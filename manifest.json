@@ -1,0 +1,9 @@
+{
+  "name": "pm-ext-csv",
+  "version": "0.1.0",
+  "description": "CSV importer and exporter for pm-cli",
+  "author": "@unbraind",
+  "entry": "index.js",
+  "priority": 50,
+  "capabilities": ["commands", "importers"]
+}

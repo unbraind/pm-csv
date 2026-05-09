@@ -1,0 +1,18 @@
+{
+  "name": "pm-ext-csv",
+  "version": "0.1.0",
+  "description": "CSV importer and exporter for pm-cli",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "@unbrained/pm-cli": ">=2026.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["pm-cli", "csv", "importer", "exporter"],
+  "license": "MIT"
+}
