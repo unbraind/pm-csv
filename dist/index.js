@@ -202,18 +202,17 @@ defineExtension({
                 "pm csv import backlog.csv --delimiter ';'",
                 "pm csv import items.csv --dry-run",
             ],
-            flags: {
-                delimiter: {
-                    type: "string",
+            flags: [
+                {
+                    long: "--delimiter",
+                    value_name: "char",
                     description: "CSV field delimiter character (default: ,)",
-                    default: ",",
                 },
-                "dry-run": {
-                    type: "boolean",
+                {
+                    long: "--dry-run",
                     description: "Preview what would be imported without writing any data",
-                    default: false,
                 },
-            },
+            ],
             async run(ctx) {
                 const filePath = ctx.args[0];
                 if (!filePath) {
@@ -321,22 +320,25 @@ defineExtension({
                 "pm csv export --status todo --output todos.csv",
                 "pm csv export --type Feature --output features.csv",
             ],
-            flags: {
-                output: {
-                    type: "string",
+            flags: [
+                {
+                    long: "--output",
+                    value_name: "path",
                     description: "Output file path (default: print to stdout)",
                 },
-                delimiter: {
-                    type: "string",
+                {
+                    long: "--delimiter",
+                    value_name: "char",
                     description: "CSV field delimiter character (default: ,)",
-                    default: ",",
                 },
-                status: {
-                    type: "string",
+                {
+                    long: "--status",
+                    value_name: "filter",
                     description: "Filter by status: todo | wip | done | blocked",
                 },
-                type: {
-                    type: "string",
+                {
+                    long: "--type",
+                    value_name: "filter",
                     description: "Filter by item type",
                 },
             },
