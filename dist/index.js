@@ -1,4 +1,4 @@
-import { defineExtension } from "@unbrained/pm-cli/sdk";
+function defineExtension(m){return m}
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 // Columns accepted on import (order independent — driven by header row)
