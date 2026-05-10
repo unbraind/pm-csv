@@ -1,12 +1,13 @@
 import { defineExtension } from "@unbrained/pm-cli/sdk";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type ItemStatus = "todo" | "done" | "wip" | "blocked";
+type ItemStatus = "open" | "in_progress" | "blocked" | "closed" | "canceled" | "draft";
 
 interface PmItem {
   id: string;
@@ -167,27 +168,30 @@ function serializeCSV(rows: string[][], delimiter: string): string {
 
 /**
  * Map an arbitrary status string (from the CSV) to a valid SDK status.
- * Falls back to "todo".
+ * Falls back to "open".
  */
 function normalizeStatus(raw: string): ItemStatus {
   const s = raw.trim().toLowerCase();
   const map: Record<string, ItemStatus> = {
-    todo: "todo",
-    open: "todo",
-    new: "todo",
-    done: "done",
-    closed: "done",
-    complete: "done",
-    completed: "done",
-    wip: "wip",
-    in_progress: "wip",
-    "in progress": "wip",
-    doing: "wip",
+    open: "open",
+    todo: "open",
+    new: "open",
+    in_progress: "in_progress",
+    wip: "in_progress",
+    "in progress": "in_progress",
+    doing: "in_progress",
     blocked: "blocked",
     on_hold: "blocked",
     "on hold": "blocked",
+    closed: "closed",
+    done: "closed",
+    complete: "closed",
+    completed: "closed",
+    canceled: "canceled",
+    cancelled: "canceled",
+    draft: "draft",
   };
-  return map[s] ?? "todo";
+  return map[s] ?? "open";
 }
 
 /**
@@ -253,31 +257,22 @@ defineExtension({
         "pm csv import backlog.csv --delimiter ';'",
         "pm csv import items.csv --dry-run",
       ],
-      flags: {
-        delimiter: {
-          type: "string",
-          description: "CSV field delimiter character (default: ,)",
-          default: ",",
-        },
-        "dry-run": {
-          type: "boolean",
-          description:
-            "Preview what would be imported without writing any data",
-          default: false,
-        },
-      },
+      flags: [
+        { long: "--delimiter", value_name: "char", description: "CSV field delimiter (default: ,)" },
+        { long: "--dry-run", description: "Preview without writing" },
+      ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
         if (!filePath) {
-          ctx.log.warn("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]");
+          console.error("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]");
           return { error: "No file path provided" };
         }
 
-        const delimiter = (ctx.args["delimiter"] as string | undefined) ?? ",";
-        const dryRun = Boolean(ctx.args["dry-run"]);
+        const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+        const dryRun = Boolean(ctx.options["dry-run"]);
         const absolutePath = resolve(filePath);
 
-        ctx.log.info(`Reading CSV from: ${absolutePath}`);
+        console.error(`Reading CSV from: ${absolutePath}`);
 
         let headers: string[];
         let dataRows: string[][];
@@ -285,18 +280,18 @@ defineExtension({
           ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          ctx.log.warn(`Failed to read file: ${msg}`);
+          console.error(`Failed to read file: ${msg}`);
           return { error: msg };
         }
 
         if (headers.length === 0) {
-          ctx.log.warn("CSV file is empty or has no headers.");
+          console.error("CSV file is empty or has no headers.");
           return { imported: 0, skipped: 0 };
         }
 
         // Validate that at minimum 'title' is present
         if (!headers.includes("title")) {
-          ctx.log.warn(
+          console.error(
             `CSV is missing required 'title' column. Found: ${headers.join(", ")}`
           );
           return { error: "Missing required 'title' column" };
@@ -319,13 +314,13 @@ defineExtension({
 
           const title = get("title");
           if (!title) {
-            ctx.log.warn(`Row ${rowIndex + 2}: skipping — 'title' is empty`);
+            console.error(`Row ${rowIndex + 2}: skipping — 'title' is empty`);
             skipped++;
             continue;
           }
 
           const rawStatus = get("status");
-          const status = rawStatus ? normalizeStatus(rawStatus) : "todo";
+          const status = rawStatus ? normalizeStatus(rawStatus) : "open";
           const rawPriority = get("priority");
           const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
           const tags = parseTags(get("tags"));
@@ -341,37 +336,39 @@ defineExtension({
           }
 
           try {
-            await ctx.pm.upsertItem({
-              idSuffix: title
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-|-$/g, "")
-                .slice(0, 40),
-              title,
-              body,
-              status,
-              ...(priority !== undefined && !isNaN(priority) ? { priority } : {}),
-              ...(tags.length > 0 ? { tags } : {}),
-              ...(type ? { type } : {}),
-              ...(milestone ? { milestone } : {}),
-              ...(due_date ? { due_date } : {}),
-            });
+            const spawnArgs = [
+              "--path", ctx.pm_root,
+              "create",
+              "--title", title,
+              "--status", status,
+            ];
+            if (body) spawnArgs.push("--body", body);
+            if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
+            if (type) spawnArgs.push("--type", type);
+            if (milestone) spawnArgs.push("--milestone", milestone);
+            if (due_date) spawnArgs.push("--due-date", due_date);
+            if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
+
+            const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
+            if (result.status !== 0) {
+              throw new Error(result.stderr || "pm create failed");
+            }
             imported++;
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            ctx.log.warn(`Row ${rowIndex + 2}: upsert failed — ${msg}`);
+            console.error(`Row ${rowIndex + 2}: create failed — ${msg}`);
             skipped++;
           }
         }
 
         if (dryRun) {
-          ctx.log.info(
+          console.error(
             `[dry-run] Would import ${imported} item(s), skip ${skipped} item(s).`
           );
           return { dryRun: true, wouldImport: imported, wouldSkip: skipped, previews };
         }
 
-        ctx.log.info(`Imported ${imported} item(s), skipped ${skipped} item(s).`);
+        console.error(`Imported ${imported} item(s), skipped ${skipped} item(s).`);
         return { imported, skipped };
       },
     });
@@ -389,43 +386,45 @@ defineExtension({
         "pm csv export",
         "pm csv export --output items.csv",
         "pm csv export --output backlog.csv --delimiter ';'",
-        "pm csv export --status todo --output todos.csv",
+        "pm csv export --status open --output todos.csv",
         "pm csv export --type Feature --output features.csv",
       ],
-      flags: {
-        output: {
-          type: "string",
-          description: "Output file path (default: print to stdout)",
-        },
-        delimiter: {
-          type: "string",
-          description: "CSV field delimiter character (default: ,)",
-          default: ",",
-        },
-        status: {
-          type: "string",
-          description: "Filter by status: todo | wip | done | blocked",
-        },
-        type: {
-          type: "string",
-          description: "Filter by item type",
-        },
-      },
+      flags: [
+        { long: "--output", value_name: "file", description: "Output file path (default: print to stdout)" },
+        { long: "--delimiter", value_name: "char", description: "CSV field delimiter (default: ,)" },
+        { long: "--status", value_name: "filter", description: "Filter by status: open | in_progress | blocked | closed | canceled | draft" },
+        { long: "--type", value_name: "type", description: "Filter by item type" },
+      ],
       async run(ctx) {
-        const delimiter = (ctx.args["delimiter"] as string | undefined) ?? ",";
-        const outputPath = ctx.args["output"] as string | undefined;
-        const statusFilter = ctx.args["status"] as ItemStatus | undefined;
-        const typeFilter = ctx.args["type"] as string | undefined;
+        const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+        const outputPath = ctx.options["output"] as string | undefined;
+        const statusFilter = ctx.options["status"] as string | undefined;
+        const typeFilter = ctx.options["type"] as string | undefined;
 
-        const listOpts: { status?: ItemStatus; type?: string } = {};
-        if (statusFilter) listOpts.status = statusFilter;
-        if (typeFilter) listOpts.type = typeFilter;
+        const spawnArgs = ["--path", ctx.pm_root, "list-all", "--json"];
 
-        ctx.log.info("Fetching pm items…");
-        const items: PmItem[] = await ctx.pm.listItems(listOpts);
+        console.error("Fetching pm items…");
+        const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
+        if (result.status !== 0) {
+          const msg = result.stderr || "pm list-all failed";
+          console.error(msg);
+          return { error: msg };
+        }
+
+        let allItems: PmItem[] = JSON.parse(result.stdout).items ?? [];
+
+        // Apply filters client-side
+        if (statusFilter) {
+          allItems = allItems.filter((item) => item.status === statusFilter);
+        }
+        if (typeFilter) {
+          allItems = allItems.filter((item) => item.type === typeFilter);
+        }
+
+        const items = allItems;
 
         if (items.length === 0) {
-          ctx.log.info("No items found.");
+          console.error("No items found.");
           return { exported: 0 };
         }
 
@@ -445,12 +444,12 @@ defineExtension({
         if (outputPath) {
           const absolutePath = resolve(outputPath);
           writeFileSync(absolutePath, csvText + "\n", "utf-8");
-          ctx.log.info(`Exported ${items.length} item(s) to: ${absolutePath}`);
+          console.error(`Exported ${items.length} item(s) to: ${absolutePath}`);
           return { exported: items.length, file: absolutePath };
         }
 
         // Print to stdout — return as data so the CLI host renders it
-        ctx.log.info(`Exported ${items.length} item(s).`);
+        console.error(`Exported ${items.length} item(s).`);
         return { exported: items.length, csv: csvText };
       },
     });
@@ -458,17 +457,17 @@ defineExtension({
     // -----------------------------------------------------------------------
     // Importer: csv-import  (programmatic / config-driven)
     // -----------------------------------------------------------------------
-    api.registerImporter("csv-import", async ({ config, pm, log }) => {
-      const filePath = config?.file as string | undefined;
+    api.registerImporter("csv-import", async (ctx) => {
+      const filePath = ctx.options["file"] as string | undefined;
       if (!filePath) {
-        log.info("csv-import: no 'file' provided in config — skipping.");
+        console.error("csv-import: no 'file' provided in options — skipping.");
         return;
       }
 
-      const delimiter = (config?.delimiter as string | undefined) ?? ",";
+      const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
       const absolutePath = resolve(filePath);
 
-      log.info(`csv-import: reading ${absolutePath}`);
+      console.error(`csv-import: reading ${absolutePath}`);
 
       let headers: string[];
       let dataRows: string[][];
@@ -476,12 +475,12 @@ defineExtension({
         ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        log.info(`csv-import: failed to read file — ${msg}`);
+        console.error(`csv-import: failed to read file — ${msg}`);
         return;
       }
 
       if (!headers.includes("title")) {
-        log.info("csv-import: CSV is missing required 'title' column — skipping.");
+        console.error("csv-import: CSV is missing required 'title' column — skipping.");
         return;
       }
 
@@ -505,7 +504,7 @@ defineExtension({
         }
 
         const rawStatus = get("status");
-        const status = rawStatus ? normalizeStatus(rawStatus) : "todo";
+        const status = rawStatus ? normalizeStatus(rawStatus) : "open";
         const rawPriority = get("priority");
         const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
         const tags = parseTags(get("tags"));
@@ -515,30 +514,32 @@ defineExtension({
         const body = get("body") || undefined;
 
         try {
-          await pm.upsertItem({
-            idSuffix: title
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-|-$/g, "")
-              .slice(0, 40),
-            title,
-            body,
-            status,
-            ...(priority !== undefined && !isNaN(priority) ? { priority } : {}),
-            ...(tags.length > 0 ? { tags } : {}),
-            ...(type ? { type } : {}),
-            ...(milestone ? { milestone } : {}),
-            ...(due_date ? { due_date } : {}),
-          });
+          const spawnArgs = [
+            "--path", ctx.pm_root,
+            "create",
+            "--title", title,
+            "--status", status,
+          ];
+          if (body) spawnArgs.push("--body", body);
+          if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
+          if (type) spawnArgs.push("--type", type);
+          if (milestone) spawnArgs.push("--milestone", milestone);
+          if (due_date) spawnArgs.push("--due-date", due_date);
+          if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
+
+          const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
+          if (result.status !== 0) {
+            throw new Error(result.stderr || "pm create failed");
+          }
           imported++;
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          log.info(`csv-import: row ${rowIndex + 2} upsert failed — ${msg}`);
+          console.error(`csv-import: row ${rowIndex + 2} create failed — ${msg}`);
           skipped++;
         }
       }
 
-      log.info(`csv-import: done — imported ${imported}, skipped ${skipped}.`);
+      console.error(`csv-import: done — imported ${imported}, skipped ${skipped}.`);
     });
   },
 });
