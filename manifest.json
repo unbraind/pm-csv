@@ -7,6 +7,7 @@
   "priority": 50,
   "capabilities": [
     "commands",
+    "schema",
     "importers"
   ]
 }
