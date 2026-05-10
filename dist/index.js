@@ -341,7 +341,7 @@ defineExtension({
                     value_name: "filter",
                     description: "Filter by item type",
                 },
-            },
+            ],
             async run(ctx) {
                 const delimiter = ctx.args["delimiter"] ?? ",";
                 const outputPath = ctx.args["output"];
