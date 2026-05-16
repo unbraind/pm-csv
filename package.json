@@ -2,6 +2,14 @@
   "name": "pm-ext-csv",
   "version": "0.1.0",
   "description": "CSV importer and exporter for pm-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unbraind/pm-cli-ext-csv.git"
+  },
+  "bugs": {
+    "url": "https://github.com/unbraind/pm-cli-ext-csv/issues"
+  },
+  "homepage": "https://github.com/unbraind/pm-cli-ext-csv#readme",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
