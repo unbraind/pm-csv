@@ -97,10 +97,6 @@ jobs:
           node -e "const fs=require('node:fs');const version=JSON.parse(fs.readFileSync('package.json','utf8')).version;for(const file of ['manifest.json']){if(!fs.existsSync(file))continue;const json=JSON.parse(fs.readFileSync(file,'utf8'));json.version=version;fs.writeFileSync(file,JSON.stringify(json,null,2)+'\n');}if(fs.existsSync('index.ts')){const source=fs.readFileSync('index.ts','utf8');const next=source.replace(/version:\s*[\"'][^\"']+[\"']/,'version: \"'+version+'\"');if(next!==source)fs.writeFileSync('index.ts',next);}"
           npm run build
 
-      - name: Run release checks
-        if: steps.decide.outputs.should_release == 'true'
-        run: npm run release:check
-
       - name: Generate changelog and release notes
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
@@ -109,6 +105,10 @@ jobs:
           npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary
           npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --check
           npx pm-changelog --pm-root .agents/pm --stdout --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm > RELEASE_NOTES.md
+
+      - name: Run release checks
+        if: steps.decide.outputs.should_release == 'true'
+        run: npm run release:check
 
       - name: Commit release files
         if: steps.decide.outputs.should_release == 'true'
