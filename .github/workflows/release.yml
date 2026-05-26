@@ -1,0 +1,143 @@
+name: Daily Release
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: daily-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TIMEZONE: Europe/Vienna
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.2.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Decide release
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags
+          latest_tag="$(git tag --sort=-creatordate | head -n 1 || true)"
+          if [[ -n "$latest_tag" ]] && git diff --quiet "$latest_tag"..HEAD -- .; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+            echo "No changes since $latest_tag; skipping release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          release_date="$(TZ="$RELEASE_TIMEZONE" date +%Y.%m.%d)"
+          base_tag="v${release_date}"
+          max_suffix=-1
+          while IFS= read -r existing_tag; do
+            if [[ "$existing_tag" == "$base_tag" ]]; then
+              (( max_suffix < 0 )) && max_suffix=0
+              continue
+            fi
+            if [[ "$existing_tag" == "$base_tag-"* ]]; then
+              suffix="${existing_tag#"$base_tag-"}"
+              if [[ "$suffix" =~ ^[0-9]+$ ]] && (( suffix > max_suffix )); then
+                max_suffix="$suffix"
+              fi
+            fi
+          done < <(git tag -l "${base_tag}*")
+
+          if (( max_suffix >= 0 )); then
+            tag="${base_tag}-$((max_suffix + 1))"
+          else
+            tag="$base_tag"
+          fi
+
+          version_core="${tag#v}"
+          year="${version_core%%.*}"
+          version_tail="${version_core#*.}"
+          month="${version_tail%%.*}"
+          day_and_suffix="${version_tail#*.}"
+          day="${day_and_suffix%%-*}"
+          suffix="${day_and_suffix#"$day"}"
+          npm_version="$((10#$year)).$((10#$month)).$((10#$day))${suffix}"
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
+
+      - name: Update release version
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm version "${{ steps.decide.outputs.npm_version }}" --no-git-tag-version --allow-same-version
+          node -e "const fs=require('node:fs');const version=JSON.parse(fs.readFileSync('package.json','utf8')).version;for(const file of ['manifest.json']){if(!fs.existsSync(file))continue;const json=JSON.parse(fs.readFileSync(file,'utf8'));json.version=version;fs.writeFileSync(file,JSON.stringify(json,null,2)+'\n');}if(fs.existsSync('index.ts')){const source=fs.readFileSync('index.ts','utf8');const next=source.replace(/version:\s*[\"'][^\"']+[\"']/,'version: \"'+version+'\"');if(next!==source)fs.writeFileSync('index.ts',next);}"
+          npm run build
+
+      - name: Run release checks
+        if: steps.decide.outputs.should_release == 'true'
+        run: npm run release:check
+
+      - name: Generate changelog and release notes
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary
+          npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --check
+          npx pm-changelog --pm-root .agents/pm --stdout --all-release-tags --version "${{ steps.decide.outputs.tag }}" --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm > RELEASE_NOTES.md
+
+      - name: Commit release files
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          paths=(package.json package-lock.json manifest.json dist CHANGELOG.md)
+          [[ -f index.ts ]] && paths+=(index.ts)
+          [[ -d src ]] && paths+=(src)
+          git add "${paths[@]}"
+          if git diff --cached --quiet; then
+            echo "Release files are already current; tagging existing commit."
+          else
+            git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
+          fi
+          git tag "${{ steps.decide.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.decide.outputs.tag }}"
+
+      - name: Publish npm package
+        if: steps.decide.outputs.should_release == 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.decide.outputs.tag }}" --title "${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}" --notes-file RELEASE_NOTES.md --verify-tag
