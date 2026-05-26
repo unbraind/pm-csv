@@ -1,0 +1,12 @@
+id: pm-csv-qnmk
+title: "ci: fix release workflow step ordering"
+description: "Swap changelog regeneration before release:check so changelog:check sees the version-bumped CHANGELOG.md instead of failing the gate."
+type: Task
+status: closed
+priority: 1
+tags[2]: ci,release
+created_at: "2026-05-26T13:41:36.743Z"
+updated_at: "2026-05-26T13:41:40.912Z"
+author: codex
+close_reason: "Swapped changelog generation before release checks so changelog:check sees updated file. Verified workflow dispatch then triggers npm publish + GH release."
+body: ""
