@@ -1,0 +1,23 @@
+id: pm-csv-1pty
+title: Release readiness hardening for pm-csv
+description: "Prepare pm-csv as a production-ready pm package with package-local pm tracking, generated changelog data, CI and daily release automation."
+type: Task
+status: closed
+priority: 1
+tags[5]: automation,pm-package,privacy,release,typescript
+created_at: "2026-05-26T11:07:53.503Z"
+updated_at: "2026-05-26T11:07:53.503Z"
+author: codex
+acceptance_criteria: Package installs with pm install; npm release gate passes; changelog is generated from package-local pm data; tracked files and reachable git history have no secret pattern hits.
+risk: medium
+confidence: high
+release: 0.1.0
+files[3]{path,scope,note}:
+  package.json,project,null
+  .github/workflows/release.yml,project,null
+  .agents/pm,project,null
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
+  "npm run release:check",null,project,null,null,null,null,null,null,null,null,null,null,null,null,passed in package verification loop
+docs[1]{path,scope,note}:
+  CHANGELOG.md,project,null
+body: "Implemented release-ready package metadata and automation for pm-csv using the latest pm CLI 2026.5.24 and pm SDK contracts. Added local pm project tracking, CI/release workflows, pm-changelog integration, TypeScript checks, production audit gates, dry-run packaging, installability metadata, and registry metadata. Verified no private tokens or personal files are present in tracked files or reachable git history before release preparation."

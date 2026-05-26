@@ -1,39 +1,87 @@
 {
-  "name": "pm-ext-csv",
+  "name": "pm-csv",
   "version": "0.1.0",
   "description": "CSV importer and exporter for pm-cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/unbraind/pm-cli-ext-csv.git"
+    "url": "git+https://github.com/unbraind/pm-csv.git"
   },
   "bugs": {
-    "url": "https://github.com/unbraind/pm-cli-ext-csv/issues"
+    "url": "https://github.com/unbraind/pm-csv/issues"
   },
-  "homepage": "https://github.com/unbraind/pm-cli-ext-csv#readme",
+  "homepage": "https://github.com/unbraind/pm-csv#readme",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
     "manifest.json",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
+    "audit:prod": "npm audit --omit=dev",
+    "pack:dry-run": "npm pack --dry-run",
+    "changelog": "pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --release-version-from-package --since-previous-tag --until-release-tag --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm",
+    "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm",
+    "changelog:check": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --check",
+    "release:check": "npm run typecheck && npm run build && npm run audit:prod && npm run pack:dry-run && npm run changelog:check"
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": ">=2026.5.0"
+    "@unbrained/pm-cli": ">=2026.5.24"
   },
   "devDependencies": {
-    "@unbrained/pm-cli": "^2026.5.10",
-    "typescript": "^5.0.0"
+    "@unbrained/pm-cli": "^2026.5.24",
+    "typescript": "^6.0.3",
+    "pm-changelog": "^2026.5.25",
+    "@types/node": "^25.9.1"
   },
   "keywords": [
-    "pm-cli",
     "csv",
+    "exporter",
     "importer",
-    "exporter"
+    "pm-cli",
+    "pm-extension",
+    "pm-package"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "@unbraind",
+  "pm": {
+    "aliases": [
+      "csv"
+    ],
+    "extensions": [
+      "."
+    ],
+    "catalog": {
+      "display_name": "CSV Import/Export",
+      "category": "import-export",
+      "summary": "CSV importer and exporter for pm-cli",
+      "tags": [
+        "csv",
+        "import",
+        "export"
+      ],
+      "links": {
+        "docs": "https://github.com/unbraind/pm-csv#readme",
+        "npm": "https://www.npmjs.com/package/pm-csv",
+        "repository": "https://github.com/unbraind/pm-csv",
+        "report": "https://github.com/unbraind/pm-csv/issues"
+      }
+    },
+    "docs": [
+      "README.md",
+      "CHANGELOG.md"
+    ],
+    "examples": [
+      "README.md"
+    ]
+  }
 }

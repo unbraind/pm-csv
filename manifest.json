@@ -1,5 +1,5 @@
 {
-  "name": "pm-ext-csv",
+  "name": "pm-csv",
   "version": "0.1.0",
   "description": "CSV importer and exporter for pm-cli",
   "author": "@unbraind",
@@ -9,5 +9,8 @@
     "commands",
     "schema",
     "importers"
-  ]
+  ],
+  "pm": {
+    "compatibility": "v2"
+  }
 }

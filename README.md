@@ -1,4 +1,4 @@
-# pm-ext-csv
+# pm-csv
 
 CSV importer and exporter for [pm-cli](https://github.com/unbraind/pm-cli).
 
@@ -14,7 +14,7 @@ Add the extension to your pm-cli config:
 // pm-config.json (or wherever your pm-cli extensions are configured)
 {
   "extensions": [
-    { "path": "/path/to/pm-ext-csv" }
+    { "path": "/path/to/pm-csv" }
   ]
 }
 ```
@@ -181,3 +181,7 @@ TypeScript 5, ES2022 target, NodeNext module resolution, strict mode. Zero runti
 ## License
 
 MIT
+
+## Release Automation
+
+This package is release-ready for GitHub, npm, and Bun-compatible installs. CI runs type checking, build, production dependency audit, package packing, Bun install verification, and pm-changelog validation. The daily release workflow publishes only when commits exist after the latest release tag and uses pm-changelog to generate CHANGELOG.md and GitHub release notes.
