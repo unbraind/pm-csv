@@ -1,0 +1,12 @@
+id: pm-csv-0wj8
+title: Add bun-install verification to release workflow
+description: Smoke-test that the just-published npm package installs cleanly via bun via daily release workflow.
+type: Task
+status: closed
+priority: 2
+tags[3]: bun,ci,release
+created_at: "2026-05-26T20:57:45.997Z"
+updated_at: "2026-05-26T20:57:52.712Z"
+author: codex
+close_reason: completed via PR
+body: ""
