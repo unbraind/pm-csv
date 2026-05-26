@@ -190,7 +190,7 @@ function readCSVFile(filePath, delimiter) {
 // ---------------------------------------------------------------------------
 defineExtension({
     name: "pm-csv",
-    version: "0.1.0",
+    version: "2026.5.26",
     activate(api) {
         // -----------------------------------------------------------------------
         // Command: pm csv import <file>
