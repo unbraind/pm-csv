@@ -136,6 +136,28 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+
+      - name: Verify bun install of published package
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_name="$(node -p "require('./package.json').name")"
+          mkdir -p /tmp/bun-verify
+          cd /tmp/bun-verify
+          rm -rf node_modules bun.lockb package.json
+          bun init -y > /dev/null
+          # Retry up to 5 times - npm registry can take ~60s to propagate
+          for attempt in 1 2 3 4 5; do
+            if bun add "${pkg_name}@${{ steps.decide.outputs.npm_version }}"; then
+              echo "bun add succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "bun add failed on attempt $attempt, sleeping 30s..."
+            sleep 30
+          done
+          echo "bun add failed after 5 attempts"
+          exit 1
       - name: Create GitHub release
         if: steps.decide.outputs.should_release == 'true'
         env:
