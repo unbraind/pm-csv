@@ -1,0 +1,11 @@
+id: pm-csv-e9k2
+title: Add publish retry + provenance fallback to release workflow
+description: "Replace the npm publish step in .github/workflows/release.yml with a resilient version that (1) skips if the version is already published, (2) retries up to 3 times with 30s sleep, and (3) falls back to publishing without --provenance after persistent registry 404s. Permanent fix for the 2026-05-27 npm E404 outage that left all 19 packages tagged in git but unpublished on npm."
+type: Task
+status: open
+priority: 2
+tags[2]: ci,release
+created_at: "2026-05-27T18:46:47.650Z"
+updated_at: "2026-05-27T18:46:47.650Z"
+author: codex
+body: ""
