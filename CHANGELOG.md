@@ -1,12 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add publish retry + provenance fallback to release workflow ([pm-csv-e9k2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-e9k2.toon))
+
 ## 2026.05.27 - 2026-05-27
 
 ### Added
 
 - Add bun-install verification to release workflow ([pm-csv-0wj8](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-0wj8.toon))
-
-## 2026.05.26 - 2026-05-26
 
 ### Fixed
 
