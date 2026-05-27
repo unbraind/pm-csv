@@ -132,9 +132,50 @@ jobs:
 
       - name: Publish npm package
         if: steps.decide.outputs.should_release == 'true'
-        run: npm publish --access public --provenance
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
+        run: |
+          set -euo pipefail
+          pkg_name="$(node -p "require('./package.json').name")"
+          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
+            echo "::notice::${pkg_name}@${NPM_VERSION} already published; skipping publish step."
+            exit 0
+          fi
+          publish_with_provenance() {
+            npm publish --access public --provenance
+          }
+          publish_without_provenance() {
+            echo "::warning::Falling back to publish WITHOUT --provenance after repeated 404 from npm registry."
+            npm publish --access public
+          }
+          attempt=0
+          max_attempts=3
+          while (( attempt < max_attempts )); do
+            attempt=$(( attempt + 1 ))
+            if publish_with_provenance; then
+              echo "Published with provenance on attempt ${attempt}."
+              exit 0
+            fi
+            if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
+              echo "::notice::Version landed despite reported error; treating as success."
+              exit 0
+            fi
+            echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
+            sleep 30
+          done
+          echo "::warning::All ${max_attempts} provenance publish attempts failed; trying once without provenance."
+          if publish_without_provenance; then
+            echo "Published without provenance."
+            exit 0
+          fi
+          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
+            echo "::notice::Version landed during fallback; treating as success."
+            exit 0
+          fi
+          echo "::error::Publish failed after retries and provenance fallback."
+          exit 1
 
 
       - name: Verify bun install of published package
