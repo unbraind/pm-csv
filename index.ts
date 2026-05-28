@@ -240,7 +240,7 @@ function readCSVFile(
 // Extension
 // ---------------------------------------------------------------------------
 
-defineExtension({
+export default defineExtension({
   name: "pm-csv",
   version: "2026.5.27",
 

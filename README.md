@@ -8,25 +8,15 @@ Import pm items from a CSV file, export them back out, or wire up a programmatic
 
 ## Installation
 
-Add the extension to your pm-cli config:
-
-```jsonc
-// pm-config.json (or wherever your pm-cli extensions are configured)
-{
-  "extensions": [
-    { "path": "/path/to/pm-csv" }
-  ]
-}
+```bash
+pm install github.com/unbraind/pm-csv --global
 ```
 
-Build the extension before use:
+Or install per-project:
 
 ```bash
-npm install
-npm run build
+pm install github.com/unbraind/pm-csv --project
 ```
-
-The compiled entry point is `dist/index.js`, which is referenced by `manifest.json` as `"entry": "index.js"` — ensure your pm-cli host resolves it relative to the `dist/` directory, or adjust `manifest.json` to point at `dist/index.js` if needed.
 
 ---
 
