@@ -188,7 +188,7 @@ function readCSVFile(filePath, delimiter) {
 // ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
-defineExtension({
+export default defineExtension({
     name: "pm-csv",
     version: "2026.5.27",
     activate(api) {
