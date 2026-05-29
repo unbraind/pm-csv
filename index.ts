@@ -22,8 +22,7 @@ interface PmItem {
   tags?: string[];
   created_at?: string;
   updated_at?: string;
-  due_date?: string;
-  milestone?: string;
+  deadline?: string;
 }
 
 // Columns accepted on import (order independent — driven by header row)
@@ -33,8 +32,7 @@ const IMPORT_COLUMNS = [
   "status",
   "priority",
   "tags",
-  "milestone",
-  "due_date",
+  "deadline",
   "body",
 ] as const;
 
@@ -46,8 +44,7 @@ const EXPORT_COLUMNS: Array<keyof PmItem> = [
   "status",
   "priority",
   "tags",
-  "milestone",
-  "due_date",
+  "deadline",
   "body",
   "created_at",
   "updated_at",
@@ -170,6 +167,18 @@ function serializeCSV(rows: string[][], delimiter: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Read a boolean option honoring both the kebab-case long flag and the
+ * camelCase key the runtime normalizes it to (e.g. `--dry-run` -> `dryRun`).
+ * Without this, `ctx.options["dry-run"]` is silently `undefined`.
+ */
+function readBoolOption(options: Record<string, unknown>, ...keys: string[]): boolean {
+  for (const key of keys) {
+    if (options[key] !== undefined) return Boolean(options[key]);
+  }
+  return false;
+}
+
+/**
  * Map an arbitrary status string (from the CSV) to a valid SDK status.
  * Falls back to "open".
  */
@@ -267,12 +276,11 @@ export default defineExtension({
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
         if (!filePath) {
-          console.error("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]");
-          return { error: "No file path provided" };
+          throw new Error("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]");
         }
 
         const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
-        const dryRun = Boolean(ctx.options["dry-run"]);
+        const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
         const absolutePath = resolve(filePath);
 
         console.error(`Reading CSV from: ${absolutePath}`);
@@ -283,8 +291,7 @@ export default defineExtension({
           ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`Failed to read file: ${msg}`);
-          return { error: msg };
+          throw new Error(`Failed to read file: ${msg}`);
         }
 
         if (headers.length === 0) {
@@ -294,10 +301,9 @@ export default defineExtension({
 
         // Validate that at minimum 'title' is present
         if (!headers.includes("title")) {
-          console.error(
+          throw new Error(
             `CSV is missing required 'title' column. Found: ${headers.join(", ")}`
           );
-          return { error: "Missing required 'title' column" };
         }
 
         // Index columns
@@ -328,12 +334,13 @@ export default defineExtension({
           const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
           const tags = parseTags(get("tags"));
           const type = get("type") || undefined;
-          const milestone = get("milestone") || undefined;
-          const due_date = get("due_date") || undefined;
+          // pm has no milestone/due_date fields on `create`; the deadline column
+          // (accept legacy "due_date" header too) maps to `--deadline`.
+          const deadline = get("deadline") || get("due_date") || undefined;
           const body = get("body") || undefined;
 
           if (dryRun) {
-            previews.push({ title, type, status, priority, tags, milestone, due_date, body });
+            previews.push({ title, type, status, priority, tags, deadline, body });
             imported++;
             continue;
           }
@@ -348,8 +355,7 @@ export default defineExtension({
             if (body) spawnArgs.push("--body", body);
             if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
             if (type) spawnArgs.push("--type", type);
-            if (milestone) spawnArgs.push("--milestone", milestone);
-            if (due_date) spawnArgs.push("--due-date", due_date);
+            if (deadline) spawnArgs.push("--deadline", deadline);
             if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
 
             const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
@@ -404,14 +410,14 @@ export default defineExtension({
         const statusFilter = ctx.options["status"] as string | undefined;
         const typeFilter = ctx.options["type"] as string | undefined;
 
-        const spawnArgs = ["--path", ctx.pm_root, "list-all", "--json"];
+        // --include-body is required or the `body` column is always empty.
+        const spawnArgs = ["--path", ctx.pm_root, "list-all", "--json", "--include-body"];
 
         console.error("Fetching pm items…");
         const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
         if (result.status !== 0) {
           const msg = result.stderr || "pm list-all failed";
-          console.error(msg);
-          return { error: msg };
+          throw new Error(msg);
         }
 
         let allItems: PmItem[] = JSON.parse(result.stdout).items ?? [];
@@ -512,8 +518,7 @@ export default defineExtension({
         const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
         const tags = parseTags(get("tags"));
         const type = get("type") || undefined;
-        const milestone = get("milestone") || undefined;
-        const due_date = get("due_date") || undefined;
+        const deadline = get("deadline") || get("due_date") || undefined;
         const body = get("body") || undefined;
 
         try {
@@ -526,8 +531,7 @@ export default defineExtension({
           if (body) spawnArgs.push("--body", body);
           if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
           if (type) spawnArgs.push("--type", type);
-          if (milestone) spawnArgs.push("--milestone", milestone);
-          if (due_date) spawnArgs.push("--due-date", due_date);
+          if (deadline) spawnArgs.push("--deadline", deadline);
           if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
 
           const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });

@@ -1,0 +1,13 @@
+id: pm-csv-e9v4
+title: csv import/export return error object instead of throwing (exit 0 on failure)
+description: ""
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-05-29T15:37:37.407Z"
+updated_at: "2026-05-29T15:37:50.148Z"
+author: codex
+parent: pm-csv-z5f8
+close_reason: "Replaced return {error} with throw in import+export handlers. Verified missing-file/no-title/no-arg all exit 1."
+body: "Bug class #4 (wrong exit code on failure). Error paths returned { error } which the host treats as success (exit 0). A scripted pipeline could not detect failures.\n\nRepro (before fix):\n  pm csv import /tmp/nope.csv ; echo $?   -> 0  (missing file)\n  pm csv import notitle.csv ; echo $?      -> 0  (no title column)\n  pm csv import ; echo $?                  -> 0  (no arg)\nExpected: non-zero.\n\nFix: replaced return { error } with throw new Error(...) in the import handler (no-arg, read failure, missing title column) and the export handler (list-all failure). Verified all three now exit 1; export-to-stdout still exits 0."
