@@ -1,6 +1,6 @@
 {
   "name": "pm-csv",
-  "version": "2026.5.28",
+  "version": "2026.5.29",
   "description": "CSV importer and exporter for pm-cli",
   "author": "@unbraind",
   "entry": "./dist/index.js",
