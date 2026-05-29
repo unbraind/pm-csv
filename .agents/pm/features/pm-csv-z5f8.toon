@@ -1,0 +1,12 @@
+id: pm-csv-z5f8
+title: Hands-on functional test pass 2026-05-29 (real data)
+description: ""
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-05-29T15:37:11.423Z"
+updated_at: "2026-05-29T15:37:55.174Z"
+author: codex
+close_reason: "All three bugs fixed, rebuilt, re-tested green. pm-csv functional pass complete."
+body: Functional test pass running every pm-csv command against a real pm workspace with seeded items. Verifying exit codes and that flags take effect. Hunting the 4 known bug classes.

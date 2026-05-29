@@ -1,0 +1,13 @@
+id: pm-csv-l4vy
+title: csv export drops body (no --include-body) and uses nonexistent due_date/milestone create flags
+description: ""
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-05-29T15:37:39.044Z"
+updated_at: "2026-05-29T15:37:52.330Z"
+author: codex
+parent: pm-csv-z5f8
+close_reason: Added --include-body to export; switched to deadline column mapped to --deadline; dropped invalid --milestone flag. Round-trip verified.
+body: "Data-loss / wrong field mapping. (a) export ran `list-all --json` WITHOUT --include-body, so the body column was ALWAYS empty. (b) export columns and import flags used due_date and milestone, which do not exist in pm — `pm create` has --deadline and no milestone. So every imported row carrying due_date/milestone FAILED with \"Unknown option --milestone\", and export never populated those columns.\n\nRepro (before fix):\n  export of an item with body -> body column empty.\n  pm csv import md.csv (md.csv has due_date,milestone) -> \"Row 2: create failed — Unknown option --milestone\", imported 0 skipped 1, exit 0.\nExpected: body round-trips; deadline round-trips.\n\nFix: export now passes --include-body; replaced due_date/milestone columns with a single `deadline` column (still accepts a legacy due_date header on import) mapped to `--deadline`; removed the invalid --milestone create flag. Verified: body + deadline both survive a full export->import round-trip."

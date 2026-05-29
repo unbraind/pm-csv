@@ -1,0 +1,13 @@
+id: pm-csv-zw3a
+title: csv import --dry-run silently ignored (still writes)
+description: ""
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-05-29T15:37:35.009Z"
+updated_at: "2026-05-29T15:37:48.511Z"
+author: codex
+parent: pm-csv-z5f8
+close_reason: Fixed via readBoolOption helper reading both dry-run and dryRun. Verified dry-run writes nothing (before=3 after=3).
+body: "Bug class #1 (option-key normalization). The runtime normalizes --dry-run to camelCase dryRun, but both the `csv import` command handler and the `csv-import` importer read ctx.options[\"dry-run\"], which is always undefined.\n\nRepro:\n  pm csv import export.csv --dry-run\nObserved: actually imported 5 items (before=5 after=10), output \"Imported 5 item(s)\". Exit 0.\nExpected: write nothing, print \"[dry-run] Would import...\".\n\nFix: added readBoolOption(options, \"dry-run\", \"dryRun\") helper and used it. Verified: before=3 after=3, prints dry-run preview."
