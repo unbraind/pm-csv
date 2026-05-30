@@ -251,7 +251,7 @@ function readCSVFile(
 
 export default defineExtension({
   name: "pm-csv",
-  version: "2026.5.29",
+  version: "2026.5.30",
 
   activate(api) {
     // -----------------------------------------------------------------------
