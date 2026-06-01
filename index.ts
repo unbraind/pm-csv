@@ -7,6 +7,32 @@ import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/s
 const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
 // ---------------------------------------------------------------------------
+// Error contract
+// ---------------------------------------------------------------------------
+
+// pm's extension command runtime only treats a thrown error as a cleanly
+// handled non-zero exit when the error carries a numeric `exitCode` property
+// (see @unbrained/pm-cli runCommandHandler). A plain `Error` makes the runtime
+// fall through to its "unhandled" path, which RE-INVOKES the command handler a
+// second time and exits with a generic code. We mirror the SDK's EXIT_CODE
+// contract here rather than importing it: standalone-installed extensions load
+// only their own `dist/`, so `@unbrained/pm-cli` is not resolvable at runtime.
+const EXIT_CODE = {
+  GENERIC_FAILURE: 1,
+  USAGE: 2,
+  NOT_FOUND: 3,
+} as const;
+
+class CommandError extends Error {
+  exitCode: number;
+  constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE) {
+    super(message);
+    this.name = "CommandError";
+    this.exitCode = exitCode;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -276,7 +302,7 @@ export default defineExtension({
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
         if (!filePath) {
-          throw new Error("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]");
+          throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]", EXIT_CODE.USAGE);
         }
 
         const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
@@ -291,7 +317,8 @@ export default defineExtension({
           ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          throw new Error(`Failed to read file: ${msg}`);
+          const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
+          throw new CommandError(`Failed to read file: ${msg}`, exitCode);
         }
 
         if (headers.length === 0) {
@@ -301,7 +328,7 @@ export default defineExtension({
 
         // Validate that at minimum 'title' is present
         if (!headers.includes("title")) {
-          throw new Error(
+          throw new CommandError(
             `CSV is missing required 'title' column. Found: ${headers.join(", ")}`
           );
         }
@@ -417,7 +444,7 @@ export default defineExtension({
         const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
         if (result.status !== 0) {
           const msg = result.stderr || "pm list-all failed";
-          throw new Error(msg);
+          throw new CommandError(msg);
         }
 
         let allItems: PmItem[] = JSON.parse(result.stdout).items ?? [];

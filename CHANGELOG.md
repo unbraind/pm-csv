@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Command handlers threw plain Error \(no exitCode\) → runtime double-invocation ([pm-csv-017m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-017m.toon))
+
 ## 2026.05.29 - 2026-05-29
 
 ### Added
