@@ -1,0 +1,12 @@
+id: pm-csv-u0xp
+title: "Idempotent upsert: --key <col> dedups via csv-key provenance tag"
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-02T08:01:18.885Z"
+updated_at: "2026-06-02T08:01:18.885Z"
+author: codex
+parent: pm-csv-xim5
+body: "When --key col given, tag created items 'csv-key:<value>'; on re-import find existing item by that tag and update instead of create. Avoids duplicates on re-run."

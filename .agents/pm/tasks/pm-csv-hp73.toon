@@ -1,0 +1,12 @@
+id: pm-csv-hp73
+title: "Robust import: BOM, --map col=field, type coercion, malformed-row handling"
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-02T08:01:18.608Z"
+updated_at: "2026-06-02T08:01:18.608Z"
+author: codex
+parent: pm-csv-xim5
+body: Strip UTF-8 BOM before parse. Add --map to remap arbitrary CSV headers to pm fields. Coerce priority/status. Clear per-row errors with row numbers; report imported/updated/skipped counts.
