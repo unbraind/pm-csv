@@ -1,0 +1,12 @@
+id: pm-csv-bocj
+title: "Export: TSV delimiter, --no-header, --crlf line endings"
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-02T08:01:19.111Z"
+updated_at: "2026-06-02T08:01:19.111Z"
+author: codex
+parent: pm-csv-xim5
+body: Header control and CRLF line endings for spreadsheet/Excel compatibility; TSV via --delimiter tab. Keep RFC-4180 quoting.
