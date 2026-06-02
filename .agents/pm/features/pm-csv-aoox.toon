@@ -1,0 +1,12 @@
+id: pm-csv-aoox
+title: "Deepen SDK surface: relational columns, validate, encoding, excel, csv_source schema field"
+description: ""
+type: Feature
+status: closed
+priority: 1
+tags: []
+created_at: "2026-06-02T11:42:33.159Z"
+updated_at: "2026-06-02T11:43:00.246Z"
+author: codex
+close_reason: completed
+body: Round-trip parent/assignee/sprint/release/blocked_by; add pm csv validate; --encoding; --excel; register csv_source schema field (schema capability).

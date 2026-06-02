@@ -1,0 +1,12 @@
+id: pm-csv-vp1u
+title: "csv_source persisted as tag, not scalar field"
+description: ""
+type: Decision
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T11:42:59.427Z"
+updated_at: "2026-06-02T11:42:59.427Z"
+author: codex
+parent: pm-csv-aoox
+body: "pm 2026.5.31 accepts registerItemFields into the schema registry but exposes NO 'pm create --csv_source' setter for extension-registered scalar fields (verified: Unknown option --csv_source, exit 2). Chose to persist the --source label as an internal csv-source: tag (stripped from exports, surfaced via csv_source export column). schema capability is still declared honestly because registration genuinely succeeds."

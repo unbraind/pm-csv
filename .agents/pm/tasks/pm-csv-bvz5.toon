@@ -1,0 +1,12 @@
+id: pm-csv-bvz5
+title: Fix --key dedup duplication (pm tag case-folding)
+description: ""
+type: Task
+status: closed
+priority: 1
+tags: []
+created_at: "2026-06-02T11:42:48.145Z"
+updated_at: "2026-06-02T11:42:48.145Z"
+author: codex
+parent: pm-csv-aoox
+body: "Pre-existing bug found in functional test: pm lowercases stored tags so keyed re-import created duplicates. Fixed via normalizeKeyValue (lowercase+trim) on write and lookup."

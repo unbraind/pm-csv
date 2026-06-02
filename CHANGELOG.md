@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Deepen SDK surface: relational columns, validate, encoding, excel, csv\_source schema field ([pm-csv-aoox](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-aoox.toon))
+- New command: pm csv validate <file\> ([pm-csv-rq5q](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-rq5q.toon))
+
+### Fixed
+
+- Fix --key dedup duplication \(pm tag case-folding\) ([pm-csv-bvz5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-bvz5.toon))
+
+### Other
+
+- validate exit-code policy ([pm-csv-yhp9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-yhp9.toon))
+- csv\_source persisted as tag, not scalar field ([pm-csv-vp1u](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-vp1u.toon))
+- Which extra pm fields to round-trip ([pm-csv-ry94](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-ry94.toon))
+- Unit tests + functional test with real data ([pm-csv-z5f5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-z5f5.toon))
+- Register csv\_source schema field \(schema capability\) ([pm-csv-w1k3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-w1k3.toon))
+- Export --excel \(CRLF + UTF-8 BOM\) ([pm-csv-vxz6](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-vxz6.toon))
+- Import --encoding \(utf-8/utf16le/latin1\) ([pm-csv-z3lo](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-z3lo.toon))
+- Round-trip parent/assignee/sprint/release/blocked\_by columns ([pm-csv-6kyh](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-6kyh.toon))
+
 ## 2026.06.02 - 2026-06-02
 
 ### Added

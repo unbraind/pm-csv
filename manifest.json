@@ -7,7 +7,8 @@
   "priority": 50,
   "capabilities": [
     "commands",
-    "importers"
+    "importers",
+    "schema"
   ],
   "pm": {
     "compatibility": "v2"

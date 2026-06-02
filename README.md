@@ -29,6 +29,11 @@ Read a CSV file and create or update pm items.
 ```
 pm csv import tasks.csv
 pm csv import backlog.csv --delimiter ';'
+pm csv import data.tsv --delimiter tab
+pm csv import jira.csv --map 'Summary=title,Owner=assignee'
+pm csv import items.csv --key title         # idempotent re-import (no duplicates)
+pm csv import legacy.csv --encoding latin1  # non-UTF-8 source
+pm csv import sprint12.csv --source 'jira-export-2026-06'
 pm csv import items.csv --dry-run
 ```
 
@@ -36,12 +41,43 @@ pm csv import items.csv --dry-run
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--delimiter <char>` | string | `,` | CSV field delimiter |
+| `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
+| `--map <col=field>` | string | — | Remap a CSV header to a pm field (repeatable, comma-joined), e.g. `--map 'Summary=title'` |
+| `--key <field>` | string | — | Dedup key column: a re-import **updates** the matching item instead of creating a duplicate |
+| `--encoding <enc>` | string | `utf-8` | Source file encoding: `utf-8` \| `utf16le` \| `latin1` |
+| `--source <label>` | string | — | Record an import-provenance label in the `csv_source` field of created/updated items |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
 
 **Required column:** `title`
 
-**Optional columns:** `type`, `status`, `priority`, `tags`, `milestone`, `due_date`, `body`
+**Optional columns:** `type`, `status`, `priority`, `tags`, `deadline`, `body`, `parent`, `assignee`, `sprint`, `release`, `blocked_by`
+
+---
+
+### `pm csv validate <file>`
+
+Parse a CSV and report data-quality issues **without importing**. Exits non-zero
+(usage error) when there is a structural problem (no `title` column after `--map`
+or an empty file); otherwise exits `0` even when it reports row-level warnings.
+
+```
+pm csv validate tasks.csv
+pm csv validate jira.csv --map 'Summary=title'
+pm csv validate data.tsv --delimiter tab --json
+```
+
+The report includes: row count, detected columns, mapped columns (after `--map`),
+whether the required `title` column is present, and counts of rows missing a
+title, rows with an unrecognized status, and rows with a non-integer priority.
+
+**Flags**
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
+| `--map <col=field>` | string | — | Remap a CSV header to a pm field before validating |
+| `--encoding <enc>` | string | `utf-8` | Source file encoding: `utf-8` \| `utf16le` \| `latin1` |
+| `--json` | boolean | false | Emit the report as JSON |
 
 ---
 
@@ -53,8 +89,9 @@ Export all pm items (or a filtered subset) to CSV. Without `--output` the CSV is
 pm csv export
 pm csv export --output items.csv
 pm csv export --output backlog.csv --delimiter ';'
-pm csv export --status todo --output todos.csv
+pm csv export --status open --output todos.csv
 pm csv export --type Feature --output features.csv
+pm csv export --excel --output for-excel.csv
 ```
 
 **Flags**
@@ -62,12 +99,16 @@ pm csv export --type Feature --output features.csv
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--output <file>` | string | — | Write CSV to this file path instead of returning it |
-| `--delimiter <char>` | string | `,` | CSV field delimiter |
-| `--status <status>` | string | — | Filter: `todo`, `wip`, `done`, `blocked` |
+| `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
+| `--status <status>` | string | — | Filter: `open` \| `in_progress` \| `blocked` \| `closed` \| `canceled` \| `draft` |
 | `--type <type>` | string | — | Filter by item type |
+| `--columns <list>` | string | all | Comma-separated columns to export, in order |
+| `--no-header` | boolean | false | Omit the CSV header row |
+| `--crlf` | boolean | false | Use CRLF line endings (RFC-4180 / Excel) |
+| `--excel` | boolean | false | Excel-friendly output: CRLF line endings **and** a UTF-8 BOM prefix |
 
 **Export columns (fixed order):**
-`id, title, type, status, priority, tags, milestone, due_date, body, created_at, updated_at`
+`id, title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by, csv_source, created_at, updated_at`
 
 ---
 
@@ -94,7 +135,11 @@ Register the importer in your pm-cli config to automatically pull from a CSV fil
 | Key | Type | Required | Description |
 |---|---|---|---|
 | `file` | string | yes | Path to the CSV file to import |
-| `delimiter` | string | no (default `,`) | CSV field delimiter |
+| `delimiter` | string | no (default `,`) | CSV field delimiter (or alias `tab`/`comma`/`semicolon`/`pipe`) |
+| `map` | string | no | Header remap, e.g. `Summary=title` |
+| `key` | string | no | Dedup key column for idempotent re-import |
+| `encoding` | string | no (default `utf-8`) | `utf-8` \| `utf16le` \| `latin1` |
+| `source` | string | no | Provenance label recorded in `csv_source` |
 
 ---
 
@@ -105,10 +150,10 @@ Register the importer in your pm-cli config to automatically pull from a CSV fil
 The first row must be a header row. Column names are **case-insensitive**. Column order does not matter. Only `title` is required.
 
 ```csv
-title,type,status,priority,tags,milestone,due_date,body
-"Add login page",Feature,open,2,"auth,ui",v1.0,2026-05-30,"Landing page with email+password login"
-"Fix navbar bug",Issue,in_progress,1,"bug,ui",,,"Navbar collapses on mobile Safari"
-"Write API docs",Task,todo,3,docs,,,
+title,type,status,priority,tags,deadline,body,parent,assignee,sprint,release,blocked_by
+"Add login page",Feature,open,2,"auth,ui",2026-05-30,"Landing page with email+password login",,alice,Sprint-12,v1.0,
+"Fix navbar bug",Issue,in_progress,1,"bug,ui",,"Navbar collapses on mobile Safari",,bob,Sprint-12,v1.0,
+"Write API docs",Task,open,3,docs,,,,,Sprint-13,v1.1,Fix navbar bug
 ```
 
 ### Column reference
@@ -116,13 +161,19 @@ title,type,status,priority,tags,milestone,due_date,body
 | Column | Description | Notes |
 |---|---|---|
 | `title` | Item title | **Required** |
-| `type` | Item type | Any string, e.g. `Feature`, `Bug`, `Task` |
+| `type` | Item type | Any string, e.g. `Feature`, `Issue`, `Task` |
 | `status` | Item status | See status mapping below |
 | `priority` | Numeric priority | Integer |
 | `tags` | Comma-separated tags | Quote the field if tags contain commas |
-| `milestone` | Milestone name | Any string |
-| `due_date` | Due date | ISO 8601 format recommended, e.g. `2026-05-30` |
+| `deadline` | Deadline | ISO 8601, e.g. `2026-05-30` (legacy `due_date` header accepted) |
 | `body` | Description / body text | Supports multiline when quoted |
+| `parent` | Parent item id | Maps to `pm create --parent` |
+| `assignee` | Assignee | Maps to `pm create --assignee` |
+| `sprint` | Sprint identifier | Maps to `pm create --sprint` |
+| `release` | Release identifier | Maps to `pm create --release` |
+| `blocked_by` | Blocked-by item id or reason | Maps to `pm create --blocked-by` (legacy `blocked-by` header accepted) |
+
+All columns except `title` are optional. Round-tripping (`export` then `import --key`) is lossless for these fields.
 
 ### Status mapping
 
@@ -130,21 +181,47 @@ The importer accepts common status strings and maps them to pm-cli statuses:
 
 | Input values | pm-cli status |
 |---|---|
-| `todo`, `open`, `new` | `todo` |
-| `done`, `closed`, `complete`, `completed` | `done` |
-| `wip`, `in_progress`, `in progress`, `doing` | `wip` |
+| `open`, `todo`, `new` | `open` |
+| `in_progress`, `wip`, `in progress`, `doing` | `in_progress` |
 | `blocked`, `on_hold`, `on hold` | `blocked` |
+| `closed`, `done`, `complete`, `completed` | `closed` |
+| `canceled`, `cancelled` | `canceled` |
+| `draft` | `draft` |
 
-Unrecognized values default to `todo`.
+Unrecognized values default to `open`.
 
 ### Export format
 
-Exports use the same CSV format and can be re-imported:
+Exports use the same CSV format and can be re-imported. An extra read-only
+`csv_source` column surfaces the import-provenance label (see `--source`); it is
+ignored on import.
 
 ```csv
-id,title,type,status,priority,tags,milestone,due_date,body,created_at,updated_at
-item-abc123,Add login page,Feature,todo,2,"auth,ui",v1.0,2026-05-30,Landing page with email+password login,2026-05-01T10:00:00Z,2026-05-09T12:00:00Z
+id,title,type,status,priority,tags,deadline,body,parent,assignee,sprint,release,blocked_by,csv_source,created_at,updated_at
+pm-abc123,Add login page,Feature,open,2,"auth,ui",2026-05-30,Landing page,,alice,Sprint-12,v1.0,,jira-export,2026-05-01T10:00:00Z,2026-05-09T12:00:00Z
 ```
+
+---
+
+## Idempotent re-import (`--key`)
+
+`--key <field>` makes re-imports update existing items instead of creating
+duplicates. The first import tags each created item with an internal
+`csv-key:<value>` provenance tag; a later import keyed on the same column finds
+and updates the matching item. Key matching is case-insensitive (pm folds tag
+case on storage). The internal `csv-key:` and `csv-source:` tags are stripped
+from exports so round-trips stay clean.
+
+## Provenance & the `csv_source` schema field (`--source`)
+
+The extension registers an optional `csv_source` schema item field (via the
+`schema` capability). When you import with `--source <label>`, the label is
+recorded on each created/updated item and is surfaced back in the `csv_source`
+export column. Note: as of pm 2026.5.31 the CLI does not expose a scalar setter
+for extension-registered fields, so the value is persisted as an internal
+`csv-source:<label>` tag (stripped from the normal `tags` export column). On
+hosts whose SDK lacks `registerItemFields`, schema registration degrades to a
+no-op without breaking any other behavior.
 
 ---
 
@@ -178,7 +255,7 @@ pm csv export --columns id,title,status --output todos.csv
 pm csv-export export --columns title,priority      # native export pipeline
 ```
 
-Valid columns: id, title, type, status, priority, tags, deadline, body, created_at, updated_at.
+Valid columns: id, title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by, csv_source, created_at, updated_at.
 
 ## License
 
