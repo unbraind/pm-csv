@@ -1,0 +1,14 @@
+id: pm-csv-7qh3
+title: "Add native csv-export exporter + --columns selection (importer/exporter pair, full SDK importers capability)"
+description: ""
+type: Feature
+status: closed
+priority: 2
+tags[2]: enhancement,sdk-capabilities
+created_at: "2026-06-02T05:16:53.260Z"
+updated_at: "2026-06-02T05:16:53.885Z"
+author: codex
+notes[1]{created_at,author,text}:
+  "2026-06-02T05:16:53.588Z",codex,"Added registerExporter('csv-export') -> 'pm csv-export export', completing the CSV import/export pair via the native pipeline (was importer-only). Added --columns (validated, ordered subset) to both 'csv export' and the new exporter; refactored shared buildCsvExport/selectExportColumns helpers (single code path). Verified: build+tsc+2/2 tests (mock updated to full ExtensionApi)+functional (import 2; --columns selection; csv-export export). Backward compatible — existing csv import/export/csv-import unchanged."
+close_reason: Implemented + verified (build/tsc/test/functional green); backward compatible.
+body: ""

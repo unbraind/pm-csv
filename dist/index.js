@@ -218,9 +218,41 @@ function readCSVFile(filePath, delimiter) {
     const dataRows = rows.slice(1);
     return { headers, dataRows };
 }
-// ---------------------------------------------------------------------------
-// Extension
-// ---------------------------------------------------------------------------
+// Parse a `--columns id,title,status` spec into a validated, ordered subset of
+// the export columns. Unknown column names throw a USAGE error; an empty/absent
+// spec falls back to the full default column set.
+function selectExportColumns(spec) {
+    if (!spec || !spec.trim())
+        return EXPORT_COLUMNS;
+    const requested = spec.split(",").map((s) => s.trim()).filter(Boolean);
+    const valid = new Set(EXPORT_COLUMNS);
+    const unknown = requested.filter((c) => !valid.has(c));
+    if (unknown.length > 0) {
+        throw new CommandError(`Unknown export column(s): ${unknown.join(", ")}. Valid: ${EXPORT_COLUMNS.join(", ")}`, EXIT_CODE.USAGE);
+    }
+    return requested;
+}
+function buildCsvExport(pmRoot, opts) {
+    const result = spawnSync("pm", ["--path", pmRoot, "list-all", "--json", "--include-body"], { encoding: "utf-8" });
+    if (result.status !== 0) {
+        throw new CommandError(result.stderr || "pm list-all failed");
+    }
+    let items = JSON.parse(result.stdout).items ?? [];
+    if (opts.statusFilter)
+        items = items.filter((i) => i.status === opts.statusFilter);
+    if (opts.typeFilter)
+        items = items.filter((i) => i.type === opts.typeFilter);
+    const headerRow = opts.columns.map(String);
+    const dataRows = items.map((item) => opts.columns.map((col) => {
+        const val = item[col];
+        if (val === undefined || val === null)
+            return "";
+        if (Array.isArray(val))
+            return stringifyTags(val);
+        return String(val);
+    }));
+    return { csvText: serializeCSV([headerRow, ...dataRows], opts.delimiter), count: items.length };
+}
 export default defineExtension({
     name: "pm-csv",
     version: "2026.6.1",
@@ -359,54 +391,56 @@ export default defineExtension({
                 { long: "--delimiter", value_name: "char", description: "CSV field delimiter (default: ,)" },
                 { long: "--status", value_name: "filter", description: "Filter by status: open | in_progress | blocked | closed | canceled | draft" },
                 { long: "--type", value_name: "type", description: "Filter by item type" },
+                { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")}` },
             ],
             async run(ctx) {
                 const delimiter = ctx.options["delimiter"] ?? ",";
                 const outputPath = ctx.options["output"];
-                const statusFilter = ctx.options["status"];
-                const typeFilter = ctx.options["type"];
-                // --include-body is required or the `body` column is always empty.
-                const spawnArgs = ["--path", ctx.pm_root, "list-all", "--json", "--include-body"];
+                const columns = selectExportColumns(ctx.options["columns"]);
                 console.error("Fetching pm items…");
-                const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
-                if (result.status !== 0) {
-                    const msg = result.stderr || "pm list-all failed";
-                    throw new CommandError(msg);
-                }
-                let allItems = JSON.parse(result.stdout).items ?? [];
-                // Apply filters client-side
-                if (statusFilter) {
-                    allItems = allItems.filter((item) => item.status === statusFilter);
-                }
-                if (typeFilter) {
-                    allItems = allItems.filter((item) => item.type === typeFilter);
-                }
-                const items = allItems;
-                if (items.length === 0) {
+                const { csvText, count } = buildCsvExport(ctx.pm_root, {
+                    statusFilter: ctx.options["status"],
+                    typeFilter: ctx.options["type"],
+                    delimiter,
+                    columns,
+                });
+                if (count === 0) {
                     console.error("No items found.");
                     return { exported: 0 };
                 }
-                // Build CSV rows
-                const headerRow = EXPORT_COLUMNS.map(String);
-                const dataRows = items.map((item) => EXPORT_COLUMNS.map((col) => {
-                    const val = item[col];
-                    if (val === undefined || val === null)
-                        return "";
-                    if (Array.isArray(val))
-                        return stringifyTags(val);
-                    return String(val);
-                }));
-                const csvText = serializeCSV([headerRow, ...dataRows], delimiter);
                 if (outputPath) {
                     const absolutePath = resolve(outputPath);
                     writeFileSync(absolutePath, csvText + "\n", "utf-8");
-                    console.error(`Exported ${items.length} item(s) to: ${absolutePath}`);
-                    return { exported: items.length, file: absolutePath };
+                    console.error(`Exported ${count} item(s) to: ${absolutePath}`);
+                    return { exported: count, file: absolutePath };
                 }
                 // Print to stdout — return as data so the CLI host renders it
-                console.error(`Exported ${items.length} item(s).`);
-                return { exported: items.length, csv: csvText };
+                console.error(`Exported ${count} item(s).`);
+                return { exported: count, csv: csvText };
             },
+        });
+        // -----------------------------------------------------------------------
+        // Exporter: csv-export  (native export pipeline — `pm csv-export export`)
+        // Mirrors the importer so CSV is a first-class import/export pair.
+        // -----------------------------------------------------------------------
+        api.registerExporter("csv-export", async (ctx) => {
+            const delimiter = ctx.options["delimiter"] ?? ",";
+            const outputPath = ctx.options["output"];
+            const columns = selectExportColumns(ctx.options["columns"]);
+            const { csvText, count } = buildCsvExport(ctx.pm_root, {
+                statusFilter: ctx.options["status"],
+                typeFilter: ctx.options["type"],
+                delimiter,
+                columns,
+            });
+            if (outputPath) {
+                const absolutePath = resolve(outputPath);
+                writeFileSync(absolutePath, csvText + "\n", "utf-8");
+                console.error(`csv-export: wrote ${count} item(s) to ${absolutePath}`);
+                return { exported: count, file: absolutePath };
+            }
+            console.log(csvText);
+            return { exported: count, csv: csvText };
         });
         // -----------------------------------------------------------------------
         // Importer: csv-import  (programmatic / config-driven)

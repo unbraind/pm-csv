@@ -168,6 +168,18 @@ TypeScript 5, ES2022 target, NodeNext module resolution, strict mode. Zero runti
 
 ---
 
+
+## Exporter & column selection (added)
+
+`pm csv export` and the native `pm csv-export export` both accept `--columns` to pick and order columns:
+
+```bash
+pm csv export --columns id,title,status --output todos.csv
+pm csv-export export --columns title,priority      # native export pipeline
+```
+
+Valid columns: id, title, type, status, priority, tags, deadline, body, created_at, updated_at.
+
 ## License
 
 MIT
