@@ -1,0 +1,12 @@
+id: pm-csv-f0nz
+title: Heavy edge-case tests + functional round-trip + manifest capabilities fix
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-02T08:01:19.455Z"
+updated_at: "2026-06-02T08:01:19.455Z"
+author: codex
+parent: pm-csv-xim5
+body: "node:test unit tests for parse/serialize edge cases (quotes, embedded newlines, BOM, unicode, TSV, escaped quotes). Functional round-trip in scratch workspace. Fix manifest capabilities to match registrations (drop unbacked schema)."
