@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026.6.1 - 2026-06-01
+## 2026.6.2 - 2026-06-02
+
+### Added
+
+- Add native csv-export exporter + --columns selection \(importer/exporter pair, full SDK importers capability\) ([pm-csv-7qh3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-7qh3.toon))
+
+## 2026.06.01 - 2026-06-01
 
 ### Fixed
 

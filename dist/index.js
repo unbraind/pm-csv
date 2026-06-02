@@ -255,7 +255,7 @@ function buildCsvExport(pmRoot, opts) {
 }
 export default defineExtension({
     name: "pm-csv",
-    version: "2026.6.1",
+    version: "2026.6.2",
     activate(api) {
         // -----------------------------------------------------------------------
         // Command: pm csv import <file>
