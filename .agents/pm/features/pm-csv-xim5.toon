@@ -1,0 +1,14 @@
+id: pm-csv-xim5
+title: Deep RFC-4180 import/export + idempotent upsert (SDK 2026.5.31)
+description: ""
+type: Feature
+status: in_progress
+priority: 1
+tags: []
+created_at: "2026-06-02T08:01:02.803Z"
+updated_at: "2026-06-02T08:01:02.803Z"
+author: codex
+acceptance_criteria: RFC-4180 parser handles quotes/escapes/embedded-newlines/CRLF/BOM; --delimiter and TSV work; --map col=field remaps headers; --key enables upsert via csv-key provenance tag; --no-header / --crlf on export; heavy edge-case tests; functional round-trip on messy real data; all CI checks green.
+value: "Make pm-csv a robust, round-trip-faithful CSV bridge: full RFC-4180 import/export, BOM handling, configurable delimiter (CSV/TSV), header-to-field mapping, type coercion, idempotent upsert keyed on a column, and header control on export."
+outcome: "pm csv import/export survives quotes, embedded newlines, unicode, BOM, TSV; re-import is idempotent (no duplicates) when --key is given; round-trip diff is clean."
+body: "Current: 2 commands (csv import/export), 1 importer (csv-import), 1 exporter (csv-export), --columns selection. manifest capabilities = commands, schema, importers (schema is claimed but nothing registered).\n\nSDK finding: registerRenderer only accepts format 'toon'|'json' (loader.js isOutputRendererFormat). A 'csv'/'tsv' output format for 'pm list --format csv' is NOT supportable in 2026.5.31 -> report upstream, do NOT register a broken/filler renderer.\n\nPlan: deepen import (BOM, --map, --key upsert, coercion, counts), deepen export (TSV, --no-header, --crlf), drop the unbacked 'schema' capability claim, keep capabilities = commands, importers."

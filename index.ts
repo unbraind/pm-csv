@@ -163,6 +163,15 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
 }
 
 /**
+ * Strip a leading UTF-8 BOM (U+FEFF) if present. Files exported by Excel and
+ * many Windows tools start with a BOM; without removing it the first header
+ * name silently becomes "﻿title" and the required-column check fails.
+ */
+function stripBOM(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+/**
  * Serialize a single field value for CSV output.
  * Wraps in double-quotes when the value contains the delimiter, quotes, or newlines.
  */
@@ -179,13 +188,27 @@ function serializeField(value: string, delimiter: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+interface SerializeOptions {
+  delimiter: string;
+  /** Line terminator. RFC-4180 mandates CRLF; we default to LF for unix-friendliness. */
+  eol?: "\n" | "\r\n";
+}
+
 /**
  * Serialize a full array of rows into a CSV string.
  */
-function serializeCSV(rows: string[][], delimiter: string): string {
+function serializeCSV(
+  rows: string[][],
+  delimiterOrOpts: string | SerializeOptions,
+): string {
+  const opts: SerializeOptions =
+    typeof delimiterOrOpts === "string"
+      ? { delimiter: delimiterOrOpts }
+      : delimiterOrOpts;
+  const eol = opts.eol ?? "\n";
   return rows
-    .map((row) => row.map((f) => serializeField(f, delimiter)).join(delimiter))
-    .join("\n");
+    .map((row) => row.map((f) => serializeField(f, opts.delimiter)).join(opts.delimiter))
+    .join(eol);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +225,81 @@ function readBoolOption(options: Record<string, unknown>, ...keys: string[]): bo
     if (options[key] !== undefined) return Boolean(options[key]);
   }
   return false;
+}
+
+/**
+ * Resolve a user-supplied delimiter, accepting friendly aliases so TSV is easy:
+ *   --delimiter tab   --delimiter "\t"   --delimiter ";"
+ * A literal backslash-t is interpreted as a tab.
+ */
+function resolveDelimiter(raw: string | undefined): string {
+  if (raw === undefined || raw === "") return ",";
+  const lower = raw.toLowerCase();
+  if (lower === "tab" || lower === "\\t" || lower === "tsv") return "\t";
+  if (lower === "comma") return ",";
+  if (lower === "semicolon") return ";";
+  if (lower === "pipe") return "|";
+  return raw;
+}
+
+/**
+ * Provenance tag prefix used for idempotent upsert. When the importer is told
+ * to key on a column, the created item is tagged `csv-key:<value>` so a later
+ * re-import can find and update the same item instead of duplicating it.
+ */
+const KEY_TAG_PREFIX = "csv-key:";
+const PM_LIST_MAX_BUFFER = 16 * 1024 * 1024;
+
+function encodeKeyTagValue(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function decodeKeyTagValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Parse a `--map csvHeader=field` spec (repeatable / comma-joined) into a
+ * lookup from a normalized CSV header name to the canonical pm field name.
+ * Example: `--map "Summary=title,Owner=tags"`.
+ */
+function parseFieldMap(spec: string | string[] | undefined): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (spec === undefined) return map;
+  const parts = (Array.isArray(spec) ? spec : [spec]).flatMap((s) => s.split(","));
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0) {
+      throw new CommandError(
+        `Invalid --map entry "${trimmed}"; expected csvHeader=field`,
+        EXIT_CODE.USAGE,
+      );
+    }
+    const from = trimmed.slice(0, eq).trim().toLowerCase();
+    const to = trimmed.slice(eq + 1).trim().toLowerCase();
+    if (!from || !to) {
+      throw new CommandError(
+        `Invalid --map entry "${trimmed}"; expected csvHeader=field`,
+        EXIT_CODE.USAGE,
+      );
+    }
+    map[from] = to;
+  }
+  return map;
+}
+
+/**
+ * Apply a field map to a list of header names, producing the effective
+ * (canonical) header used for column lookup.
+ */
+function applyFieldMap(headers: string[], fieldMap: Record<string, string>): string[] {
+  return headers.map((h) => fieldMap[h] ?? h);
 }
 
 /**
@@ -257,7 +355,7 @@ function readCSVFile(
   filePath: string,
   delimiter: string
 ): { headers: string[]; dataRows: string[][] } {
-  const text = readFileSync(filePath, "utf-8");
+  const text = stripBOM(readFileSync(filePath, "utf-8"));
   const rows = parseCSV(text, delimiter).filter((r) =>
     r.some((f) => f.trim() !== "")
   );
@@ -269,6 +367,218 @@ function readCSVFile(
   const headers = rows[0].map((h) => h.trim().toLowerCase());
   const dataRows = rows.slice(1);
   return { headers, dataRows };
+}
+
+// ---------------------------------------------------------------------------
+// Shared import core — used by `csv import` and the csv-import importer so both
+// share one code path (mapping, coercion, idempotent upsert, counts).
+// ---------------------------------------------------------------------------
+
+interface CsvImportOptions {
+  delimiter: string;
+  dryRun: boolean;
+  fieldMap: Record<string, string>;
+  /** Canonical pm field whose value is the dedup key (e.g. "title" or "id"). */
+  keyField?: string;
+}
+
+interface ImportResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+  previews: Record<string, unknown>[];
+}
+
+interface ParsedRow {
+  title: string;
+  status: ItemStatus;
+  priority?: number;
+  tags: string[];
+  type?: string;
+  deadline?: string;
+  body?: string;
+}
+
+/**
+ * Build the canonical field accessor for a header row + data row.
+ */
+function rowFields(
+  headers: string[],
+  row: string[],
+): { get: (name: string) => string; parsed: ParsedRow } {
+  const col = (name: string): number => headers.indexOf(name);
+  const get = (name: string): string => {
+    const idx = col(name);
+    return idx >= 0 ? (row[idx] ?? "").trim() : "";
+  };
+
+  const rawStatus = get("status");
+  const rawPriority = get("priority");
+  const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
+
+  return {
+    get,
+    parsed: {
+      title: get("title"),
+      status: rawStatus ? normalizeStatus(rawStatus) : "open",
+      priority: priority !== undefined && !isNaN(priority) ? priority : undefined,
+      tags: parseTags(get("tags")),
+      type: get("type") || undefined,
+      // pm has no milestone/due_date fields; map deadline (accept legacy header).
+      deadline: get("deadline") || get("due_date") || undefined,
+      body: get("body") || undefined,
+    },
+  };
+}
+
+/**
+ * List existing items once and build a lookup from csv-key provenance value to
+ * item id, for idempotent upsert.
+ */
+function loadKeyIndex(pmRoot: string): Map<string, string> {
+  const index = new Map<string, string>();
+  const result = spawnSync(
+    "pm",
+    ["--path", pmRoot, "list-all", "--json"],
+    { encoding: "utf-8", maxBuffer: PM_LIST_MAX_BUFFER },
+  );
+  if (result.error) throw new CommandError(`pm list-all failed: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new CommandError(result.stderr?.trim() || "pm list-all failed");
+  }
+  let items: PmItem[] = [];
+  try {
+    items = JSON.parse(result.stdout).items ?? [];
+  } catch {
+    return index;
+  }
+  for (const item of items) {
+    for (const tag of item.tags ?? []) {
+      if (tag.startsWith(KEY_TAG_PREFIX)) {
+        index.set(decodeKeyTagValue(tag.slice(KEY_TAG_PREFIX.length)), item.id);
+      }
+    }
+  }
+  return index;
+}
+
+function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): ImportResult {
+  const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter);
+  const result: ImportResult = { imported: 0, updated: 0, skipped: 0, errors: [], previews: [] };
+
+  if (rawHeaders.length === 0) return result;
+
+  const headers = applyFieldMap(rawHeaders, opts.fieldMap);
+
+  if (!headers.includes("title")) {
+    throw new CommandError(
+      `CSV is missing required 'title' column (after --map). Found: ${headers.join(", ")}`,
+      EXIT_CODE.USAGE,
+    );
+  }
+
+  if (opts.keyField && !headers.includes(opts.keyField)) {
+    throw new CommandError(
+      `--key column '${opts.keyField}' not found in CSV. Found: ${headers.join(", ")}`,
+      EXIT_CODE.USAGE,
+    );
+  }
+
+  // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
+  const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map<string, string>();
+
+  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+    const row = dataRows[rowIndex];
+    const lineNo = rowIndex + 2; // 1-based + header row
+    const { get, parsed } = rowFields(headers, row);
+
+    if (!parsed.title) {
+      const msg = `Row ${lineNo}: skipping — 'title' is empty`;
+      console.error(msg);
+      result.skipped++;
+      continue;
+    }
+
+    const keyValue = opts.keyField ? get(opts.keyField) : "";
+    const existingId = keyValue ? keyIndex.get(keyValue) : undefined;
+
+    if (opts.dryRun) {
+      result.previews.push({
+        action: existingId ? "update" : "create",
+        ...parsed,
+        ...(opts.keyField ? { key: keyValue } : {}),
+      });
+      if (existingId) result.updated++;
+      else result.imported++;
+      continue;
+    }
+
+    try {
+      if (existingId) {
+        upsertUpdate(pmRoot, existingId, parsed);
+        result.updated++;
+      } else {
+        const newId = upsertCreate(pmRoot, parsed, opts.keyField ? keyValue : undefined);
+        if (opts.keyField && keyValue && newId) keyIndex.set(keyValue, newId);
+        result.imported++;
+      }
+    } catch (err: unknown) {
+      const msg = `Row ${lineNo}: ${existingId ? "update" : "create"} failed — ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      console.error(msg);
+      result.errors.push(msg);
+      result.skipped++;
+    }
+  }
+
+  return result;
+}
+
+/** Create a new item, optionally carrying a csv-key provenance tag. Returns the new id. */
+function upsertCreate(pmRoot: string, p: ParsedRow, keyValue?: string): string {
+  const tags = [...p.tags];
+  if (keyValue) tags.push(`${KEY_TAG_PREFIX}${encodeKeyTagValue(keyValue)}`);
+
+  const args = ["--path", pmRoot, "create", "--title", p.title, "--status", p.status, "--json"];
+  if (p.body) args.push("--body", p.body);
+  if (p.priority !== undefined) args.push("--priority", String(p.priority));
+  if (p.type) args.push("--type", p.type);
+  if (p.deadline) args.push("--deadline", p.deadline);
+  if (tags.length > 0) args.push("--tags", tags.join(","));
+
+  const r = spawnSync("pm", args, { encoding: "utf-8" });
+  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  try {
+    const parsed = JSON.parse(r.stdout);
+    return parsed.id ?? parsed.item?.id ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Update an existing item in place (status via update; close handled separately). */
+function upsertUpdate(pmRoot: string, id: string, p: ParsedRow): void {
+  const args = ["--path", pmRoot, "update", id, "--title", p.title];
+  if (p.body !== undefined) args.push("--body", p.body);
+  if (p.priority !== undefined) args.push("--priority", String(p.priority));
+  if (p.type) args.push("--type", p.type);
+  if (p.deadline) args.push("--deadline", p.deadline);
+  // Preserve the csv-key tag (additive) and refresh the user tags.
+  if (p.tags.length > 0) args.push("--add-tags", p.tags.join(","));
+  // `update` cannot set a closed status; only set non-closed statuses here.
+  if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
+
+  const r = spawnSync("pm", args, { encoding: "utf-8" });
+  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm update failed");
+
+  // Apply terminal statuses through the dedicated close command.
+  if (p.status === "closed" || p.status === "canceled") {
+    const reason = p.status === "canceled" ? "canceled" : "completed";
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", reason], { encoding: "utf-8" });
+    if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +596,10 @@ interface CsvExportOptions {
   typeFilter?: string;
   delimiter: string;
   columns: Array<keyof PmItem>;
+  /** Omit the header row. */
+  noHeader?: boolean;
+  /** Use CRLF line endings (RFC-4180 / Excel-friendly). */
+  crlf?: boolean;
 }
 
 // Parse a `--columns id,title,status` spec into a validated, ordered subset of
@@ -319,17 +633,27 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
   if (opts.statusFilter) items = items.filter((i) => i.status === opts.statusFilter);
   if (opts.typeFilter) items = items.filter((i) => i.type === opts.typeFilter);
 
-  const headerRow = opts.columns.map(String);
   const dataRows = items.map((item) =>
     opts.columns.map((col) => {
       const val = item[col];
       if (val === undefined || val === null) return "";
-      if (Array.isArray(val)) return stringifyTags(val);
+      if (Array.isArray(val)) {
+        // Strip internal csv-key provenance tags so a round-trip export stays clean.
+        const visible = (val as unknown[]).filter(
+          (t) => typeof t === "string" && !t.startsWith(KEY_TAG_PREFIX),
+        ) as string[];
+        return stringifyTags(visible);
+      }
       return String(val);
     }),
   );
 
-  return { csvText: serializeCSV([headerRow, ...dataRows], opts.delimiter), count: items.length };
+  const allRows = opts.noHeader ? dataRows : [opts.columns.map(String), ...dataRows];
+  const eol: "\n" | "\r\n" = opts.crlf ? "\r\n" : "\n";
+  return {
+    csvText: serializeCSV(allRows, { delimiter: opts.delimiter, eol }),
+    count: items.length,
+  };
 }
 
 export default defineExtension({
@@ -343,126 +667,69 @@ export default defineExtension({
     api.registerCommand({
       name: "csv import",
       description:
-        "Import pm items from a CSV file. " +
-        "Expected columns: title, type, status, priority, tags, milestone, due_date, body. " +
-        "Only 'title' is required; all other columns are optional.",
+        "Import pm items from a CSV file with full RFC-4180 parsing (quoted fields, " +
+        "embedded newlines, escaped quotes, BOM, CRLF). Expected columns: title, type, " +
+        "status, priority, tags, deadline, body. Only 'title' is required. Use --map to " +
+        "remap arbitrary headers and --key for idempotent re-import (upsert).",
       intent: "import items from a CSV file into pm",
       examples: [
         "pm csv import tasks.csv",
         "pm csv import backlog.csv --delimiter ';'",
+        "pm csv import data.tsv --delimiter tab",
+        "pm csv import jira.csv --map 'Summary=title,Owner=tags'",
+        "pm csv import items.csv --key title   # idempotent re-import (no duplicates)",
         "pm csv import items.csv --dry-run",
       ],
       flags: [
-        { long: "--delimiter", value_name: "char", description: "CSV field delimiter (default: ,)" },
+        { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
+        { long: "--map", value_name: "col=field", description: "Remap a CSV header to a pm field (repeatable, comma-joined). e.g. --map 'Summary=title'" },
+        { long: "--key", value_name: "field", description: "Dedup key column: re-import updates the matching item instead of creating a duplicate" },
         { long: "--dry-run", description: "Preview without writing" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
         if (!filePath) {
-          throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--dry-run]", EXIT_CODE.USAGE);
+          throw new CommandError(
+            "Usage: pm csv import <file> [--delimiter <char>] [--map col=field] [--key field] [--dry-run]",
+            EXIT_CODE.USAGE,
+          );
         }
 
-        const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
         const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
+        const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
+        const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
         const absolutePath = resolve(filePath);
 
         console.error(`Reading CSV from: ${absolutePath}`);
 
-        let headers: string[];
-        let dataRows: string[][];
+        let res: ImportResult;
         try {
-          ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
+          res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, keyField });
         } catch (err: unknown) {
+          if (err instanceof CommandError) throw err;
           const msg = err instanceof Error ? err.message : String(err);
           const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
-          throw new CommandError(`Failed to read file: ${msg}`, exitCode);
-        }
-
-        if (headers.length === 0) {
-          console.error("CSV file is empty or has no headers.");
-          return { imported: 0, skipped: 0 };
-        }
-
-        // Validate that at minimum 'title' is present
-        if (!headers.includes("title")) {
-          throw new CommandError(
-            `CSV is missing required 'title' column. Found: ${headers.join(", ")}`
-          );
-        }
-
-        // Index columns
-        const col = (name: string): number => headers.indexOf(name);
-
-        let imported = 0;
-        let skipped = 0;
-        const previews: Record<string, unknown>[] = [];
-
-        for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-          const row = dataRows[rowIndex];
-
-          const get = (name: string): string => {
-            const idx = col(name);
-            return idx >= 0 ? (row[idx] ?? "").trim() : "";
-          };
-
-          const title = get("title");
-          if (!title) {
-            console.error(`Row ${rowIndex + 2}: skipping — 'title' is empty`);
-            skipped++;
-            continue;
-          }
-
-          const rawStatus = get("status");
-          const status = rawStatus ? normalizeStatus(rawStatus) : "open";
-          const rawPriority = get("priority");
-          const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
-          const tags = parseTags(get("tags"));
-          const type = get("type") || undefined;
-          // pm has no milestone/due_date fields on `create`; the deadline column
-          // (accept legacy "due_date" header too) maps to `--deadline`.
-          const deadline = get("deadline") || get("due_date") || undefined;
-          const body = get("body") || undefined;
-
-          if (dryRun) {
-            previews.push({ title, type, status, priority, tags, deadline, body });
-            imported++;
-            continue;
-          }
-
-          try {
-            const spawnArgs = [
-              "--path", ctx.pm_root,
-              "create",
-              "--title", title,
-              "--status", status,
-            ];
-            if (body) spawnArgs.push("--body", body);
-            if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
-            if (type) spawnArgs.push("--type", type);
-            if (deadline) spawnArgs.push("--deadline", deadline);
-            if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
-
-            const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
-            if (result.status !== 0) {
-              throw new Error(result.stderr || "pm create failed");
-            }
-            imported++;
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(`Row ${rowIndex + 2}: create failed — ${msg}`);
-            skipped++;
-          }
+          throw new CommandError(`Failed to import: ${msg}`, exitCode);
         }
 
         if (dryRun) {
           console.error(
-            `[dry-run] Would import ${imported} item(s), skip ${skipped} item(s).`
+            `[dry-run] Would create ${res.imported}, update ${res.updated}, skip ${res.skipped}.`,
           );
-          return { dryRun: true, wouldImport: imported, wouldSkip: skipped, previews };
+          return {
+            dryRun: true,
+            wouldCreate: res.imported,
+            wouldUpdate: res.updated,
+            wouldSkip: res.skipped,
+            previews: res.previews,
+          };
         }
 
-        console.error(`Imported ${imported} item(s), skipped ${skipped} item(s).`);
-        return { imported, skipped };
+        console.error(
+          `Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}.`,
+        );
+        return { imported: res.imported, updated: res.updated, skipped: res.skipped, errors: res.errors };
       },
     });
 
@@ -484,15 +751,19 @@ export default defineExtension({
       ],
       flags: [
         { long: "--output", value_name: "file", description: "Output file path (default: print to stdout)" },
-        { long: "--delimiter", value_name: "char", description: "CSV field delimiter (default: ,)" },
+        { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
         { long: "--status", value_name: "filter", description: "Filter by status: open | in_progress | blocked | closed | canceled | draft" },
         { long: "--type", value_name: "type", description: "Filter by item type" },
         { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")}` },
+        { long: "--no-header", description: "Omit the CSV header row" },
+        { long: "--crlf", description: "Use CRLF line endings (RFC-4180 / Excel)" },
       ],
       async run(ctx) {
-        const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
         const outputPath = ctx.options["output"] as string | undefined;
         const columns = selectExportColumns(ctx.options["columns"] as string | undefined);
+        const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+        const crlf = readBoolOption(ctx.options, "crlf");
 
         console.error("Fetching pm items…");
         const { csvText, count } = buildCsvExport(ctx.pm_root, {
@@ -500,6 +771,8 @@ export default defineExtension({
           typeFilter: ctx.options["type"] as string | undefined,
           delimiter,
           columns,
+          noHeader,
+          crlf,
         });
 
         if (count === 0) {
@@ -525,15 +798,19 @@ export default defineExtension({
     // Mirrors the importer so CSV is a first-class import/export pair.
     // -----------------------------------------------------------------------
     api.registerExporter("csv-export", async (ctx) => {
-      const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
       const outputPath = ctx.options["output"] as string | undefined;
       const columns = selectExportColumns(ctx.options["columns"] as string | undefined);
+      const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+      const crlf = readBoolOption(ctx.options, "crlf");
 
       const { csvText, count } = buildCsvExport(ctx.pm_root, {
         statusFilter: ctx.options["status"] as string | undefined,
         typeFilter: ctx.options["type"] as string | undefined,
         delimiter,
         columns,
+        noHeader,
+        crlf,
       });
 
       if (outputPath) {
@@ -556,80 +833,45 @@ export default defineExtension({
         return;
       }
 
-      const delimiter = (ctx.options["delimiter"] as string | undefined) ?? ",";
+      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
+      const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
+      const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
       const absolutePath = resolve(filePath);
 
       console.error(`csv-import: reading ${absolutePath}`);
 
-      let headers: string[];
-      let dataRows: string[][];
+      let res: ImportResult;
       try {
-        ({ headers, dataRows } = readCSVFile(absolutePath, delimiter));
+        res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, keyField });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`csv-import: failed to read file — ${msg}`);
+        console.error(`csv-import: failed — ${msg}`);
         return;
       }
 
-      if (!headers.includes("title")) {
-        console.error("csv-import: CSV is missing required 'title' column — skipping.");
-        return;
-      }
-
-      const col = (name: string): number => headers.indexOf(name);
-
-      let imported = 0;
-      let skipped = 0;
-
-      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-        const row = dataRows[rowIndex];
-
-        const get = (name: string): string => {
-          const idx = col(name);
-          return idx >= 0 ? (row[idx] ?? "").trim() : "";
-        };
-
-        const title = get("title");
-        if (!title) {
-          skipped++;
-          continue;
-        }
-
-        const rawStatus = get("status");
-        const status = rawStatus ? normalizeStatus(rawStatus) : "open";
-        const rawPriority = get("priority");
-        const priority = rawPriority ? parseInt(rawPriority, 10) : undefined;
-        const tags = parseTags(get("tags"));
-        const type = get("type") || undefined;
-        const deadline = get("deadline") || get("due_date") || undefined;
-        const body = get("body") || undefined;
-
-        try {
-          const spawnArgs = [
-            "--path", ctx.pm_root,
-            "create",
-            "--title", title,
-            "--status", status,
-          ];
-          if (body) spawnArgs.push("--body", body);
-          if (priority !== undefined && !isNaN(priority)) spawnArgs.push("--priority", String(priority));
-          if (type) spawnArgs.push("--type", type);
-          if (deadline) spawnArgs.push("--deadline", deadline);
-          if (tags.length > 0) spawnArgs.push("--tags", tags.join(","));
-
-          const result = spawnSync("pm", spawnArgs, { encoding: "utf-8" });
-          if (result.status !== 0) {
-            throw new Error(result.stderr || "pm create failed");
-          }
-          imported++;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`csv-import: row ${rowIndex + 2} create failed — ${msg}`);
-          skipped++;
-        }
-      }
-
-      console.error(`csv-import: done — imported ${imported}, skipped ${skipped}.`);
+      console.error(
+        `csv-import: done — imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}.`,
+      );
     });
   },
 });
+
+// ---------------------------------------------------------------------------
+// Named exports — pure helpers exposed for unit testing (no side effects).
+// ---------------------------------------------------------------------------
+export {
+  parseCSV,
+  serializeCSV,
+  serializeField,
+  stripBOM,
+  resolveDelimiter,
+  parseFieldMap,
+  applyFieldMap,
+  normalizeStatus,
+  parseTags,
+  stringifyTags,
+  encodeKeyTagValue,
+  decodeKeyTagValue,
+  selectExportColumns,
+  EXPORT_COLUMNS,
+};

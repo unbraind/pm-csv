@@ -1,0 +1,12 @@
+id: pm-csv-3d3b
+title: Investigate renderers capability (pm list --format csv)
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-02T08:01:19.754Z"
+updated_at: "2026-06-02T08:01:19.754Z"
+author: codex
+parent: pm-csv-xim5
+body: SDK 2026.5.31 registerRenderer rejects non-toon/json formats. Document as not-supportable; report upstream.
