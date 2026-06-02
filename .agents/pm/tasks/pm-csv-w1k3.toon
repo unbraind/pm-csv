@@ -1,0 +1,12 @@
+id: pm-csv-w1k3
+title: Register csv_source schema field (schema capability)
+description: ""
+type: Task
+status: closed
+priority: 1
+tags: []
+created_at: "2026-06-02T11:42:47.698Z"
+updated_at: "2026-06-02T11:42:47.698Z"
+author: codex
+parent: pm-csv-aoox
+body: "registerItemFields([{name:csv_source,type:string,optional:true}]) guarded by typeof check; manifest declares schema. Value persisted as csv-source: tag + surfaced in csv_source export col."

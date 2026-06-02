@@ -1,0 +1,12 @@
+id: pm-csv-ry94
+title: Which extra pm fields to round-trip
+description: ""
+type: Decision
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T11:42:58.969Z"
+updated_at: "2026-06-02T11:42:58.969Z"
+author: codex
+parent: pm-csv-aoox
+body: "Inspected pm create/update --help: --parent, --assignee, --sprint, --release, --blocked-by all exist. blocked_by stores an item id OR a free-text reason. All five adopted. Skipped none."

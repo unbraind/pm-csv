@@ -1,0 +1,12 @@
+id: pm-csv-rq5q
+title: "New command: pm csv validate <file>"
+description: ""
+type: Task
+status: closed
+priority: 1
+tags: []
+created_at: "2026-06-02T11:42:46.211Z"
+updated_at: "2026-06-02T11:42:46.211Z"
+author: codex
+parent: pm-csv-aoox
+body: "Reports row count, detected/mapped columns, missing-title rows, unknown-status rows, non-int-priority rows; non-zero exit on missing title col; --json supported."

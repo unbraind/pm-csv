@@ -1,0 +1,12 @@
+id: pm-csv-z5f5
+title: Unit tests + functional test with real data
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-02T11:42:48.612Z"
+updated_at: "2026-06-02T11:42:48.612Z"
+author: codex
+parent: pm-csv-aoox
+body: "Added tests for resolveEncoding, validateParsedCSV, new columns, normalizeKeyValue. Functionally verified all flows in /tmp/csv-fn."

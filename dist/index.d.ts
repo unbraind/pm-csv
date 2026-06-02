@@ -10,8 +10,19 @@ interface PmItem {
     created_at?: string;
     updated_at?: string;
     deadline?: string;
+    parent?: string;
+    assignee?: string;
+    sprint?: string;
+    release?: string;
+    blocked_by?: string;
+    /** Derived on export from the csv-source: provenance tag (not a stored field). */
+    csv_source?: string;
 }
+declare const IMPORT_COLUMNS: readonly ["title", "type", "status", "priority", "tags", "deadline", "body", "parent", "assignee", "sprint", "release", "blocked_by"];
 declare const EXPORT_COLUMNS: Array<keyof PmItem>;
+/** Supported file encodings for `--encoding` on import. */
+declare const SUPPORTED_ENCODINGS: readonly ["utf-8", "utf8", "utf16le", "latin1"];
+type SupportedEncoding = (typeof SUPPORTED_ENCODINGS)[number];
 /**
  * Parse a full CSV string into rows of string arrays.
  * Handles:
@@ -47,6 +58,13 @@ declare function serializeCSV(rows: string[][], delimiterOrOpts: string | Serial
  * A literal backslash-t is interpreted as a tab.
  */
 declare function resolveDelimiter(raw: string | undefined): string;
+/**
+ * Normalize a dedup key value for stable matching. pm lower-cases tags on
+ * storage, so a `csv-key:` tag written from "Fix Bug" comes back as
+ * "fix bug"; we therefore fold the key to lower-case on BOTH write and lookup
+ * so re-imports match (and thus update) instead of duplicating.
+ */
+declare function normalizeKeyValue(value: string): string;
 declare function encodeKeyTagValue(value: string): string;
 declare function decodeKeyTagValue(value: string): string;
 /**
@@ -74,6 +92,27 @@ declare function parseTags(raw: string): string[];
  * (safe to embed in a single CSV field).
  */
 declare function stringifyTags(tags: string[] | undefined): string;
+/**
+ * Validate and normalize a user-supplied `--encoding` value to a Node-supported
+ * BufferEncoding. Accepts utf-8/utf8, utf16le, latin1. Throws USAGE otherwise.
+ */
+declare function resolveEncoding(raw: string | undefined): SupportedEncoding;
+interface CsvValidateReport {
+    ok: boolean;
+    rowCount: number;
+    detectedColumns: string[];
+    mappedColumns: string[];
+    hasTitleColumn: boolean;
+    rowsMissingTitle: number;
+    rowsWithUnknownStatus: number;
+    rowsWithNonIntegerPriority: number;
+    issues: string[];
+}
+/**
+ * Core validation logic over already-parsed headers + rows. Pure and
+ * side-effect-free so it can be unit tested directly.
+ */
+declare function validateParsedCSV(rawHeaders: string[], dataRows: string[][], fieldMap: Record<string, string>): CsvValidateReport;
 declare function selectExportColumns(spec: string | undefined): Array<keyof PmItem>;
 declare const _default: {
     name: string;
@@ -81,5 +120,5 @@ declare const _default: {
     activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
 };
 export default _default;
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, selectExportColumns, EXPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, EXPORT_COLUMNS, IMPORT_COLUMNS, };
 //# sourceMappingURL=index.d.ts.map

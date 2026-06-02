@@ -14,8 +14,12 @@ import {
   stringifyTags,
   encodeKeyTagValue,
   decodeKeyTagValue,
+  normalizeKeyValue,
   selectExportColumns,
+  resolveEncoding,
+  validateParsedCSV,
   EXPORT_COLUMNS,
+  IMPORT_COLUMNS,
 } from "../dist/index.js";
 
 // ---------------------------------------------------------------------------
@@ -221,6 +225,13 @@ test("csv-key provenance values are encoded before comma-separated tag transport
   assert.equal(decodeKeyTagValue("legacy,raw"), "legacy,raw");
 });
 
+test("normalizeKeyValue: folds case + trims so re-import dedups despite pm tag lowercasing", () => {
+  assert.equal(normalizeKeyValue("Fix Login Bug"), "fix login bug");
+  assert.equal(normalizeKeyValue("  Spaced  "), "spaced");
+  // Same logical key from two casings collapses to one bucket.
+  assert.equal(normalizeKeyValue("OAuth"), normalizeKeyValue("oauth"));
+});
+
 // ---------------------------------------------------------------------------
 // Export column selection
 // ---------------------------------------------------------------------------
@@ -236,4 +247,100 @@ test("selectExportColumns: ordered subset", () => {
 
 test("selectExportColumns: unknown column throws USAGE", () => {
   assert.throws(() => selectExportColumns("title,bogus"), /Unknown export column/);
+});
+
+test("selectExportColumns: new relational columns are valid", () => {
+  assert.deepEqual(
+    selectExportColumns("parent,assignee,sprint,release,blocked_by"),
+    ["parent", "assignee", "sprint", "release", "blocked_by"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// New columns present in the canonical column sets
+// ---------------------------------------------------------------------------
+
+test("IMPORT/EXPORT_COLUMNS include the new relational fields", () => {
+  for (const col of ["parent", "assignee", "sprint", "release", "blocked_by"]) {
+    assert.ok((IMPORT_COLUMNS as readonly string[]).includes(col), `IMPORT missing ${col}`);
+    assert.ok((EXPORT_COLUMNS as readonly string[]).includes(col), `EXPORT missing ${col}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Encoding resolution
+// ---------------------------------------------------------------------------
+
+test("resolveEncoding: defaults and aliases", () => {
+  assert.equal(resolveEncoding(undefined), "utf-8");
+  assert.equal(resolveEncoding(""), "utf-8");
+  assert.equal(resolveEncoding("UTF-8"), "utf-8");
+  assert.equal(resolveEncoding("utf8"), "utf8");
+  assert.equal(resolveEncoding("UTF16LE"), "utf16le");
+  assert.equal(resolveEncoding("latin1"), "latin1");
+});
+
+test("resolveEncoding: unknown encoding throws USAGE", () => {
+  assert.throws(() => resolveEncoding("ebcdic"), /Unknown --encoding/);
+});
+
+// ---------------------------------------------------------------------------
+// CSV validation (pure core)
+// ---------------------------------------------------------------------------
+
+test("validateParsedCSV: clean CSV reports ok with zero issues", () => {
+  const headers = ["title", "status", "priority"];
+  const rows = [
+    ["Fix bug", "open", "1"],
+    ["Ship it", "in_progress", "2"],
+  ];
+  const report = validateParsedCSV(headers, rows, {});
+  assert.equal(report.ok, true);
+  assert.equal(report.rowCount, 2);
+  assert.equal(report.hasTitleColumn, true);
+  assert.equal(report.rowsMissingTitle, 0);
+  assert.equal(report.rowsWithUnknownStatus, 0);
+  assert.equal(report.rowsWithNonIntegerPriority, 0);
+  assert.deepEqual(report.issues, []);
+});
+
+test("validateParsedCSV: missing title column is a structural failure", () => {
+  const report = validateParsedCSV(["name", "status"], [["x", "open"]], {});
+  assert.equal(report.ok, false);
+  assert.equal(report.hasTitleColumn, false);
+  assert.ok(report.issues.some((i) => /title/.test(i)));
+});
+
+test("validateParsedCSV: --map can satisfy the title requirement", () => {
+  const report = validateParsedCSV(["summary", "status"], [["x", "open"]], { summary: "title" });
+  assert.equal(report.ok, true);
+  assert.equal(report.hasTitleColumn, true);
+  assert.deepEqual(report.mappedColumns, ["title", "status"]);
+});
+
+test("validateParsedCSV: counts empty titles, unknown status, non-int priority", () => {
+  const headers = ["title", "status", "priority"];
+  const rows = [
+    ["", "open", "1"],            // empty title
+    ["Has title", "wat", "2"],    // unknown status
+    ["Also", "open", "high"],     // non-int priority
+    ["Fine", "done", "3"],        // all good (done is known)
+  ];
+  const report = validateParsedCSV(headers, rows, {});
+  assert.equal(report.ok, true); // structurally fine; these are warnings
+  assert.equal(report.rowsMissingTitle, 1);
+  assert.equal(report.rowsWithUnknownStatus, 1);
+  assert.equal(report.rowsWithNonIntegerPriority, 1);
+  assert.equal(report.issues.length, 3);
+});
+
+test("validateParsedCSV: negative integer priority is accepted", () => {
+  const report = validateParsedCSV(["title", "priority"], [["x", "-1"]], {});
+  assert.equal(report.rowsWithNonIntegerPriority, 0);
+});
+
+test("validateParsedCSV: empty CSV is a structural failure", () => {
+  const report = validateParsedCSV([], [], {});
+  assert.equal(report.ok, false);
+  assert.ok(report.issues.some((i) => /empty/i.test(i)));
 });
