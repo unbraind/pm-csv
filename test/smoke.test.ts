@@ -14,16 +14,19 @@ test("extension has required shape", () => {
 test("extension registers at least one capability", () => {
   const registered: string[] = [];
   const noop = () => {};
+  // Mirror the full ExtensionApi surface so activate() can register every
+  // capability the extension uses (commands, importer, exporter).
   const api = {
     registerCommand: () => { registered.push("command"); },
-    registerHook: () => { registered.push("hook"); },
+    registerParser: noop, registerPreflight: noop, registerService: noop,
+    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
+    registerMigration: noop, registerRenderer: noop,
     registerImporter: () => { registered.push("importer"); },
-    registerSchema: () => { registered.push("schema"); },
-    registerRenderer: () => { registered.push("renderer"); },
-    registerSearchProvider: () => { registered.push("search"); },
-    registerPreflight: () => { registered.push("preflight"); },
-    registerService: () => { registered.push("service"); },
+    registerExporter: () => { registered.push("exporter"); },
+    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
+    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
   };
   extension.activate(api as any);
-  assert.ok(registered.length > 0, `extension should register at least one capability, got: ${JSON.stringify(registered)}`);
+  assert.ok(registered.includes("importer"), "should register the csv importer");
+  assert.ok(registered.includes("exporter"), "should register the csv exporter");
 });
