@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026.6.2-1 - 2026-06-02
+## 2026.6.4 - 2026-06-03
+
+### Other
+
+- Import row-filtering \(--status/--type/--priority\) and custom-field export discovery \(--all-fields\) ([pm-csv-dk6h](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-dk6h.toon))
+
+## 2026.06.02-1 - 2026-06-02
 
 ### Added
 
