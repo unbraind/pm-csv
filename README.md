@@ -46,7 +46,24 @@ pm csv import items.csv --dry-run
 | `--key <field>` | string | — | Dedup key column: a re-import **updates** the matching item instead of creating a duplicate |
 | `--encoding <enc>` | string | `utf-8` | Source file encoding: `utf-8` \| `utf16le` \| `latin1` |
 | `--source <label>` | string | — | Record an import-provenance label in the `csv_source` field of created/updated items |
+| `--status <filter>` | string | — | Import **only** rows whose (normalized) status matches; non-matching rows are skipped |
+| `--type <type>` | string | — | Import **only** rows whose type matches (case-insensitive) |
+| `--priority <n>` | integer | — | Import **only** rows whose integer priority equals this value |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
+
+#### Row filtering on import
+
+`--status`, `--type` and `--priority` filter the CSV rows **before** any items
+are created — non-matching rows are skipped, never written. They mirror the
+`csv export` filter semantics exactly (status is normalized through the same
+alias table, so `--status open` matches a row whose status cell is `todo`).
+Multiple criteria are ANDed. The result reports how many rows were filtered out:
+
+```
+pm csv import tasks.csv --status open               # import open rows only
+pm csv import tasks.csv --type Feature --priority 1 # AND: Feature *and* priority 1
+# → Imported 1, updated 0, skipped 5 (5 filtered out).
+```
 
 **Required column:** `title`
 
@@ -102,13 +119,33 @@ pm csv export --excel --output for-excel.csv
 | `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
 | `--status <status>` | string | — | Filter: `open` \| `in_progress` \| `blocked` \| `closed` \| `canceled` \| `draft` |
 | `--type <type>` | string | — | Filter by item type |
-| `--columns <list>` | string | all | Comma-separated columns to export, in order |
+| `--columns <list>` | string | all | Comma-separated columns to export, in order (custom fields selectable when `--all-fields` is set) |
+| `--all-fields` | boolean | false | Discover custom item fields registered in the workspace schema and append them as columns |
+| `--discover-fields` | boolean | false | Alias for `--all-fields` |
 | `--no-header` | boolean | false | Omit the CSV header row |
 | `--crlf` | boolean | false | Use CRLF line endings (RFC-4180 / Excel) |
 | `--excel` | boolean | false | Excel-friendly output: CRLF line endings **and** a UTF-8 BOM prefix |
 
 **Export columns (fixed order):**
 `id, title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by, csv_source, created_at, updated_at`
+
+#### Custom-field discovery (`--all-fields`)
+
+By default only the built-in columns above are exported. `--all-fields` (alias
+`--discover-fields`) discovers any **custom item fields** registered in the
+workspace runtime schema and appends them as extra columns — the default column
+set is otherwise unchanged, so the flag is strictly additive.
+
+Discovery reads the same inputs the SDK's `resolveRuntimeFieldRegistry` consumes
+(the workspace `settings.json` `schema.fields` plus the file it points at via
+`schema.files.fields`, default `schema/fields.json`). A standalone-installed
+extension only loads its own `dist/`, so the SDK function isn't importable at
+runtime; reading its inputs directly is the runtime-safe equivalent.
+
+```bash
+pm csv export --all-fields --output full.csv
+# header gains your custom columns, e.g. …,updated_at,story_points,team
+```
 
 ---
 

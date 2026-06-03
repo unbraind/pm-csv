@@ -97,6 +97,50 @@ declare function stringifyTags(tags: string[] | undefined): string;
  * BufferEncoding. Accepts utf-8/utf8, utf16le, latin1. Throws USAGE otherwise.
  */
 declare function resolveEncoding(raw: string | undefined): SupportedEncoding;
+/**
+ * Row-level import filter. Mirrors the `csv export` filter semantics exactly:
+ *   - `status` matches the row's *normalized* SDK status (so `done` matches
+ *     `--status closed`, just like export filters on the stored status).
+ *   - `type` matches the row's raw `type` value case-insensitively.
+ *   - `priority` matches the row's parsed integer priority.
+ * Any unset criterion is a wildcard. Rows that fail are skipped (not imported)
+ * and counted in the result's `skipped` total.
+ */
+interface ImportRowFilter {
+    status?: ItemStatus;
+    type?: string;
+    priority?: number;
+}
+interface ParsedRow {
+    title: string;
+    status: ItemStatus;
+    priority?: number;
+    tags: string[];
+    type?: string;
+    deadline?: string;
+    body?: string;
+    parent?: string;
+    assignee?: string;
+    sprint?: string;
+    release?: string;
+    blocked_by?: string;
+}
+/**
+ * Parse the `--status`/`--type`/`--priority` import filter flags into a
+ * normalized {@link ImportRowFilter}. Mirrors export filter semantics:
+ *   - status is normalized through {@link normalizeStatus} so the same alias
+ *     vocabulary as a CSV `status` cell applies (e.g. `--status done` matches
+ *     rows whose status normalizes to `closed`).
+ *   - priority must be an integer; a non-integer is a USAGE error.
+ *   - type is matched case-insensitively (lower-cased here and at compare time).
+ * Returns `undefined` when no filter flag is set (the common no-filter path).
+ */
+declare function parseImportFilter(statusRaw: string | undefined, typeRaw: string | undefined, priorityRaw: string | undefined): ImportRowFilter | undefined;
+/**
+ * Pure predicate: does a parsed row satisfy every set filter criterion?
+ * Unset criteria are wildcards. Exposed for unit testing.
+ */
+declare function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): boolean;
 interface CsvValidateReport {
     ok: boolean;
     rowCount: number;
@@ -113,12 +157,40 @@ interface CsvValidateReport {
  * side-effect-free so it can be unit tested directly.
  */
 declare function validateParsedCSV(rawHeaders: string[], dataRows: string[][], fieldMap: Record<string, string>): CsvValidateReport;
-declare function selectExportColumns(spec: string | undefined): Array<keyof PmItem>;
+/**
+ * A custom (workspace-registered) item field discovered from the runtime
+ * schema. `key` is the human-facing column name; `metadataKey` is the property
+ * name the value is stored under on the item JSON (usually identical).
+ */
+interface DiscoveredField {
+    key: string;
+    metadataKey: string;
+}
+/**
+ * Discover custom item fields registered in the workspace runtime schema and
+ * return those that are NOT already covered by the built-in export columns
+ * (or the provenance `csv_source` column).
+ *
+ * This is the standalone-extension-safe equivalent of the SDK's
+ * `resolveRuntimeFieldRegistry(settings.schema)`: a standalone-installed
+ * extension only loads its own `dist/`, so `@unbrained/pm-cli` is not
+ * resolvable at runtime and the SDK function cannot be imported. We instead
+ * read the very same inputs that function consumes — the workspace
+ * `settings.json` `schema.fields` plus the file it points at
+ * (`schema.files.fields`, default `schema/fields.json`) — and merge them by
+ * field key. The shape matches the SDK `RuntimeFieldDefinition` type.
+ *
+ * Never throws: any read/parse problem yields an empty list so export still
+ * works on hosts without a runtime field schema.
+ */
+declare function discoverCustomFields(pmRoot: string): DiscoveredField[];
+declare function selectExportColumns(spec: string | undefined, extraValid?: ReadonlyArray<string>): string[];
 declare const _default: {
     name: string;
     version: string;
     activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
 };
 export default _default;
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export type { ParsedRow, ImportRowFilter, DiscoveredField };
 //# sourceMappingURL=index.d.ts.map

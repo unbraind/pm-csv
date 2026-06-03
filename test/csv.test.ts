@@ -18,9 +18,16 @@ import {
   selectExportColumns,
   resolveEncoding,
   validateParsedCSV,
+  parseImportFilter,
+  rowMatchesFilter,
+  discoverCustomFields,
   EXPORT_COLUMNS,
   IMPORT_COLUMNS,
 } from "../dist/index.js";
+
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // RFC-4180 parsing
@@ -343,4 +350,176 @@ test("validateParsedCSV: empty CSV is a structural failure", () => {
   const report = validateParsedCSV([], [], {});
   assert.equal(report.ok, false);
   assert.ok(report.issues.some((i) => /empty/i.test(i)));
+});
+
+// ---------------------------------------------------------------------------
+// Import row-filtering (parseImportFilter + rowMatchesFilter)
+// ---------------------------------------------------------------------------
+
+function makeRow(over: Partial<Record<string, unknown>> = {}): any {
+  return {
+    title: "T",
+    status: "open",
+    priority: undefined,
+    tags: [],
+    type: undefined,
+    deadline: undefined,
+    body: undefined,
+    ...over,
+  };
+}
+
+test("parseImportFilter: no flags returns undefined (no-filter fast path)", () => {
+  assert.equal(parseImportFilter(undefined, undefined, undefined), undefined);
+  assert.equal(parseImportFilter("", "  ", ""), undefined);
+});
+
+test("parseImportFilter: status is normalized like a CSV status cell", () => {
+  // 'done' normalizes to 'closed' — same alias vocabulary as the importer.
+  assert.deepEqual(parseImportFilter("done", undefined, undefined), { status: "closed", type: undefined, priority: undefined });
+  assert.deepEqual(parseImportFilter("in progress", undefined, undefined), { status: "in_progress", type: undefined, priority: undefined });
+});
+
+test("parseImportFilter: type is lower-cased; priority parsed as int", () => {
+  assert.deepEqual(parseImportFilter(undefined, "Feature", "1"), { status: undefined, type: "feature", priority: 1 });
+});
+
+test("parseImportFilter: non-integer priority is a usage error", () => {
+  assert.throws(() => parseImportFilter(undefined, undefined, "high"), /Invalid --priority/);
+});
+
+test("rowMatchesFilter: undefined filter matches every row", () => {
+  assert.equal(rowMatchesFilter(makeRow(), undefined), true);
+});
+
+test("rowMatchesFilter: status criterion skips non-matching rows", () => {
+  const filter = parseImportFilter("open", undefined, undefined);
+  assert.equal(rowMatchesFilter(makeRow({ status: "open" }), filter), true);
+  assert.equal(rowMatchesFilter(makeRow({ status: "closed" }), filter), false);
+});
+
+test("rowMatchesFilter: type is matched case-insensitively", () => {
+  const filter = parseImportFilter(undefined, "Feature", undefined);
+  assert.equal(rowMatchesFilter(makeRow({ type: "feature" }), filter), true);
+  assert.equal(rowMatchesFilter(makeRow({ type: "FEATURE" }), filter), true);
+  assert.equal(rowMatchesFilter(makeRow({ type: "Task" }), filter), false);
+  assert.equal(rowMatchesFilter(makeRow({ type: undefined }), filter), false);
+});
+
+test("rowMatchesFilter: priority criterion requires an exact integer match", () => {
+  const filter = parseImportFilter(undefined, undefined, "2");
+  assert.equal(rowMatchesFilter(makeRow({ priority: 2 }), filter), true);
+  assert.equal(rowMatchesFilter(makeRow({ priority: 3 }), filter), false);
+  assert.equal(rowMatchesFilter(makeRow({ priority: undefined }), filter), false);
+});
+
+test("rowMatchesFilter: combined criteria are ANDed together", () => {
+  const filter = parseImportFilter("open", "Feature", "1");
+  assert.equal(rowMatchesFilter(makeRow({ status: "open", type: "feature", priority: 1 }), filter), true);
+  // matches type+priority but wrong status → skipped
+  assert.equal(rowMatchesFilter(makeRow({ status: "closed", type: "feature", priority: 1 }), filter), false);
+});
+
+// ---------------------------------------------------------------------------
+// Custom-field discovery on export (discoverCustomFields)
+// ---------------------------------------------------------------------------
+
+function makeWorkspace(setup: (root: string) => void): string {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-test-"));
+  setup(root);
+  return root;
+}
+
+test("discoverCustomFields: no workspace settings → empty list (never throws)", () => {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-test-"));
+  try {
+    assert.deepEqual(discoverCustomFields(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverCustomFields: reads file-backed schema/fields.json", () => {
+  const root = makeWorkspace((r) => {
+    writeFileSync(join(r, "settings.json"), JSON.stringify({ schema: { files: { fields: "schema/fields.json" }, fields: [] } }));
+    mkdirSync(join(r, "schema"));
+    writeFileSync(
+      join(r, "schema", "fields.json"),
+      JSON.stringify({
+        fields: [
+          { key: "story_points", metadata_key: "story_points", type: "number" },
+          { key: "team", metadata_key: "team", type: "string" },
+        ],
+      }),
+    );
+  });
+  try {
+    const found = discoverCustomFields(root);
+    assert.deepEqual(found, [
+      { key: "story_points", metadataKey: "story_points" },
+      { key: "team", metadataKey: "team" },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverCustomFields: built-in columns and csv_source are excluded", () => {
+  const root = makeWorkspace((r) => {
+    writeFileSync(
+      join(r, "settings.json"),
+      JSON.stringify({
+        schema: {
+          files: {},
+          fields: [
+            { key: "title" },        // built-in → excluded
+            { key: "csv_source" },   // provenance column → excluded
+            { key: "epic_link", metadata_key: "epic_link" },
+          ],
+        },
+      }),
+    );
+  });
+  try {
+    assert.deepEqual(discoverCustomFields(root), [{ key: "epic_link", metadataKey: "epic_link" }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverCustomFields: falls back to metadata key, then key, for the stored property", () => {
+  const root = makeWorkspace((r) => {
+    writeFileSync(
+      join(r, "settings.json"),
+      JSON.stringify({
+        schema: {
+          files: {},
+          fields: [
+            { key: "points" }, // no metadata_key → property is the key itself
+            { key: "sev", front_matter_key: "severity" }, // legacy front_matter_key honored
+          ],
+        },
+      }),
+    );
+  });
+  try {
+    assert.deepEqual(discoverCustomFields(root), [
+      { key: "points", metadataKey: "points" },
+      { key: "sev", metadataKey: "severity" },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// selectExportColumns: discovered custom fields are selectable via --columns
+// ---------------------------------------------------------------------------
+
+test("selectExportColumns: extraValid lets a custom field be selected", () => {
+  assert.deepEqual(selectExportColumns("title,story_points", ["story_points"]), ["title", "story_points"]);
+});
+
+test("selectExportColumns: unknown column still rejected with custom fields present", () => {
+  assert.throws(() => selectExportColumns("title,nope", ["story_points"]), /Unknown export column/);
 });

@@ -1,0 +1,12 @@
+id: pm-csv-dk6h
+title: Import row-filtering (--status/--type/--priority) and custom-field export discovery (--all-fields)
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-06-03T23:40:24.625Z"
+updated_at: "2026-06-03T23:40:41.401Z"
+author: codex
+close_reason: "Shipped in 2026.6.4: import row-filtering + custom-field export discovery; tested + documented"
+body: ""

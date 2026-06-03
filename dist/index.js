@@ -388,6 +388,47 @@ function rowFields(headers, row) {
     };
 }
 /**
+ * Parse the `--status`/`--type`/`--priority` import filter flags into a
+ * normalized {@link ImportRowFilter}. Mirrors export filter semantics:
+ *   - status is normalized through {@link normalizeStatus} so the same alias
+ *     vocabulary as a CSV `status` cell applies (e.g. `--status done` matches
+ *     rows whose status normalizes to `closed`).
+ *   - priority must be an integer; a non-integer is a USAGE error.
+ *   - type is matched case-insensitively (lower-cased here and at compare time).
+ * Returns `undefined` when no filter flag is set (the common no-filter path).
+ */
+function parseImportFilter(statusRaw, typeRaw, priorityRaw) {
+    const status = statusRaw && statusRaw.trim() ? normalizeStatus(statusRaw) : undefined;
+    const type = typeRaw && typeRaw.trim() ? typeRaw.trim().toLowerCase() : undefined;
+    let priority;
+    if (priorityRaw !== undefined && priorityRaw.trim() !== "") {
+        const n = Number(priorityRaw.trim());
+        if (!Number.isInteger(n)) {
+            throw new CommandError(`Invalid --priority filter '${priorityRaw}'; expected an integer.`, EXIT_CODE.USAGE);
+        }
+        priority = n;
+    }
+    if (status === undefined && type === undefined && priority === undefined) {
+        return undefined;
+    }
+    return { status, type, priority };
+}
+/**
+ * Pure predicate: does a parsed row satisfy every set filter criterion?
+ * Unset criteria are wildcards. Exposed for unit testing.
+ */
+function rowMatchesFilter(row, filter) {
+    if (!filter)
+        return true;
+    if (filter.status !== undefined && row.status !== filter.status)
+        return false;
+    if (filter.type !== undefined && (row.type ?? "").toLowerCase() !== filter.type)
+        return false;
+    if (filter.priority !== undefined && row.priority !== filter.priority)
+        return false;
+    return true;
+}
+/**
  * List existing items once and build a lookup from csv-key provenance value to
  * item id, for idempotent upsert.
  */
@@ -417,7 +458,7 @@ function loadKeyIndex(pmRoot) {
 }
 function importCSV(pmRoot, filePath, opts) {
     const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8");
-    const result = { imported: 0, updated: 0, skipped: 0, errors: [], previews: [] };
+    const result = { imported: 0, updated: 0, skipped: 0, filtered: 0, errors: [], previews: [] };
     if (rawHeaders.length === 0)
         return result;
     const headers = applyFieldMap(rawHeaders, opts.fieldMap);
@@ -437,6 +478,13 @@ function importCSV(pmRoot, filePath, opts) {
             const msg = `Row ${lineNo}: skipping — 'title' is empty`;
             console.error(msg);
             result.skipped++;
+            continue;
+        }
+        // Row-level filter (mirrors export filter semantics): skip non-matching
+        // rows BEFORE any create/update so they never become pm items.
+        if (!rowMatchesFilter(parsed, opts.filter)) {
+            result.skipped++;
+            result.filtered++;
             continue;
         }
         const keyValue = opts.keyField ? get(opts.keyField) : "";
@@ -627,19 +675,111 @@ function validateParsedCSV(rawHeaders, dataRows, fieldMap) {
         issues,
     };
 }
+/**
+ * Discover custom item fields registered in the workspace runtime schema and
+ * return those that are NOT already covered by the built-in export columns
+ * (or the provenance `csv_source` column).
+ *
+ * This is the standalone-extension-safe equivalent of the SDK's
+ * `resolveRuntimeFieldRegistry(settings.schema)`: a standalone-installed
+ * extension only loads its own `dist/`, so `@unbrained/pm-cli` is not
+ * resolvable at runtime and the SDK function cannot be imported. We instead
+ * read the very same inputs that function consumes — the workspace
+ * `settings.json` `schema.fields` plus the file it points at
+ * (`schema.files.fields`, default `schema/fields.json`) — and merge them by
+ * field key. The shape matches the SDK `RuntimeFieldDefinition` type.
+ *
+ * Never throws: any read/parse problem yields an empty list so export still
+ * works on hosts without a runtime field schema.
+ */
+function discoverCustomFields(pmRoot) {
+    const builtin = new Set(EXPORT_COLUMNS);
+    const byKey = new Map();
+    const collect = (fields) => {
+        if (!Array.isArray(fields))
+            return;
+        for (const raw of fields) {
+            if (!raw || typeof raw !== "object")
+                continue;
+            const def = raw;
+            const key = typeof def.key === "string" ? def.key.trim() : "";
+            if (!key || builtin.has(key))
+                continue;
+            const metadataKey = (typeof def.metadata_key === "string" && def.metadata_key.trim()) ||
+                (typeof def.front_matter_key === "string" && def.front_matter_key.trim()) ||
+                key;
+            if (!byKey.has(key))
+                byKey.set(key, { key, metadataKey });
+        }
+    };
+    let settings = {};
+    try {
+        settings = JSON.parse(readFileSync(resolve(pmRoot, "settings.json"), "utf-8"));
+    }
+    catch {
+        return [];
+    }
+    const schema = (settings["schema"] ?? {});
+    // Inline fields declared directly in settings.json.
+    collect(schema["fields"]);
+    // File-backed fields (schema.files.fields, default schema/fields.json) — the
+    // path the CLI scaffolds and the SDK loader reads.
+    const files = (schema["files"] ?? {});
+    const fieldsPath = typeof files["fields"] === "string" && files["fields"].trim()
+        ? files["fields"]
+        : "schema/fields.json";
+    try {
+        const fileJson = JSON.parse(readFileSync(resolve(pmRoot, fieldsPath), "utf-8"));
+        collect(fileJson?.fields);
+    }
+    catch {
+        // No file / unreadable / unparsable — inline fields (if any) still apply.
+    }
+    return [...byKey.values()];
+}
 // Parse a `--columns id,title,status` spec into a validated, ordered subset of
 // the export columns. Unknown column names throw a USAGE error; an empty/absent
-// spec falls back to the full default column set.
-function selectExportColumns(spec) {
+// spec falls back to the full default column set. `extraValid` lets discovered
+// custom-field keys be selected explicitly via --columns alongside --all-fields.
+function selectExportColumns(spec, extraValid = []) {
     if (!spec || !spec.trim())
-        return EXPORT_COLUMNS;
+        return [...EXPORT_COLUMNS];
     const requested = spec.split(",").map((s) => s.trim()).filter(Boolean);
-    const valid = new Set(EXPORT_COLUMNS);
+    const valid = new Set([...EXPORT_COLUMNS, ...extraValid]);
     const unknown = requested.filter((c) => !valid.has(c));
     if (unknown.length > 0) {
-        throw new CommandError(`Unknown export column(s): ${unknown.join(", ")}. Valid: ${EXPORT_COLUMNS.join(", ")}`, EXIT_CODE.USAGE);
+        const validList = [...EXPORT_COLUMNS, ...extraValid].join(", ");
+        throw new CommandError(`Unknown export column(s): ${unknown.join(", ")}. Valid: ${validList}`, EXIT_CODE.USAGE);
     }
     return requested;
+}
+/**
+ * Resolve the effective export column list (and the column→property remap for
+ * custom fields) shared by `csv export` and the `csv-export` exporter.
+ *
+ * - With no `--columns` and no discovery, returns the default built-in set.
+ * - With `discover` set, appends every discovered custom field key not already
+ *   present (default column set otherwise unchanged — strictly additive).
+ * - With `--columns`, the explicit, ordered selection wins; discovered custom
+ *   field keys become selectable names too.
+ */
+function resolveExportColumns(pmRoot, columnsSpec, discover) {
+    const discovered = discover ? discoverCustomFields(pmRoot) : [];
+    const columnSource = {};
+    for (const f of discovered) {
+        if (f.key !== f.metadataKey)
+            columnSource[f.key] = f.metadataKey;
+    }
+    if (columnsSpec && columnsSpec.trim()) {
+        const columns = selectExportColumns(columnsSpec, discovered.map((f) => f.key));
+        return { columns, columnSource };
+    }
+    const columns = [...EXPORT_COLUMNS];
+    for (const f of discovered) {
+        if (!columns.includes(f.key))
+            columns.push(f.key);
+    }
+    return { columns, columnSource };
 }
 function buildCsvExport(pmRoot, opts) {
     const result = spawnSync("pm", ["--path", pmRoot, "list-all", "--json", "--include-body"], { encoding: "utf-8" });
@@ -658,7 +798,8 @@ function buildCsvExport(pmRoot, opts) {
             item.csv_source = decodeKeyTagValue(sourceTag.slice(SOURCE_TAG_PREFIX.length));
     }
     const dataRows = items.map((item) => opts.columns.map((col) => {
-        const val = item[col];
+        const prop = opts.columnSource?.[col] ?? col;
+        const val = item[prop];
         if (val === undefined || val === null)
             return "";
         if (Array.isArray(val)) {
@@ -684,7 +825,7 @@ function buildCsvExport(pmRoot, opts) {
 }
 export default defineExtension({
     name: "pm-csv",
-    version: "2026.6.2-1",
+    version: "2026.6.4",
     activate(api) {
         // -----------------------------------------------------------------------
         // Schema: register an optional `csv_source` provenance field so imported
@@ -718,8 +859,9 @@ export default defineExtension({
                 "embedded newlines, escaped quotes, BOM, CRLF). Expected columns: title, type, " +
                 "status, priority, tags, deadline, body, parent, assignee, sprint, release, " +
                 "blocked_by. Only 'title' is required. Use --map to remap arbitrary headers, " +
-                "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, and " +
-                "--source to record import provenance in the csv_source field.",
+                "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, " +
+                "--source to record import provenance in the csv_source field, and " +
+                "--status/--type/--priority to import only matching rows (others are skipped).",
             intent: "import items from a CSV file into pm",
             examples: [
                 "pm csv import tasks.csv",
@@ -729,6 +871,8 @@ export default defineExtension({
                 "pm csv import items.csv --key title   # idempotent re-import (no duplicates)",
                 "pm csv import legacy.csv --encoding latin1",
                 "pm csv import sprint12.csv --source 'jira-export-2026-06'",
+                "pm csv import tasks.csv --status open          # import only open rows",
+                "pm csv import tasks.csv --type Feature --priority 1",
                 "pm csv import items.csv --dry-run",
             ],
             flags: [
@@ -737,12 +881,15 @@ export default defineExtension({
                 { long: "--key", value_name: "field", description: "Dedup key column: re-import updates the matching item instead of creating a duplicate" },
                 { long: "--encoding", value_name: "enc", description: "Source file encoding: utf-8 (default) | utf16le | latin1" },
                 { long: "--source", value_name: "label", description: "Record an import-provenance label in the csv_source field of created/updated items" },
+                { long: "--status", value_name: "filter", description: "Import only rows whose (normalized) status matches: open | in_progress | blocked | closed | canceled | draft" },
+                { long: "--type", value_name: "type", description: "Import only rows whose type matches (case-insensitive)" },
+                { long: "--priority", value_name: "n", description: "Import only rows whose integer priority equals this value" },
                 { long: "--dry-run", description: "Preview without writing" },
             ],
             async run(ctx) {
                 const filePath = ctx.args[0];
                 if (!filePath) {
-                    throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--map col=field] [--key field] [--encoding enc] [--source label] [--dry-run]", EXIT_CODE.USAGE);
+                    throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--map col=field] [--key field] [--encoding enc] [--source label] [--status s] [--type t] [--priority n] [--dry-run]", EXIT_CODE.USAGE);
                 }
                 const delimiter = resolveDelimiter(ctx.options["delimiter"]);
                 const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
@@ -750,11 +897,12 @@ export default defineExtension({
                 const keyField = (ctx.options["key"] ?? "").trim().toLowerCase() || undefined;
                 const encoding = resolveEncoding(ctx.options["encoding"]);
                 const source = (ctx.options["source"] ?? "").trim() || undefined;
+                const filter = parseImportFilter(ctx.options["status"], ctx.options["type"], ctx.options["priority"]);
                 const absolutePath = resolve(filePath);
                 console.error(`Reading CSV from: ${absolutePath}`);
                 let res;
                 try {
-                    res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, keyField, encoding, source });
+                    res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, keyField, encoding, source, filter });
                 }
                 catch (err) {
                     if (err instanceof CommandError)
@@ -763,18 +911,20 @@ export default defineExtension({
                     const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
                     throw new CommandError(`Failed to import: ${msg}`, exitCode);
                 }
+                const filterNote = res.filtered > 0 ? ` (${res.filtered} filtered out)` : "";
                 if (dryRun) {
-                    console.error(`[dry-run] Would create ${res.imported}, update ${res.updated}, skip ${res.skipped}.`);
+                    console.error(`[dry-run] Would create ${res.imported}, update ${res.updated}, skip ${res.skipped}${filterNote}.`);
                     return {
                         dryRun: true,
                         wouldCreate: res.imported,
                         wouldUpdate: res.updated,
                         wouldSkip: res.skipped,
+                        filtered: res.filtered,
                         previews: res.previews,
                     };
                 }
-                console.error(`Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}.`);
-                return { imported: res.imported, updated: res.updated, skipped: res.skipped, errors: res.errors };
+                console.error(`Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`);
+                return { imported: res.imported, updated: res.updated, skipped: res.skipped, filtered: res.filtered, errors: res.errors };
             },
         });
         // -----------------------------------------------------------------------
@@ -856,6 +1006,7 @@ export default defineExtension({
                 "pm csv export --output backlog.csv --delimiter ';'",
                 "pm csv export --status open --output todos.csv",
                 "pm csv export --type Feature --output features.csv",
+                "pm csv export --all-fields --output full.csv   # include custom workspace fields",
                 "pm csv export --excel --output for-excel.csv",
             ],
             flags: [
@@ -863,7 +1014,9 @@ export default defineExtension({
                 { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
                 { long: "--status", value_name: "filter", description: "Filter by status: open | in_progress | blocked | closed | canceled | draft" },
                 { long: "--type", value_name: "type", description: "Filter by item type" },
-                { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")}` },
+                { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")} (plus any discovered custom fields)` },
+                { long: "--all-fields", description: "Discover custom item fields registered in the workspace schema and append them as columns" },
+                { long: "--discover-fields", description: "Alias for --all-fields" },
                 { long: "--no-header", description: "Omit the CSV header row" },
                 { long: "--crlf", description: "Use CRLF line endings (RFC-4180 / Excel)" },
                 { long: "--excel", description: "Excel-friendly output: CRLF line endings + a UTF-8 BOM prefix" },
@@ -871,7 +1024,8 @@ export default defineExtension({
             async run(ctx) {
                 const delimiter = resolveDelimiter(ctx.options["delimiter"]);
                 const outputPath = ctx.options["output"];
-                const columns = selectExportColumns(ctx.options["columns"]);
+                const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
+                const { columns, columnSource } = resolveExportColumns(ctx.pm_root, ctx.options["columns"], discover);
                 const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
                 const crlf = readBoolOption(ctx.options, "crlf");
                 const excel = readBoolOption(ctx.options, "excel");
@@ -881,6 +1035,7 @@ export default defineExtension({
                     typeFilter: ctx.options["type"],
                     delimiter,
                     columns,
+                    columnSource,
                     noHeader,
                     crlf,
                     excel,
@@ -907,7 +1062,8 @@ export default defineExtension({
         api.registerExporter("csv-export", async (ctx) => {
             const delimiter = resolveDelimiter(ctx.options["delimiter"]);
             const outputPath = ctx.options["output"];
-            const columns = selectExportColumns(ctx.options["columns"]);
+            const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
+            const { columns, columnSource } = resolveExportColumns(ctx.pm_root, ctx.options["columns"], discover);
             const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
             const crlf = readBoolOption(ctx.options, "crlf");
             const excel = readBoolOption(ctx.options, "excel");
@@ -916,6 +1072,7 @@ export default defineExtension({
                 typeFilter: ctx.options["type"],
                 delimiter,
                 columns,
+                columnSource,
                 noHeader,
                 crlf,
                 excel,
@@ -943,23 +1100,25 @@ export default defineExtension({
             const keyField = (ctx.options["key"] ?? "").trim().toLowerCase() || undefined;
             const encoding = resolveEncoding(ctx.options["encoding"]);
             const source = (ctx.options["source"] ?? "").trim() || undefined;
+            const filter = parseImportFilter(ctx.options["status"], ctx.options["type"], ctx.options["priority"]);
             const absolutePath = resolve(filePath);
             console.error(`csv-import: reading ${absolutePath}`);
             let res;
             try {
-                res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, keyField, encoding, source });
+                res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, keyField, encoding, source, filter });
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`csv-import: failed — ${msg}`);
                 return;
             }
-            console.error(`csv-import: done — imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}.`);
+            const filterNote = res.filtered > 0 ? ` (${res.filtered} filtered out)` : "";
+            console.error(`csv-import: done — imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`);
         });
     },
 });
 // ---------------------------------------------------------------------------
 // Named exports — pure helpers exposed for unit testing (no side effects).
 // ---------------------------------------------------------------------------
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
 //# sourceMappingURL=index.js.map
