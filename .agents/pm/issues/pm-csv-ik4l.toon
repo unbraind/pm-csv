@@ -1,0 +1,11 @@
+id: pm-csv-ik4l
+title: "Fix --no-header: host rejects bare --no- flag as negation of missing --header"
+description: "pm csv export --no-header (and csv-export export --no-header) failed with 'Unknown option --header' / silently ignored, because the pm host parses --no-X as the negation of a registered --X flag. The export command declared a bare { long: '--no-header' } which the host never matched. Fix: declare the positive --header flag (host now accepts --no-header as its negation, setting header=false) and read ctx.options.header===false in both the command and exporter-capability paths. Added a regression test asserting the export command declares --header not --no-header. Verified end-to-end: --no-header omits the header row, default keeps it; 59/59 tests pass."
+type: Issue
+status: open
+priority: 2
+tags: []
+created_at: "2026-06-04T23:11:36.126Z"
+updated_at: "2026-06-04T23:11:36.126Z"
+author: codex
+body: ""
