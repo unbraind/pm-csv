@@ -39,6 +39,30 @@ test("extension registers at least one capability", () => {
   );
 });
 
+test("csv export declares --header (not a bare --no-header the host rejects)", () => {
+  // Regression: a bare `{ long: "--no-header" }` flag is unusable because the
+  // host parses `--no-header` as the negation of a (missing) `--header` flag
+  // ("Unknown option '--header'"). The export command must declare the positive
+  // `--header` flag so the host accepts `--no-header` as its negation.
+  const commands: any[] = [];
+  const noop = () => {};
+  const api = {
+    registerCommand: (def: any) => { commands.push(def); },
+    registerParser: noop, registerPreflight: noop, registerService: noop,
+    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
+    registerMigration: noop, registerRenderer: noop,
+    registerImporter: noop, registerExporter: noop,
+    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
+    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
+  };
+  extension.activate(api as any);
+  const exportCmd = commands.find((c) => c.name === "csv export");
+  assert.ok(exportCmd, "csv export command should be registered");
+  const longs = (exportCmd.flags ?? []).map((f: any) => f.long);
+  assert.ok(longs.includes("--header"), "csv export should declare the positive --header flag");
+  assert.ok(!longs.includes("--no-header"), "csv export must not declare a bare --no-header flag (host rejects it)");
+});
+
 test("activate degrades gracefully when registerItemFields is absent", () => {
   const registered: string[] = [];
   const noop = () => {};

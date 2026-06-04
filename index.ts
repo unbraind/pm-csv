@@ -263,6 +263,18 @@ function readBoolOption(options: Record<string, unknown>, ...keys: string[]): bo
 }
 
 /**
+ * Whether the CSV header row should be omitted. The host parses `--no-header`
+ * as the negation of the registered positive `--header` flag (setting
+ * `header=false`); the literal `no-header`/`noHeader` keys are accepted as a
+ * fallback for the exporter-capability path. Precedence: an explicit
+ * `header=false` (i.e. `--no-header`) always wins. Shared by the `csv export`
+ * command and the `csv-export` exporter so the two paths can't drift.
+ */
+function readNoHeaderOption(options: Record<string, unknown>): boolean {
+  return options["header"] === false || readBoolOption(options, "no-header", "noHeader");
+}
+
+/**
  * Resolve a user-supplied delimiter, accepting friendly aliases so TSV is easy:
  *   --delimiter tab   --delimiter "\t"   --delimiter ";"
  * A literal backslash-t is interpreted as a tab.
@@ -1312,7 +1324,7 @@ export default defineExtension({
         { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")} (plus any discovered custom fields)` },
         { long: "--all-fields", description: "Discover custom item fields registered in the workspace schema and append them as columns" },
         { long: "--discover-fields", description: "Alias for --all-fields" },
-        { long: "--no-header", description: "Omit the CSV header row" },
+        { long: "--header", description: "Include the CSV header row (default: on). Pass --no-header to omit it." },
         { long: "--crlf", description: "Use CRLF line endings (RFC-4180 / Excel)" },
         { long: "--excel", description: "Excel-friendly output: CRLF line endings + a UTF-8 BOM prefix" },
       ],
@@ -1325,7 +1337,7 @@ export default defineExtension({
           ctx.options["columns"] as string | undefined,
           discover,
         );
-        const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+        const noHeader = readNoHeaderOption(ctx.options);
         const crlf = readBoolOption(ctx.options, "crlf");
         const excel = readBoolOption(ctx.options, "excel");
 
@@ -1372,7 +1384,7 @@ export default defineExtension({
         ctx.options["columns"] as string | undefined,
         discover,
       );
-      const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+      const noHeader = readNoHeaderOption(ctx.options);
       const crlf = readBoolOption(ctx.options, "crlf");
       const excel = readBoolOption(ctx.options, "excel");
 
