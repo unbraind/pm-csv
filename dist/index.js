@@ -1017,7 +1017,7 @@ export default defineExtension({
                 { long: "--columns", value_name: "list", description: `Comma-separated columns to export, in order (default: all). Valid: ${EXPORT_COLUMNS.join(", ")} (plus any discovered custom fields)` },
                 { long: "--all-fields", description: "Discover custom item fields registered in the workspace schema and append them as columns" },
                 { long: "--discover-fields", description: "Alias for --all-fields" },
-                { long: "--no-header", description: "Omit the CSV header row" },
+                { long: "--header", description: "Include the CSV header row (default: on). Pass --no-header to omit it." },
                 { long: "--crlf", description: "Use CRLF line endings (RFC-4180 / Excel)" },
                 { long: "--excel", description: "Excel-friendly output: CRLF line endings + a UTF-8 BOM prefix" },
             ],
@@ -1026,7 +1026,11 @@ export default defineExtension({
                 const outputPath = ctx.options["output"];
                 const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
                 const { columns, columnSource } = resolveExportColumns(ctx.pm_root, ctx.options["columns"], discover);
-                const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+                // The host parses `--no-header` as the negation of the registered
+                // `--header` flag (sets header=false); we also accept a literal
+                // `no-header`/`noHeader` option for the exporter-capability path.
+                const noHeader = ctx.options["header"] === false ||
+                    readBoolOption(ctx.options, "no-header", "noHeader");
                 const crlf = readBoolOption(ctx.options, "crlf");
                 const excel = readBoolOption(ctx.options, "excel");
                 console.error("Fetching pm items…");
@@ -1064,7 +1068,10 @@ export default defineExtension({
             const outputPath = ctx.options["output"];
             const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
             const { columns, columnSource } = resolveExportColumns(ctx.pm_root, ctx.options["columns"], discover);
-            const noHeader = readBoolOption(ctx.options, "no-header", "noHeader");
+            // Accept both the host-negated `--header` (header=false) and a literal
+            // no-header/noHeader option (see the `csv export` command for details).
+            const noHeader = ctx.options["header"] === false ||
+                readBoolOption(ctx.options, "no-header", "noHeader");
             const crlf = readBoolOption(ctx.options, "crlf");
             const excel = readBoolOption(ctx.options, "excel");
             const { csvText, count } = buildCsvExport(ctx.pm_root, {
