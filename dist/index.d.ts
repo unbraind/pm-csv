@@ -147,9 +147,11 @@ interface CsvValidateReport {
     detectedColumns: string[];
     mappedColumns: string[];
     hasTitleColumn: boolean;
+    duplicateMappedColumns: string[];
     rowsMissingTitle: number;
     rowsWithUnknownStatus: number;
     rowsWithNonIntegerPriority: number;
+    rowsWithOutOfRangePriority: number;
     issues: string[];
 }
 /**
@@ -157,6 +159,7 @@ interface CsvValidateReport {
  * side-effect-free so it can be unit tested directly.
  */
 declare function validateParsedCSV(rawHeaders: string[], dataRows: string[][], fieldMap: Record<string, string>): CsvValidateReport;
+declare function strictValidationIssues(report: CsvValidateReport): string[];
 /**
  * A custom (workspace-registered) item field discovered from the runtime
  * schema. `key` is the human-facing column name; `metadataKey` is the property
@@ -191,6 +194,6 @@ declare const _default: {
     activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
 };
 export default _default;
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
 export type { ParsedRow, ImportRowFilter, DiscoveredField };
 //# sourceMappingURL=index.d.ts.map
