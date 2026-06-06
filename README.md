@@ -34,6 +34,7 @@ pm csv import jira.csv --map 'Summary=title,Owner=assignee'
 pm csv import items.csv --key title         # idempotent re-import (no duplicates)
 pm csv import legacy.csv --encoding latin1  # non-UTF-8 source
 pm csv import sprint12.csv --source 'jira-export-2026-06'
+pm csv import vendor.csv --strict       # fail before writing on bad row data
 pm csv import items.csv --dry-run
 ```
 
@@ -49,7 +50,17 @@ pm csv import items.csv --dry-run
 | `--status <filter>` | string | — | Import **only** rows whose (normalized) status matches; non-matching rows are skipped |
 | `--type <type>` | string | — | Import **only** rows whose type matches (case-insensitive) |
 | `--priority <n>` | integer | — | Import **only** rows whose integer priority equals this value |
+| `--strict` | boolean | false | Abort before writing if validation finds missing titles, unknown statuses, invalid/out-of-range priorities, or duplicate mapped columns |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
+
+#### Strict import gate
+
+Default imports remain lenient for messy spreadsheets: empty titles are skipped,
+unknown statuses fall back to `open`, and invalid priorities are ignored. Add
+`--strict` when the CSV is expected to be a production source of truth. In
+strict mode the importer runs the same parser as `pm csv validate` before any
+write, then aborts on row-level data issues or duplicate mapped columns so a bad
+file cannot partially mutate the pm store.
 
 #### Row filtering on import
 
@@ -84,8 +95,9 @@ pm csv validate data.tsv --delimiter tab --json
 ```
 
 The report includes: row count, detected columns, mapped columns (after `--map`),
-whether the required `title` column is present, and counts of rows missing a
-title, rows with an unrecognized status, and rows with a non-integer priority.
+whether the required `title` column is present, duplicate mapped columns, and
+counts of rows missing a title, rows with an unrecognized status, rows with a
+non-integer priority, and rows with a priority outside pm's `0..4` range.
 
 **Flags**
 

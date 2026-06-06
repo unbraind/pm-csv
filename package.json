@@ -37,9 +37,9 @@
     "@unbrained/pm-cli": ">=2026.5.31"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
-    "@unbrained/pm-cli": "^2026.5.31",
-    "pm-changelog": "^2026.6.2",
+    "@types/node": "^25.9.2",
+    "@unbrained/pm-cli": "^2026.6.6",
+    "pm-changelog": "^2026.6.6",
     "typescript": "^6.0.3"
   },
   "keywords": [

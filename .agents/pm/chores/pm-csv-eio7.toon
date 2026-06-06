@@ -1,0 +1,17 @@
+id: pm-csv-eio7
+title: Align package dependencies to pm CLI/SDK 2026.6.6
+description: ""
+type: Chore
+status: closed
+priority: 1
+tags[2]: dependencies,release-readiness
+created_at: "2026-06-06T18:15:55.721Z"
+updated_at: "2026-06-06T18:37:10.042Z"
+author: codex
+estimated_minutes: 30
+acceptance_criteria: package.json and lockfile use the current published pm CLI/SDK 2026.6.6; pm-changelog is current where used; local build/typecheck/test/audit/pack/changelog checks pass with realistic package data; no secrets or private data are introduced.
+resolution: Package manifest and lockfile now use pm CLI/SDK tooling 2026.6.6; changelog integration regenerated where applicable; repository-specific hygiene fixes applied without telemetry changes.
+expected_result: "release:check, npm test, production audit, pm package doctor, and real-data package smoke checks pass."
+actual_result: "Passed npm run release:check and npm test for all 15 packages; npm audit --omit=dev found 0 vulnerabilities; combined real-data smoke workspace installed all 15 packages and exercised import/export, graph, gantt, slack, standup, presets, starters, changelog, and pm-web doctor successfully."
+close_reason: Aligned package tooling with pm CLI/SDK 2026.6.6 and verified release readiness.
+body: ""
