@@ -1,3 +1,8 @@
 node_modules/
+*.tgz
+RELEASE_NOTES.md
 
 dist-test/
+.agents/pm/locks/
+.agents/pm/runtime/
+.agents/pm/search/
