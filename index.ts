@@ -793,9 +793,11 @@ interface CsvValidateReport {
   detectedColumns: string[];
   mappedColumns: string[];
   hasTitleColumn: boolean;
+  duplicateMappedColumns: string[];
   rowsMissingTitle: number;
   rowsWithUnknownStatus: number;
   rowsWithNonIntegerPriority: number;
+  rowsWithOutOfRangePriority: number;
   issues: string[];
 }
 
@@ -829,6 +831,13 @@ function validateParsedCSV(
   let rowsMissingTitle = 0;
   let rowsWithUnknownStatus = 0;
   let rowsWithNonIntegerPriority = 0;
+  let rowsWithOutOfRangePriority = 0;
+  const seenColumns = new Set<string>();
+  const duplicateMappedColumns: string[] = [];
+  for (const col of mappedColumns) {
+    if (seenColumns.has(col) && !duplicateMappedColumns.includes(col)) duplicateMappedColumns.push(col);
+    seenColumns.add(col);
+  }
 
   const titleIdx = mappedColumns.indexOf("title");
   const statusIdx = mappedColumns.indexOf("status");
@@ -845,7 +854,12 @@ function validateParsedCSV(
     }
     if (priorityIdx >= 0) {
       const priority = (row[priorityIdx] ?? "").trim();
-      if (priority && !/^-?\d+$/.test(priority)) rowsWithNonIntegerPriority++;
+      if (priority && !/^-?\d+$/.test(priority)) {
+        rowsWithNonIntegerPriority++;
+      } else if (priority) {
+        const n = Number(priority);
+        if (n < 0 || n > 4) rowsWithOutOfRangePriority++;
+      }
     }
   }
 
@@ -857,6 +871,9 @@ function validateParsedCSV(
       `Missing required 'title' column (after --map). Detected: ${mappedColumns.join(", ") || "(none)"}`,
     );
   }
+  if (duplicateMappedColumns.length > 0) {
+    issues.push(`Duplicate mapped column(s): ${duplicateMappedColumns.join(", ")}. Use --map/--columns so each pm field appears once.`);
+  }
   if (rowsMissingTitle > 0) {
     issues.push(`${rowsMissingTitle} row(s) have an empty title and would be skipped.`);
   }
@@ -865,6 +882,9 @@ function validateParsedCSV(
   }
   if (rowsWithNonIntegerPriority > 0) {
     issues.push(`${rowsWithNonIntegerPriority} row(s) have a non-integer priority (would be ignored).`);
+  }
+  if (rowsWithOutOfRangePriority > 0) {
+    issues.push(`${rowsWithOutOfRangePriority} row(s) have a priority outside pm's 0-4 range (pm may reject them).`);
   }
 
   // Only a missing title column (or empty file) is a structural problem.
@@ -876,11 +896,37 @@ function validateParsedCSV(
     detectedColumns: rawHeaders,
     mappedColumns,
     hasTitleColumn,
+    duplicateMappedColumns,
     rowsMissingTitle,
     rowsWithUnknownStatus,
     rowsWithNonIntegerPriority,
+    rowsWithOutOfRangePriority,
     issues,
   };
+}
+
+function strictValidationIssues(report: CsvValidateReport): string[] {
+  const issues: string[] = [];
+  if (!report.ok) issues.push(...report.issues);
+  if (report.duplicateMappedColumns.length > 0) issues.push(`duplicate mapped columns: ${report.duplicateMappedColumns.join(", ")}`);
+  if (report.rowsMissingTitle > 0) issues.push(`${report.rowsMissingTitle} row(s) missing title`);
+  if (report.rowsWithUnknownStatus > 0) issues.push(`${report.rowsWithUnknownStatus} row(s) with unknown status`);
+  if (report.rowsWithNonIntegerPriority > 0) issues.push(`${report.rowsWithNonIntegerPriority} row(s) with non-integer priority`);
+  if (report.rowsWithOutOfRangePriority > 0) issues.push(`${report.rowsWithOutOfRangePriority} row(s) with out-of-range priority`);
+  return [...new Set(issues)];
+}
+
+function assertStrictImportReady(filePath: string, opts: CsvValidateOptions): CsvValidateReport {
+  const report = validateCSV(filePath, opts);
+  const strictIssues = strictValidationIssues(report);
+  if (strictIssues.length > 0) {
+    throw new CommandError(
+      `CSV strict validation failed; import aborted before any items were created:\n` +
+        strictIssues.map((issue) => `  - ${issue}`).join("\n"),
+      EXIT_CODE.USAGE,
+    );
+  }
+  return report;
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,7 +1188,8 @@ export default defineExtension({
         "blocked_by. Only 'title' is required. Use --map to remap arbitrary headers, " +
         "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, " +
         "--source to record import provenance in the csv_source field, and " +
-        "--status/--type/--priority to import only matching rows (others are skipped).",
+        "--status/--type/--priority to import only matching rows (others are skipped). " +
+        "Use --strict to fail before writing when row-level data issues are present.",
       intent: "import items from a CSV file into pm",
       examples: [
         "pm csv import tasks.csv",
@@ -1154,6 +1201,7 @@ export default defineExtension({
         "pm csv import sprint12.csv --source 'jira-export-2026-06'",
         "pm csv import tasks.csv --status open          # import only open rows",
         "pm csv import tasks.csv --type Feature --priority 1",
+        "pm csv import tasks.csv --strict",
         "pm csv import items.csv --dry-run",
       ],
       flags: [
@@ -1165,6 +1213,7 @@ export default defineExtension({
         { long: "--status", value_name: "filter", description: "Import only rows whose (normalized) status matches: open | in_progress | blocked | closed | canceled | draft" },
         { long: "--type", value_name: "type", description: "Import only rows whose type matches (case-insensitive)" },
         { long: "--priority", value_name: "n", description: "Import only rows whose integer priority equals this value" },
+        { long: "--strict", description: "Abort before writing if validation finds missing titles, unknown statuses, bad priorities, or duplicate mapped columns" },
         { long: "--dry-run", description: "Preview without writing" },
       ],
       async run(ctx) {
@@ -1182,6 +1231,7 @@ export default defineExtension({
         const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
         const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
         const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
+        const strict = readBoolOption(ctx.options, "strict");
         const filter = parseImportFilter(
           ctx.options["status"] as string | undefined,
           ctx.options["type"] as string | undefined,
@@ -1193,6 +1243,7 @@ export default defineExtension({
 
         let res: ImportResult;
         try {
+          if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding });
           res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, keyField, encoding, source, filter });
         } catch (err: unknown) {
           if (err instanceof CommandError) throw err;
@@ -1280,6 +1331,8 @@ export default defineExtension({
         console.error(`Rows missing title: ${report.rowsMissingTitle}`);
         console.error(`Rows w/ unknown status: ${report.rowsWithUnknownStatus}`);
         console.error(`Rows w/ non-integer priority: ${report.rowsWithNonIntegerPriority}`);
+        console.error(`Rows w/ out-of-range priority: ${report.rowsWithOutOfRangePriority}`);
+        console.error(`Duplicate mapped columns: ${report.duplicateMappedColumns.join(", ") || "(none)"}`);
         for (const issue of report.issues) console.error(`  - ${issue}`);
         console.error(report.ok ? "Validation OK." : "Validation FAILED (structural problems).");
 
@@ -1428,6 +1481,7 @@ export default defineExtension({
       const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
       const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
       const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
+      const strict = readBoolOption(ctx.options, "strict");
       const filter = parseImportFilter(
         ctx.options["status"] as string | undefined,
         ctx.options["type"] as string | undefined,
@@ -1439,6 +1493,7 @@ export default defineExtension({
 
       let res: ImportResult;
       try {
+        if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding });
         res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, keyField, encoding, source, filter });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1474,6 +1529,7 @@ export {
   selectExportColumns,
   resolveEncoding,
   validateParsedCSV,
+  strictValidationIssues,
   parseImportFilter,
   rowMatchesFilter,
   discoverCustomFields,

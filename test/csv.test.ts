@@ -18,6 +18,7 @@ import {
   selectExportColumns,
   resolveEncoding,
   validateParsedCSV,
+  strictValidationIssues,
   parseImportFilter,
   rowMatchesFilter,
   discoverCustomFields,
@@ -305,9 +306,11 @@ test("validateParsedCSV: clean CSV reports ok with zero issues", () => {
   assert.equal(report.ok, true);
   assert.equal(report.rowCount, 2);
   assert.equal(report.hasTitleColumn, true);
+  assert.deepEqual(report.duplicateMappedColumns, []);
   assert.equal(report.rowsMissingTitle, 0);
   assert.equal(report.rowsWithUnknownStatus, 0);
   assert.equal(report.rowsWithNonIntegerPriority, 0);
+  assert.equal(report.rowsWithOutOfRangePriority, 0);
   assert.deepEqual(report.issues, []);
 });
 
@@ -338,18 +341,49 @@ test("validateParsedCSV: counts empty titles, unknown status, non-int priority",
   assert.equal(report.rowsMissingTitle, 1);
   assert.equal(report.rowsWithUnknownStatus, 1);
   assert.equal(report.rowsWithNonIntegerPriority, 1);
+  assert.equal(report.rowsWithOutOfRangePriority, 0);
   assert.equal(report.issues.length, 3);
 });
 
-test("validateParsedCSV: negative integer priority is accepted", () => {
+test("validateParsedCSV: negative integer priority is integer but out of pm range", () => {
   const report = validateParsedCSV(["title", "priority"], [["x", "-1"]], {});
   assert.equal(report.rowsWithNonIntegerPriority, 0);
+  assert.equal(report.rowsWithOutOfRangePriority, 1);
+  assert.ok(report.issues.some((i) => /outside pm's 0-4 range/.test(i)));
 });
 
 test("validateParsedCSV: empty CSV is a structural failure", () => {
   const report = validateParsedCSV([], [], {});
   assert.equal(report.ok, false);
   assert.ok(report.issues.some((i) => /empty/i.test(i)));
+});
+
+test("validateParsedCSV: duplicate mapped columns are reported", () => {
+  const report = validateParsedCSV(["summary", "name", "status"], [["A", "B", "open"]], {
+    summary: "title",
+    name: "title",
+  });
+  assert.equal(report.ok, true, "duplicate mapped columns are data-quality issues, not structural parse failures");
+  assert.deepEqual(report.duplicateMappedColumns, ["title"]);
+  assert.ok(report.issues.some((i) => /Duplicate mapped column/.test(i)));
+});
+
+test("strictValidationIssues promotes warning-class row issues to blocking import issues", () => {
+  const report = validateParsedCSV(
+    ["title", "status", "priority"],
+    [
+      ["", "open", "1"],
+      ["Known", "mystery", "7"],
+      ["Bad priority", "open", "high"],
+    ],
+    {},
+  );
+  assert.equal(report.ok, true);
+  const issues = strictValidationIssues(report);
+  assert.ok(issues.some((i) => /missing title/.test(i)));
+  assert.ok(issues.some((i) => /unknown status/.test(i)));
+  assert.ok(issues.some((i) => /non-integer priority/.test(i)));
+  assert.ok(issues.some((i) => /out-of-range priority/.test(i)));
 });
 
 // ---------------------------------------------------------------------------
