@@ -832,6 +832,7 @@ function buildCsvExport(pmRoot, opts) {
     return {
         csvText,
         count: items.length,
+        eol,
     };
 }
 export default defineExtension({
@@ -1041,7 +1042,7 @@ export default defineExtension({
                 const crlf = readBoolOption(ctx.options, "crlf");
                 const excel = readBoolOption(ctx.options, "excel");
                 console.error("Fetching pm items…");
-                const { csvText, count } = buildCsvExport(ctx.pm_root, {
+                const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
                     statusFilter: ctx.options["status"],
                     typeFilter: ctx.options["type"],
                     delimiter,
@@ -1057,7 +1058,9 @@ export default defineExtension({
                 }
                 if (outputPath) {
                     const absolutePath = resolve(outputPath);
-                    writeFileSync(absolutePath, csvText + "\n", "utf-8");
+                    // Terminate the final record with the SAME EOL used between records
+                    // so `--crlf`/`--excel` output is uniformly CRLF (no lone trailing LF).
+                    writeFileSync(absolutePath, csvText + eol, "utf-8");
                     console.error(`Exported ${count} item(s) to: ${absolutePath}`);
                     return { exported: count, file: absolutePath };
                 }
@@ -1078,7 +1081,7 @@ export default defineExtension({
             const noHeader = readNoHeaderOption(ctx.options);
             const crlf = readBoolOption(ctx.options, "crlf");
             const excel = readBoolOption(ctx.options, "excel");
-            const { csvText, count } = buildCsvExport(ctx.pm_root, {
+            const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
                 statusFilter: ctx.options["status"],
                 typeFilter: ctx.options["type"],
                 delimiter,
@@ -1090,7 +1093,8 @@ export default defineExtension({
             });
             if (outputPath) {
                 const absolutePath = resolve(outputPath);
-                writeFileSync(absolutePath, csvText + "\n", "utf-8");
+                // Match the inter-record EOL on the trailing terminator (no lone LF in --crlf/--excel).
+                writeFileSync(absolutePath, csvText + eol, "utf-8");
                 console.error(`csv-export: wrote ${count} item(s) to ${absolutePath}`);
                 return { exported: count, file: absolutePath };
             }

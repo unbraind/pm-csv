@@ -1,0 +1,12 @@
+id: pm-csv-69ln
+title: Export --excel/--crlf wrote a lone LF as the final line terminator
+description: "buildCsvExport joins records with CRLF for --excel/--crlf, but both write sites appended a hardcoded '\\n', so the FINAL record ended in a lone LF while all others ended CRLF — mixed line endings that break the strict-CRLF promise of --excel (RFC 4180 / Excel)."
+type: Issue
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-06-05T14:43:11.807Z"
+updated_at: "2026-06-05T14:43:18.302Z"
+author: codex
+acceptance_criteria: "--excel/--crlf output is uniformly CRLF incl. the trailing terminator (no lone LF); default (LF) export unchanged; build+tests green"
+body: ""
