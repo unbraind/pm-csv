@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add strict CSV import gate for production data ([pm-csv-z9ad](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-z9ad.toon))
+
+### Other
+
+- Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-csv-eio7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-eio7.toon))
+
 ## 2026.06.04 - 2026-06-04
 
 ### Other
