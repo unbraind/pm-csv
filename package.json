@@ -34,12 +34,12 @@
     "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check"
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": ">=2026.5.31"
+    "@unbrained/pm-cli": ">=2026.6.7"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "@unbrained/pm-cli": "^2026.6.6",
-    "pm-changelog": "^2026.6.6",
+    "@unbrained/pm-cli": "^2026.6.7",
+    "pm-changelog": "^2026.6.7",
     "typescript": "^6.0.3"
   },
   "keywords": [
