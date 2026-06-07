@@ -1,0 +1,23 @@
+id: pm-csv-9jj1
+title: "Full-cycle hardening wave: pm-csv"
+description: "Track dependency, changelog, release checks, and security hardening evidence."
+type: Task
+status: in_progress
+priority: 1
+tags[4]: deps-2026-6-7,full-cycle-hardening,hardening-pass,wave-full-cycle-2026-06-07
+created_at: "2026-06-07T07:41:34.875Z"
+updated_at: "2026-06-07T08:00:41.688Z"
+assignee: codex-5.3-full-cycle
+author: codex-5.3-full-cycle
+notes[2]{created_at,author,text}:
+  "2026-06-07T07:41:36.337Z",codex-5.3-full-cycle,"Hardening pass complete: release:check succeeded after dependency bump and changelog regeneration."
+  "2026-06-07T08:00:41.688Z",codex-5.3-full-cycle,"Security gate: high-confidence token/key regex scan over tracked files and git history found no actionable secrets. Binary-history false positives were traced to embedded wasm base64 blobs, not credentials."
+files[3]{path,scope,note}:
+  CHANGELOG.md,project,Regenerated changelog to satisfy release gate
+  package-lock.json,project,Regenerated lockfile after dependency alignment
+  package.json,project,Upgraded @unbrained/pm-cli and pm-changelog to latest ranges
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
+  "npm run release:check",.,project,2400,null,null,null,null,null,null,null,null,null,null,null,null
+docs[1]{path,scope,note}:
+  README.md,project,Primary package docs reference
+body: Master execution item for full-cycle hardening in pm-csv.
