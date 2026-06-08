@@ -1,6 +1,6 @@
 {
   "name": "pm-csv",
-  "version": "2026.6.7",
+  "version": "2026.6.8",
   "description": "CSV importer and exporter for pm-cli",
   "repository": {
     "type": "git",
