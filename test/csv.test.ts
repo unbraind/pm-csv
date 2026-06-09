@@ -8,6 +8,7 @@ import {
   stripBOM,
   resolveDelimiter,
   parseFieldMap,
+  resolveImportFieldMap,
   applyFieldMap,
   normalizeStatus,
   parseTags,
@@ -203,6 +204,48 @@ test("applyFieldMap: remaps known headers, leaves others", () => {
     "title",
     "status",
   ]);
+});
+
+test("resolveImportFieldMap: --auto-map infers common aliases", () => {
+  const resolved = resolveImportFieldMap(
+    ["summary", "state", "owner", "priority"],
+    {},
+    true,
+  );
+  assert.deepEqual(resolved.fieldMap, {
+    summary: "title",
+    state: "status",
+    owner: "assignee",
+  });
+  assert.deepEqual(resolved.autoMappings, [
+    { from: "summary", to: "title" },
+    { from: "state", to: "status" },
+    { from: "owner", to: "assignee" },
+  ]);
+});
+
+test("resolveImportFieldMap: explicit --map wins over --auto-map", () => {
+  const resolved = resolveImportFieldMap(
+    ["summary", "owner"],
+    { summary: "title" },
+    true,
+  );
+  assert.equal(resolved.fieldMap.summary, "title");
+  assert.equal(resolved.fieldMap.owner, "assignee");
+  assert.deepEqual(resolved.autoMappings, [{ from: "owner", to: "assignee" }]);
+});
+
+test("resolveImportFieldMap: ambiguous aliases are left unmapped", () => {
+  const resolved = resolveImportFieldMap(
+    ["summary", "name", "state"],
+    {},
+    true,
+  );
+  // Both "summary" and "name" are title aliases: skip title auto-map.
+  assert.equal(resolved.fieldMap.summary, undefined);
+  assert.equal(resolved.fieldMap.name, undefined);
+  assert.equal(resolved.fieldMap.state, "status");
+  assert.deepEqual(resolved.autoMappings, [{ from: "state", to: "status" }]);
 });
 
 // ---------------------------------------------------------------------------

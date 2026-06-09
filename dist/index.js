@@ -294,6 +294,68 @@ function applyFieldMap(headers, fieldMap) {
     return headers.map((h) => fieldMap[h] ?? h);
 }
 /**
+ * Alias vocabulary used by `--auto-map` for import/validate. Mappings are
+ * intentionally conservative: a target field is auto-mapped only when exactly
+ * one alias candidate is present and the target is not already claimed by a
+ * canonical header or explicit `--map`.
+ */
+const AUTO_MAP_ALIASES = {
+    title: ["summary", "name", "subject", "issue", "issue_title", "item", "task"],
+    status: ["state", "workflow_state", "workflow status"],
+    priority: ["rank", "prio", "importance"],
+    tags: ["labels", "label", "tag"],
+    deadline: ["due", "due_date", "due-date", "target_date", "target-date"],
+    body: ["description", "details", "notes"],
+    parent: ["parent_id", "parent-id", "epic", "epic_id", "epic-id"],
+    assignee: ["owner", "assigned_to", "assigned-to", "assigned"],
+    sprint: ["iteration", "sprint_name", "sprint-name"],
+    release: ["milestone", "version", "fix_version", "fix-version", "fixversion"],
+    blocked_by: ["blocked-by", "depends_on", "depends-on", "dependency", "blocker", "blocked_by_id"],
+};
+/**
+ * Resolve the effective header map for import/validate.
+ *
+ * Explicit `--map` entries always win. `--auto-map` only adds non-conflicting
+ * alias mappings and never overrides an already-claimed canonical field.
+ */
+function resolveImportFieldMap(headers, explicitMap, autoMap) {
+    const fieldMap = { ...explicitMap };
+    if (!autoMap || headers.length === 0)
+        return { fieldMap, autoMappings: [] };
+    const headerCounts = new Map();
+    for (const header of headers) {
+        headerCounts.set(header, (headerCounts.get(header) ?? 0) + 1);
+    }
+    const mappedHeaders = new Set(Object.keys(fieldMap));
+    const claimedTargets = new Set(headers);
+    for (const to of Object.values(fieldMap))
+        claimedTargets.add(to);
+    const autoMappings = [];
+    for (const [target, aliases] of Object.entries(AUTO_MAP_ALIASES)) {
+        if (claimedTargets.has(target))
+            continue;
+        const candidates = aliases.filter((alias) => (headerCounts.get(alias) ?? 0) === 1 && !mappedHeaders.has(alias));
+        // Multiple candidates (e.g. both summary and name) is ambiguous: skip.
+        if (candidates.length !== 1)
+            continue;
+        const from = candidates[0];
+        fieldMap[from] = target;
+        mappedHeaders.add(from);
+        claimedTargets.add(target);
+        autoMappings.push({ from, to: target });
+    }
+    return { fieldMap, autoMappings };
+}
+function formatAutoMappings(mappings) {
+    return mappings.map((m) => `${m.from}->${m.to}`).join(", ");
+}
+function autoMappingsToRecord(mappings) {
+    const record = {};
+    for (const m of mappings)
+        record[m.from] = m.to;
+    return record;
+}
+/**
  * Map an arbitrary status string (from the CSV) to a valid SDK status.
  * Falls back to "open".
  */
@@ -469,10 +531,20 @@ function loadKeyIndex(pmRoot) {
 }
 function importCSV(pmRoot, filePath, opts) {
     const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8");
-    const result = { imported: 0, updated: 0, skipped: 0, filtered: 0, errors: [], previews: [] };
+    const result = {
+        imported: 0,
+        updated: 0,
+        skipped: 0,
+        filtered: 0,
+        autoMappings: [],
+        errors: [],
+        previews: [],
+    };
     if (rawHeaders.length === 0)
         return result;
-    const headers = applyFieldMap(rawHeaders, opts.fieldMap);
+    const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
+    const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
+    result.autoMappings = mapResolution.autoMappings;
     if (!headers.includes("title")) {
         throw new CommandError(`CSV is missing required 'title' column (after --map). Found: ${headers.join(", ")}`, EXIT_CODE.USAGE);
     }
@@ -624,7 +696,9 @@ function upsertUpdate(pmRoot, id, p, source) {
  */
 function validateCSV(filePath, opts) {
     const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8");
-    return validateParsedCSV(rawHeaders, dataRows, opts.fieldMap);
+    const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
+    const report = validateParsedCSV(rawHeaders, dataRows, mapResolution.fieldMap);
+    return { ...report, autoMappings: mapResolution.autoMappings };
 }
 /**
  * Core validation logic over already-parsed headers + rows. Pure and
@@ -705,6 +779,7 @@ function validateParsedCSV(rawHeaders, dataRows, fieldMap) {
         rowsWithUnknownStatus,
         rowsWithNonIntegerPriority,
         rowsWithOutOfRangePriority,
+        autoMappings: [],
         issues,
     };
 }
@@ -918,6 +993,7 @@ export default defineExtension({
                 "embedded newlines, escaped quotes, BOM, CRLF). Expected columns: title, type, " +
                 "status, priority, tags, deadline, body, parent, assignee, sprint, release, " +
                 "blocked_by. Only 'title' is required. Use --map to remap arbitrary headers, " +
+                "--auto-map to infer common aliases (e.g. summary->title), " +
                 "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, " +
                 "--source to record import provenance in the csv_source field, and " +
                 "--status/--type/--priority to import only matching rows (others are skipped). " +
@@ -927,6 +1003,7 @@ export default defineExtension({
                 "pm csv import tasks.csv",
                 "pm csv import backlog.csv --delimiter ';'",
                 "pm csv import data.tsv --delimiter tab",
+                "pm csv import jira.csv --auto-map",
                 "pm csv import jira.csv --map 'Summary=title,Owner=tags'",
                 "pm csv import items.csv --key title   # idempotent re-import (no duplicates)",
                 "pm csv import legacy.csv --encoding latin1",
@@ -939,6 +1016,7 @@ export default defineExtension({
             flags: [
                 { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
                 { long: "--map", value_name: "col=field", description: "Remap a CSV header to a pm field (repeatable, comma-joined). e.g. --map 'Summary=title'" },
+                { long: "--auto-map", description: "Auto-map common third-party headers (e.g. summary->title, owner->assignee) when unambiguous" },
                 { long: "--key", value_name: "field", description: "Dedup key column: re-import updates the matching item instead of creating a duplicate" },
                 { long: "--encoding", value_name: "enc", description: "Source file encoding: utf-8 (default) | utf16le | latin1" },
                 { long: "--source", value_name: "label", description: "Record an import-provenance label in the csv_source field of created/updated items" },
@@ -951,11 +1029,12 @@ export default defineExtension({
             async run(ctx) {
                 const filePath = ctx.args[0];
                 if (!filePath) {
-                    throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--map col=field] [--key field] [--encoding enc] [--source label] [--status s] [--type t] [--priority n] [--dry-run]", EXIT_CODE.USAGE);
+                    throw new CommandError("Usage: pm csv import <file> [--delimiter <char>] [--map col=field] [--auto-map] [--key field] [--encoding enc] [--source label] [--status s] [--type t] [--priority n] [--dry-run]", EXIT_CODE.USAGE);
                 }
                 const delimiter = resolveDelimiter(ctx.options["delimiter"]);
                 const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
                 const fieldMap = parseFieldMap(ctx.options["map"]);
+                const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
                 const keyField = (ctx.options["key"] ?? "").trim().toLowerCase() || undefined;
                 const encoding = resolveEncoding(ctx.options["encoding"]);
                 const source = (ctx.options["source"] ?? "").trim() || undefined;
@@ -966,8 +1045,8 @@ export default defineExtension({
                 let res;
                 try {
                     if (strict)
-                        assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding });
-                    res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, keyField, encoding, source, filter });
+                        assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap });
+                    res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, autoMap, keyField, encoding, source, filter });
                 }
                 catch (err) {
                     if (err instanceof CommandError)
@@ -977,6 +1056,10 @@ export default defineExtension({
                     throw new CommandError(`Failed to import: ${msg}`, exitCode);
                 }
                 const filterNote = res.filtered > 0 ? ` (${res.filtered} filtered out)` : "";
+                const autoMapped = autoMappingsToRecord(res.autoMappings);
+                if (res.autoMappings.length > 0) {
+                    console.error(`Auto-mapped columns: ${formatAutoMappings(res.autoMappings)}.`);
+                }
                 if (dryRun) {
                     console.error(`[dry-run] Would create ${res.imported}, update ${res.updated}, skip ${res.skipped}${filterNote}.`);
                     return {
@@ -986,10 +1069,18 @@ export default defineExtension({
                         wouldSkip: res.skipped,
                         filtered: res.filtered,
                         previews: res.previews,
+                        autoMapped,
                     };
                 }
                 console.error(`Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`);
-                return { imported: res.imported, updated: res.updated, skipped: res.skipped, filtered: res.filtered, errors: res.errors };
+                return {
+                    imported: res.imported,
+                    updated: res.updated,
+                    skipped: res.skipped,
+                    filtered: res.filtered,
+                    errors: res.errors,
+                    autoMapped,
+                };
             },
         });
         // -----------------------------------------------------------------------
@@ -1001,32 +1092,35 @@ export default defineExtension({
                 "columns, rows missing a title, rows with unrecognized status, rows with a " +
                 "non-integer priority, and whether the required 'title' column is present " +
                 "(after --map). Exits non-zero on structural problems (missing title column). " +
-                "Honors --delimiter, --map, --encoding; supports --json.",
+                "Honors --delimiter, --map, --auto-map, --encoding; supports --json.",
             intent: "validate a CSV file without importing",
             examples: [
                 "pm csv validate tasks.csv",
                 "pm csv validate jira.csv --map 'Summary=title'",
+                "pm csv validate jira.csv --auto-map",
                 "pm csv validate data.tsv --delimiter tab --json",
             ],
             flags: [
                 { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
                 { long: "--map", value_name: "col=field", description: "Remap a CSV header to a pm field (repeatable, comma-joined) before validating" },
+                { long: "--auto-map", description: "Auto-map common third-party headers (e.g. summary->title) when unambiguous" },
                 { long: "--encoding", value_name: "enc", description: "Source file encoding: utf-8 (default) | utf16le | latin1" },
                 { long: "--json", description: "Emit the report as JSON" },
             ],
             async run(ctx) {
                 const filePath = ctx.args[0];
                 if (!filePath) {
-                    throw new CommandError("Usage: pm csv validate <file> [--delimiter <char>] [--map col=field] [--encoding enc] [--json]", EXIT_CODE.USAGE);
+                    throw new CommandError("Usage: pm csv validate <file> [--delimiter <char>] [--map col=field] [--auto-map] [--encoding enc] [--json]", EXIT_CODE.USAGE);
                 }
                 const delimiter = resolveDelimiter(ctx.options["delimiter"]);
                 const fieldMap = parseFieldMap(ctx.options["map"]);
+                const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
                 const encoding = resolveEncoding(ctx.options["encoding"]);
                 const asJson = readBoolOption(ctx.options, "json");
                 const absolutePath = resolve(filePath);
                 let report;
                 try {
-                    report = validateCSV(absolutePath, { delimiter, fieldMap, encoding });
+                    report = validateCSV(absolutePath, { delimiter, fieldMap, autoMap, encoding });
                 }
                 catch (err) {
                     if (err instanceof CommandError)
@@ -1039,6 +1133,9 @@ export default defineExtension({
                 console.error(`Rows: ${report.rowCount}`);
                 console.error(`Detected columns: ${report.detectedColumns.join(", ") || "(none)"}`);
                 console.error(`Mapped columns:   ${report.mappedColumns.join(", ") || "(none)"}`);
+                if (report.autoMappings.length > 0) {
+                    console.error(`Auto-mapped columns: ${formatAutoMappings(report.autoMappings)}.`);
+                }
                 console.error(`Has 'title' column: ${report.hasTitleColumn ? "yes" : "no"}`);
                 console.error(`Rows missing title: ${report.rowsMissingTitle}`);
                 console.error(`Rows w/ unknown status: ${report.rowsWithUnknownStatus}`);
@@ -1167,6 +1264,7 @@ export default defineExtension({
             }
             const delimiter = resolveDelimiter(ctx.options["delimiter"]);
             const fieldMap = parseFieldMap(ctx.options["map"]);
+            const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
             const keyField = (ctx.options["key"] ?? "").trim().toLowerCase() || undefined;
             const encoding = resolveEncoding(ctx.options["encoding"]);
             const source = (ctx.options["source"] ?? "").trim() || undefined;
@@ -1177,8 +1275,8 @@ export default defineExtension({
             let res;
             try {
                 if (strict)
-                    assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding });
-                res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, keyField, encoding, source, filter });
+                    assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap });
+                res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, autoMap, keyField, encoding, source, filter });
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -1186,6 +1284,9 @@ export default defineExtension({
                 return;
             }
             const filterNote = res.filtered > 0 ? ` (${res.filtered} filtered out)` : "";
+            if (res.autoMappings.length > 0) {
+                console.error(`csv-import: auto-mapped columns ${formatAutoMappings(res.autoMappings)}.`);
+            }
             console.error(`csv-import: done — imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`);
         });
     },
@@ -1193,5 +1294,5 @@ export default defineExtension({
 // ---------------------------------------------------------------------------
 // Named exports — pure helpers exposed for unit testing (no side effects).
 // ---------------------------------------------------------------------------
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
 //# sourceMappingURL=index.js.map
