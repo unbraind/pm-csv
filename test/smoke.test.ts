@@ -63,6 +63,31 @@ test("csv export declares --header (not a bare --no-header the host rejects)", (
   assert.ok(!longs.includes("--no-header"), "csv export must not declare a bare --no-header flag (host rejects it)");
 });
 
+test("csv import and validate declare --auto-map", () => {
+  const commands: any[] = [];
+  const noop = () => {};
+  const api = {
+    registerCommand: (def: any) => { commands.push(def); },
+    registerParser: noop, registerPreflight: noop, registerService: noop,
+    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
+    registerMigration: noop, registerRenderer: noop,
+    registerImporter: noop, registerExporter: noop,
+    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
+    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
+  };
+  extension.activate(api as any);
+
+  const importCmd = commands.find((c) => c.name === "csv import");
+  const validateCmd = commands.find((c) => c.name === "csv validate");
+  assert.ok(importCmd, "csv import command should be registered");
+  assert.ok(validateCmd, "csv validate command should be registered");
+
+  const importLongs = (importCmd.flags ?? []).map((f: any) => f.long);
+  const validateLongs = (validateCmd.flags ?? []).map((f: any) => f.long);
+  assert.ok(importLongs.includes("--auto-map"), "csv import should expose --auto-map");
+  assert.ok(validateLongs.includes("--auto-map"), "csv validate should expose --auto-map");
+});
+
 test("activate degrades gracefully when registerItemFields is absent", () => {
   const registered: string[] = [];
   const noop = () => {};
