@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Deep RFC-4180 import/export + idempotent upsert \(SDK 2026.5.31\) ([pm-csv-xim5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-xim5.toon))
+
 ## 2026.06.07 - 2026-06-07
 
 ### Added
