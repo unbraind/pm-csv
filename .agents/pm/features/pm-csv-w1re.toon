@@ -1,0 +1,21 @@
+id: pm-csv-w1re
+title: Full pm ecosystem production pass for pm-csv
+description: ""
+type: Feature
+status: in_progress
+priority: 1
+tags[3]: ecosystem,ecosystem-pass-2026-06-10,production
+created_at: "2026-06-09T22:38:04.589Z"
+updated_at: "2026-06-09T23:29:18.913Z"
+assignee: codex-5-3-sweep
+author: codex-5-3-sweep
+files[4]{path,scope,note}:
+  index.ts,project,auto-map alias resolution
+  README.md,project,auto-map docs
+  test/csv.test.ts,project,auto-map unit coverage
+  test/smoke.test.ts,project,auto-map flag coverage
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
+  "npm run release:check",null,project,3600,null,null,null,null,null,null,null,null,null,null,null,null
+docs[1]{path,scope,note}:
+  README.md,project,user-facing auto-map docs
+body: ""

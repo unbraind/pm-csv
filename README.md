@@ -30,6 +30,7 @@ Read a CSV file and create or update pm items.
 pm csv import tasks.csv
 pm csv import backlog.csv --delimiter ';'
 pm csv import data.tsv --delimiter tab
+pm csv import jira.csv --auto-map              # infer common aliases (summary->title, owner->assignee)
 pm csv import jira.csv --map 'Summary=title,Owner=assignee'
 pm csv import items.csv --key title         # idempotent re-import (no duplicates)
 pm csv import legacy.csv --encoding latin1  # non-UTF-8 source
@@ -44,6 +45,7 @@ pm csv import items.csv --dry-run
 |---|---|---|---|
 | `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
 | `--map <col=field>` | string | — | Remap a CSV header to a pm field (repeatable, comma-joined), e.g. `--map 'Summary=title'` |
+| `--auto-map` | boolean | false | Auto-map common third-party headers when unambiguous (e.g. `summary -> title`, `owner -> assignee`) |
 | `--key <field>` | string | — | Dedup key column: a re-import **updates** the matching item instead of creating a duplicate |
 | `--encoding <enc>` | string | `utf-8` | Source file encoding: `utf-8` \| `utf16le` \| `latin1` |
 | `--source <label>` | string | — | Record an import-provenance label in the `csv_source` field of created/updated items |
@@ -91,6 +93,7 @@ or an empty file); otherwise exits `0` even when it reports row-level warnings.
 ```
 pm csv validate tasks.csv
 pm csv validate jira.csv --map 'Summary=title'
+pm csv validate jira.csv --auto-map
 pm csv validate data.tsv --delimiter tab --json
 ```
 
@@ -99,12 +102,16 @@ whether the required `title` column is present, duplicate mapped columns, and
 counts of rows missing a title, rows with an unrecognized status, rows with a
 non-integer priority, and rows with a priority outside pm's `0..4` range.
 
+`--auto-map` applies the same alias vocabulary as import, then validates against
+the effective mapped headers.
+
 **Flags**
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--delimiter <char>` | string | `,` | Field delimiter, or alias `tab` / `comma` / `semicolon` / `pipe` |
 | `--map <col=field>` | string | — | Remap a CSV header to a pm field before validating |
+| `--auto-map` | boolean | false | Auto-map common third-party headers when unambiguous before validating |
 | `--encoding <enc>` | string | `utf-8` | Source file encoding: `utf-8` \| `utf16le` \| `latin1` |
 | `--json` | boolean | false | Emit the report as JSON |
 
@@ -186,6 +193,7 @@ Register the importer in your pm-cli config to automatically pull from a CSV fil
 | `file` | string | yes | Path to the CSV file to import |
 | `delimiter` | string | no (default `,`) | CSV field delimiter (or alias `tab`/`comma`/`semicolon`/`pipe`) |
 | `map` | string | no | Header remap, e.g. `Summary=title` |
+| `auto-map` / `autoMap` | boolean | no (default `false`) | Auto-map common third-party headers when unambiguous |
 | `key` | string | no | Dedup key column for idempotent re-import |
 | `encoding` | string | no (default `utf-8`) | `utf-8` \| `utf16le` \| `latin1` |
 | `source` | string | no | Provenance label recorded in `csv_source` |
