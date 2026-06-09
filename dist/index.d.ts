@@ -78,6 +78,21 @@ declare function parseFieldMap(spec: string | string[] | undefined): Record<stri
  * (canonical) header used for column lookup.
  */
 declare function applyFieldMap(headers: string[], fieldMap: Record<string, string>): string[];
+interface AutoFieldMapping {
+    from: string;
+    to: string;
+}
+interface FieldMapResolution {
+    fieldMap: Record<string, string>;
+    autoMappings: AutoFieldMapping[];
+}
+/**
+ * Resolve the effective header map for import/validate.
+ *
+ * Explicit `--map` entries always win. `--auto-map` only adds non-conflicting
+ * alias mappings and never overrides an already-claimed canonical field.
+ */
+declare function resolveImportFieldMap(headers: string[], explicitMap: Record<string, string>, autoMap: boolean): FieldMapResolution;
 /**
  * Map an arbitrary status string (from the CSV) to a valid SDK status.
  * Falls back to "open".
@@ -152,6 +167,7 @@ interface CsvValidateReport {
     rowsWithUnknownStatus: number;
     rowsWithNonIntegerPriority: number;
     rowsWithOutOfRangePriority: number;
+    autoMappings: AutoFieldMapping[];
     issues: string[];
 }
 /**
@@ -194,6 +210,6 @@ declare const _default: {
     activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
 };
 export default _default;
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
-export type { ParsedRow, ImportRowFilter, DiscoveredField };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };
 //# sourceMappingURL=index.d.ts.map
