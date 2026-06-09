@@ -144,11 +144,11 @@ jobs:
             exit 0
           fi
           publish_with_provenance() {
-            npm publish --access public --provenance
+            npm publish --access public --provenance --ignore-scripts
           }
           publish_without_provenance() {
             echo "::warning::Falling back to publish WITHOUT --provenance after repeated 404 from npm registry."
-            npm publish --access public
+            npm publish --access public --ignore-scripts
           }
           attempt=0
           max_attempts=3
