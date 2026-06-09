@@ -31,15 +31,16 @@
     "changelog": "pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --release-version-from-package --since-previous-tag --until-release-tag --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm",
     "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm",
     "changelog:check": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --check",
-    "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check"
+    "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check",
+    "prepublishOnly": "npm run release:check"
   },
   "peerDependencies": {
     "@unbrained/pm-cli": ">=2026.6.7"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "@unbrained/pm-cli": "^2026.6.7",
-    "pm-changelog": "^2026.6.7",
+    "@unbrained/pm-cli": "^2026.6.9",
+    "pm-changelog": "^2026.6.8",
     "typescript": "^6.0.3"
   },
   "keywords": [
@@ -85,5 +86,8 @@
     "examples": [
       "README.md"
     ]
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
