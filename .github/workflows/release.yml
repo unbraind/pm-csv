@@ -184,20 +184,33 @@ jobs:
         run: |
           set -euo pipefail
           pkg_name="$(node -p "require('./package.json').name")"
+          pkg_version="${{ steps.decide.outputs.npm_version }}"
           mkdir -p /tmp/bun-verify
           cd /tmp/bun-verify
           rm -rf node_modules bun.lockb package.json
           bun init -y > /dev/null
-          # Retry up to 5 times - npm registry can take ~60s to propagate
-          for attempt in 1 2 3 4 5; do
-            if bun add "${pkg_name}@${{ steps.decide.outputs.npm_version }}"; then
+          # Smoke-test that the just-published version installs via bun.
+          # Retry to absorb npm registry propagation (~60s typical).
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if bun add "${pkg_name}@${pkg_version}"; then
               echo "bun add succeeded on attempt $attempt"
               exit 0
             fi
             echo "bun add failed on attempt $attempt, sleeping 30s..."
             sleep 30
           done
-          echo "bun add failed after 5 attempts"
+          # bun's registry mirror can lag well past npm's own propagation,
+          # especially for prerelease (-N) versions. The npm registry is
+          # authoritative for what we just published: if it confirms the
+          # version, the release genuinely succeeded and the bun failure is
+          # mirror lag, not a publish failure. Do not let it block the
+          # GitHub release / post-publish steps that follow.
+          echo "bun could not resolve ${pkg_name}@${pkg_version}; checking npm registry authoritatively..."
+          if npm view "${pkg_name}@${pkg_version}" version > /dev/null 2>&1; then
+            echo "::warning::bun has not mirrored ${pkg_name}@${pkg_version} yet, but npm confirms it is published (registry mirror lag). Treating verification as successful."
+            exit 0
+          fi
+          echo "npm registry does not show ${pkg_name}@${pkg_version} - real publish failure."
           exit 1
       - name: Create GitHub release
         if: steps.decide.outputs.should_release == 'true'
