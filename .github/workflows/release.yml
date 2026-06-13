@@ -206,7 +206,7 @@ jobs:
           # mirror lag, not a publish failure. Do not let it block the
           # GitHub release / post-publish steps that follow.
           echo "bun could not resolve ${pkg_name}@${pkg_version}; checking npm registry authoritatively..."
-          if npm view "${pkg_name}@${pkg_version}" version > /dev/null 2>&1; then
+          if npm view "${pkg_name}@${pkg_version}" version --registry="https://registry.npmjs.org" > /dev/null 2>&1; then
             echo "::warning::bun has not mirrored ${pkg_name}@${pkg_version} yet, but npm confirms it is published (registry mirror lag). Treating verification as successful."
             exit 0
           fi
