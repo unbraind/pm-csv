@@ -1,12 +1,12 @@
 # Changelog
 
-## 2026.06.09 - 2026-06-09
+## 2026.6.9 - 2026-06-09
 
 ### Added
 
 - Deep RFC-4180 import/export + idempotent upsert \(SDK 2026.5.31\) ([pm-csv-xim5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-xim5.toon))
 
-## 2026.06.07 - 2026-06-07
+## 2026.6.7 - 2026-06-07
 
 ### Added
 
@@ -17,13 +17,13 @@
 - Harden release readiness checks ([pm-csv-wn9s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-wn9s.toon))
 - Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-csv-eio7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-eio7.toon))
 
-## 2026.06.04 - 2026-06-04
+## 2026.6.4 - 2026-06-04
 
 ### Other
 
 - Import row-filtering \(--status/--type/--priority\) and custom-field export discovery \(--all-fields\) ([pm-csv-dk6h](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-dk6h.toon))
 
-## 2026.06.02-1 - 2026-06-02
+## 2026.6.2-1 - 2026-06-02
 
 ### Added
 
@@ -45,19 +45,19 @@
 - Import --encoding \(utf-8/utf16le/latin1\) ([pm-csv-z3lo](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-z3lo.toon))
 - Round-trip parent/assignee/sprint/release/blocked\_by columns ([pm-csv-6kyh](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-6kyh.toon))
 
-## 2026.06.02 - 2026-06-02
+## 2026.6.2 - 2026-06-02
 
 ### Added
 
 - Add native csv-export exporter + --columns selection \(importer/exporter pair, full SDK importers capability\) ([pm-csv-7qh3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-7qh3.toon))
 
-## 2026.06.01 - 2026-06-01
+## 2026.6.1 - 2026-06-01
 
 ### Fixed
 
 - Command handlers threw plain Error \(no exitCode\) → runtime double-invocation ([pm-csv-017m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-017m.toon))
 
-## 2026.05.29 - 2026-05-29
+## 2026.5.29 - 2026-05-29
 
 ### Added
 
@@ -69,19 +69,19 @@
 - csv import/export return error object instead of throwing \(exit 0 on failure\) ([pm-csv-e9v4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-e9v4.toon))
 - csv import --dry-run silently ignored \(still writes\) ([pm-csv-zw3a](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zw3a.toon))
 
-## 2026.05.28 - 2026-05-28
+## 2026.5.28 - 2026-05-28
 
 ### Added
 
 - Add publish retry + provenance fallback to release workflow ([pm-csv-e9k2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-e9k2.toon))
 
-## 2026.05.27 - 2026-05-27
+## 2026.5.27 - 2026-05-27
 
 ### Added
 
 - Add bun-install verification to release workflow ([pm-csv-0wj8](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-0wj8.toon))
 
-## 2026.05.26 - 2026-05-26
+## 2026.5.26 - 2026-05-26
 
 ### Fixed
 
