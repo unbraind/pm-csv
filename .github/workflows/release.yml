@@ -126,9 +126,25 @@ jobs:
           else
             git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
           fi
-          git tag "${{ steps.decide.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.decide.outputs.tag }}"
+
+      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
+      # authoritative workflow trigger ref: schedule -> refs/heads/main;
+      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
+      # feature branch -> refs/heads/<feature> (refused here). Checking the
+      # trigger ref (rather than git topology) reliably distinguishes a feature
+      # branch from main, which commit-topology checks cannot do (a feature
+      # branch off main is also a descendant of origin/main).
+      - name: Check release ref
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
+            exit 1
+          fi
 
       - name: Publish npm package
         if: steps.decide.outputs.should_release == 'true'
@@ -177,6 +193,18 @@ jobs:
           echo "::error::Publish failed after retries and provenance fallback."
           exit 1
 
+      # Push tag + main AFTER a successful publish so a failed publish does not
+      # leave the repo tagged/skipped. The release ref (fast-forward of
+      # origin/main) was already verified in the "Check release ref" step before
+      # publishing, so here we only create the tag and advance main.
+      - name: Push release tag and main
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "${{ steps.decide.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.decide.outputs.tag }}"
 
       - name: Verify bun install of published package
         if: steps.decide.outputs.should_release == 'true'
