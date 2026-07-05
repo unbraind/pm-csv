@@ -127,35 +127,22 @@ jobs:
             git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
           fi
 
-      # Verify the checkout is a fast-forward of origin/main BEFORE publishing,
-      # so a manual workflow_dispatch run from a feature branch is refused before
-      # any npm publish happens (otherwise a feature-branch run could publish a
-      # version to npm and then fail to tag/push main, leaving an orphan npm
-      # version). actions/checkout leaves us on a detached HEAD, so we can't use
-      # the branch name; instead we require that HEAD is either origin/main
-      # itself (no-op release) or a release commit whose first parent is
-      # origin/main. This is strictly stronger than an ancestor check, which any
-      # feature branch off main would also pass.
+      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
+      # authoritative workflow trigger ref: schedule -> refs/heads/main;
+      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
+      # feature branch -> refs/heads/<feature> (refused here). Checking the
+      # trigger ref (rather than git topology) reliably distinguishes a feature
+      # branch from main, which commit-topology checks cannot do (a feature
+      # branch off main is also a descendant of origin/main).
       - name: Check release ref
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
+        env:
+          GITHUB_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          current_branch="$(git rev-parse --abbrev-ref HEAD)"
-          if [[ "$current_branch" != "main" && "$current_branch" != "HEAD" ]]; then
-            echo "::error::Refusing to release non-main ref ('$current_branch'). Run the release workflow from main."
-            exit 1
-          fi
-          head_sha="$(git rev-parse HEAD)"
-          origin_main="$(git rev-parse origin/main)"
-          if [[ "$head_sha" == "$origin_main" ]]; then
-            # No-op release: HEAD is origin/main (release files already current).
-            exit 0
-          fi
-          # Require the release commit to sit directly on origin/main
-          # (HEAD^ == origin/main), so feature-branch commits can never release.
-          if [[ "$(git rev-parse HEAD^ 2>/dev/null || true)" != "$origin_main" ]]; then
-            echo "::error::HEAD ('$head_sha') is not a fast-forward of origin/main ('$origin_main'); refusing to release. Run the release workflow from main."
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
             exit 1
           fi
 
