@@ -8,6 +8,7 @@
 
 ### Other
 
+- Align Node engine with pm CLI runtime ([pm-csv-2thu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-2thu.toon))
 - Regenerate CHANGELOG after pm close item ([pm-csv-137e](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-137e.toon))
 
 ## 2026.6.9 - 2026-06-09
