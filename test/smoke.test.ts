@@ -107,3 +107,42 @@ test("activate degrades gracefully when registerItemFields is absent", () => {
   assert.ok(registered.includes("importer"), "importer still registers without schema support");
   assert.ok(registered.includes("exporter"), "exporter still registers without schema support");
 });
+
+test("csv import declares --skip-headers and --stream", () => {
+  const commands: any[] = [];
+  const noop = () => {};
+  const api = {
+    registerCommand: (def: any) => { commands.push(def); },
+    registerParser: noop, registerPreflight: noop, registerService: noop,
+    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
+    registerMigration: noop, registerRenderer: noop,
+    registerImporter: noop, registerExporter: noop,
+    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
+    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
+  };
+  extension.activate(api as any);
+  const importCmd = commands.find((c) => c.name === "csv import");
+  assert.ok(importCmd, "csv import command should be registered");
+  const longs = (importCmd.flags ?? []).map((f: any) => f.long);
+  assert.ok(longs.includes("--skip-headers"), "csv import should expose --skip-headers");
+  assert.ok(longs.includes("--stream"), "csv import should expose --stream");
+});
+
+test("csv validate declares --skip-headers", () => {
+  const commands: any[] = [];
+  const noop = () => {};
+  const api = {
+    registerCommand: (def: any) => { commands.push(def); },
+    registerParser: noop, registerPreflight: noop, registerService: noop,
+    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
+    registerMigration: noop, registerRenderer: noop,
+    registerImporter: noop, registerExporter: noop,
+    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
+    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
+  };
+  extension.activate(api as any);
+  const validateCmd = commands.find((c) => c.name === "csv validate");
+  assert.ok(validateCmd, "csv validate command should be registered");
+  const longs = (validateCmd.flags ?? []).map((f: any) => f.long);
+  assert.ok(longs.includes("--skip-headers"), "csv validate should expose --skip-headers");
+});

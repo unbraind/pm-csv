@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 const defineExtension = ((extension) => extension);
@@ -183,6 +183,135 @@ function serializeCSV(rows, delimiterOrOpts) {
         .join(eol);
 }
 // ---------------------------------------------------------------------------
+// Streaming CSV parser — for large files that should not be held in memory.
+// Same RFC-4180 state machine as parseCSV, but fed incrementally so quoted
+// fields spanning chunk boundaries are handled correctly.
+// ---------------------------------------------------------------------------
+/**
+ * Incremental CSV state machine. Feed text via {@link push} and call
+ * {@link end} when the input is exhausted. Each complete row is emitted to the
+ * `onRow` callback exactly as in {@link parseCSV}.
+ */
+class StreamingCSVParser {
+    delimiter;
+    onRow;
+    field = "";
+    row = [];
+    inQuotes = false;
+    constructor(delimiter, onRow) {
+        this.delimiter = delimiter;
+        this.onRow = onRow;
+    }
+    push(text) {
+        let i = 0;
+        while (i < text.length) {
+            const ch = text[i];
+            if (this.inQuotes) {
+                if (ch === '"') {
+                    if (text[i + 1] === '"') {
+                        this.field += '"';
+                        i += 2;
+                        continue;
+                    }
+                    this.inQuotes = false;
+                    i++;
+                    continue;
+                }
+                this.field += ch;
+                i++;
+                continue;
+            }
+            if (ch === '"') {
+                this.inQuotes = true;
+                i++;
+                continue;
+            }
+            if (ch === this.delimiter) {
+                this.row.push(this.field);
+                this.field = "";
+                i++;
+                continue;
+            }
+            if (ch === "\r" && text[i + 1] === "\n") {
+                this.row.push(this.field);
+                this.field = "";
+                this.onRow(this.row);
+                this.row = [];
+                i += 2;
+                continue;
+            }
+            if (ch === "\n") {
+                this.row.push(this.field);
+                this.field = "";
+                this.onRow(this.row);
+                this.row = [];
+                i++;
+                continue;
+            }
+            this.field += ch;
+            i++;
+        }
+    }
+    end() {
+        if (this.field !== "" || this.row.length > 0) {
+            this.row.push(this.field);
+            this.onRow(this.row);
+            this.field = "";
+            this.row = [];
+        }
+    }
+}
+/**
+ * Stream a CSV file from disk, emitting each parsed row to `onRow`. Uses a
+ * readable stream so the file is never fully loaded into memory. The BOM is
+ * stripped from the first chunk. If `onRow` throws, the stream is destroyed and
+ * the returned promise rejects with that error.
+ */
+function streamCSVFile(filePath, delimiter, encoding, onRow) {
+    const bufEnc = encoding === "utf-8" ? "utf8" : encoding;
+    const stream = createReadStream(filePath, { encoding: bufEnc });
+    const parser = new StreamingCSVParser(delimiter, onRow);
+    let bomChecked = false;
+    let stopped = false;
+    return new Promise((resolve, reject) => {
+        const fail = (err) => {
+            if (stopped)
+                return;
+            stopped = true;
+            stream.destroy();
+            reject(err);
+        };
+        stream.on("data", (chunk) => {
+            if (stopped)
+                return;
+            let text = typeof chunk === "string" ? chunk : chunk.toString(bufEnc);
+            if (!bomChecked) {
+                text = stripBOM(text);
+                bomChecked = true;
+            }
+            try {
+                parser.push(text);
+            }
+            catch (err) {
+                fail(err);
+            }
+        });
+        stream.on("end", () => {
+            if (stopped)
+                return;
+            try {
+                parser.end();
+            }
+            catch (err) {
+                fail(err);
+                return;
+            }
+            resolve();
+        });
+        stream.on("error", fail);
+    });
+}
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 /**
@@ -292,6 +421,83 @@ function parseFieldMap(spec) {
  */
 function applyFieldMap(headers, fieldMap) {
     return headers.map((h) => fieldMap[h] ?? h);
+}
+/**
+ * Compute a simple Levenshtein edit distance between two lowercase strings.
+ * Used only for "did you mean …?" suggestions, so a naive O(m*n) DP is fine.
+ */
+function levenshtein(a, b) {
+    const m = a.length;
+    const n = b.length;
+    if (m === 0)
+        return n;
+    if (n === 0)
+        return m;
+    const prev = new Array(n + 1);
+    const curr = new Array(n + 1);
+    for (let j = 0; j <= n; j++)
+        prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= n; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        for (let j = 0; j <= n; j++)
+            prev[j] = curr[j];
+    }
+    return prev[n];
+}
+/**
+ * Suggest the closest match from `valid` for an unknown `input` string, or
+ * undefined when nothing is close enough (distance > 3 and > half the input
+ * length). Exposed for unit testing.
+ */
+function suggestClosest(input, valid) {
+    let best;
+    let bestDist = Infinity;
+    for (const candidate of valid) {
+        const dist = levenshtein(input, candidate);
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = candidate;
+        }
+    }
+    if (best === undefined)
+        return undefined;
+    return bestDist <= 3 || bestDist <= Math.floor(input.length / 2) ? best : undefined;
+}
+/**
+ * Validate that every `--map` target is a known pm import field. Returns a
+ * list of helpful warning strings (empty when all targets are valid). Each
+ * warning includes a "did you mean" suggestion when one is close.
+ */
+function validateFieldMapTargets(fieldMap) {
+    const warnings = [];
+    const valid = IMPORT_COLUMNS;
+    for (const [from, to] of Object.entries(fieldMap)) {
+        if (!valid.includes(to)) {
+            const suggestion = suggestClosest(to, valid);
+            const hint = suggestion ? ` Did you mean '${suggestion}'?` : "";
+            warnings.push(`--map target '${to}' (from '${from}') is not a known pm field.${hint} Valid fields: ${valid.join(", ")}`);
+        }
+    }
+    return warnings;
+}
+/**
+ * Detect `--map` source headers that are not present in the CSV file. Returns a
+ * list of warning strings with a suggestion for the closest actual header.
+ */
+function checkMapSourcesPresent(headers, fieldMap) {
+    const warnings = [];
+    for (const from of Object.keys(fieldMap)) {
+        if (!headers.includes(from)) {
+            const suggestion = suggestClosest(from, headers);
+            const hint = suggestion ? ` Did you mean '${suggestion}'?` : "";
+            warnings.push(`--map source '${from}' not found in CSV headers.${hint} Found: ${headers.join(", ") || "(none)"}`);
+        }
+    }
+    return warnings;
 }
 /**
  * Alias vocabulary used by `--auto-map` for import/validate. Mappings are
@@ -416,13 +622,18 @@ function resolveEncoding(raw) {
  * Read rows from a CSV file, returning header and data rows separately.
  * Skips fully-empty rows. Decodes with the given encoding (default utf-8).
  */
-function readCSVFile(filePath, delimiter, encoding = "utf-8") {
+function readCSVFile(filePath, delimiter, encoding = "utf-8", skipHeaders = false) {
     // Node's BufferEncoding spells utf-8 as "utf8"; normalize.
     const bufEnc = encoding === "utf-8" ? "utf8" : encoding;
     const text = stripBOM(readFileSync(filePath, bufEnc));
     const rows = parseCSV(text, delimiter).filter((r) => r.some((f) => f.trim() !== ""));
     if (rows.length === 0) {
         return { headers: [], dataRows: [] };
+    }
+    if (skipHeaders) {
+        // No header row in the file: map columns positionally to the canonical
+        // import order. Every row (including the first) is a data row.
+        return { headers: [...IMPORT_COLUMNS], dataRows: rows };
     }
     const headers = rows[0].map((h) => h.trim().toLowerCase());
     const dataRows = rows.slice(1);
@@ -529,8 +740,96 @@ function loadKeyIndex(pmRoot) {
     }
     return index;
 }
+/**
+ * Process a single data row against the resolved headers, updating the shared
+ * {@link ImportResult} in place. Extracted so the in-memory and streaming
+ * import paths share one code path for filtering, dry-run preview, and upsert.
+ */
+function processImportRow(pmRoot, headers, row, lineNo, opts, keyIndex, result) {
+    const { get, parsed } = rowFields(headers, row);
+    if (!parsed.title) {
+        const msg = `Row ${lineNo}: skipping — 'title' is empty`;
+        console.error(msg);
+        result.skipped++;
+        return;
+    }
+    // Row-level filter (mirrors export filter semantics): skip non-matching
+    // rows BEFORE any create/update so they never become pm items.
+    if (!rowMatchesFilter(parsed, opts.filter)) {
+        result.skipped++;
+        result.filtered++;
+        return;
+    }
+    const keyValue = opts.keyField ? get(opts.keyField) : "";
+    const existingId = keyValue ? keyIndex.get(normalizeKeyValue(keyValue)) : undefined;
+    if (opts.dryRun) {
+        result.previews.push({
+            action: existingId ? "update" : "create",
+            ...parsed,
+            ...(opts.keyField ? { key: keyValue } : {}),
+            ...(opts.source ? { csv_source: opts.source } : {}),
+        });
+        if (existingId)
+            result.updated++;
+        else
+            result.imported++;
+        return;
+    }
+    try {
+        if (existingId) {
+            upsertUpdate(pmRoot, existingId, parsed, opts.source);
+            result.updated++;
+        }
+        else {
+            const newId = upsertCreate(pmRoot, parsed, opts.keyField ? keyValue : undefined, opts.source);
+            if (opts.keyField && keyValue && newId)
+                keyIndex.set(normalizeKeyValue(keyValue), newId);
+            result.imported++;
+        }
+    }
+    catch (err) {
+        const msg = `Row ${lineNo}: ${existingId ? "update" : "create"} failed — ${err instanceof Error ? err.message : String(err)}`;
+        console.error(msg);
+        result.errors.push(msg);
+        result.skipped++;
+    }
+}
+/**
+ * Validate the resolved header map, throwing a helpful error when the required
+ * `title` column or the `--key` column is missing. Shared by both import paths.
+ */
+function assertImportHeaders(headers, opts) {
+    if (!headers.includes("title")) {
+        throw new CommandError(`CSV is missing required 'title' column (after --map). Found: ${headers.join(", ") || "(none)"}`, EXIT_CODE.USAGE);
+    }
+    if (opts.keyField && !headers.includes(opts.keyField)) {
+        throw new CommandError(`--key column '${opts.keyField}' not found in CSV. Found: ${headers.join(", ") || "(none)"}`, EXIT_CODE.USAGE);
+    }
+}
+/**
+ * Compute and log field-mapping validation warnings, returning them for the
+ * caller to store in the {@link ImportResult}. Shared by both import paths.
+ */
+function computeFieldMapWarnings(rawHeaders, fieldMap) {
+    const warnings = [
+        ...validateFieldMapTargets(fieldMap),
+        ...checkMapSourcesPresent(rawHeaders, fieldMap),
+    ];
+    for (const w of warnings)
+        console.error(`Warning: ${w}`);
+    return warnings;
+}
 function importCSV(pmRoot, filePath, opts) {
-    const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8");
+    if (opts.stream)
+        return importCSVStreaming(pmRoot, filePath, opts);
+    return Promise.resolve(importCSVInMemory(pmRoot, filePath, opts));
+}
+/**
+ * In-memory import: reads the full file, resolves the header map, and processes
+ * every data row. Used when `--stream` is not set (the default).
+ */
+function importCSVInMemory(pmRoot, filePath, opts) {
+    const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", opts.skipHeaders ?? false);
     const result = {
         imported: 0,
         updated: 0,
@@ -539,71 +838,72 @@ function importCSV(pmRoot, filePath, opts) {
         autoMappings: [],
         errors: [],
         previews: [],
+        fieldMapWarnings: [],
     };
     if (rawHeaders.length === 0)
         return result;
+    result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
     const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
     const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
     result.autoMappings = mapResolution.autoMappings;
-    if (!headers.includes("title")) {
-        throw new CommandError(`CSV is missing required 'title' column (after --map). Found: ${headers.join(", ")}`, EXIT_CODE.USAGE);
-    }
-    if (opts.keyField && !headers.includes(opts.keyField)) {
-        throw new CommandError(`--key column '${opts.keyField}' not found in CSV. Found: ${headers.join(", ")}`, EXIT_CODE.USAGE);
-    }
+    assertImportHeaders(headers, opts);
     // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
     const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map();
     for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-        const row = dataRows[rowIndex];
-        const lineNo = rowIndex + 2; // 1-based + header row
-        const { get, parsed } = rowFields(headers, row);
-        if (!parsed.title) {
-            const msg = `Row ${lineNo}: skipping — 'title' is empty`;
-            console.error(msg);
-            result.skipped++;
-            continue;
-        }
-        // Row-level filter (mirrors export filter semantics): skip non-matching
-        // rows BEFORE any create/update so they never become pm items.
-        if (!rowMatchesFilter(parsed, opts.filter)) {
-            result.skipped++;
-            result.filtered++;
-            continue;
-        }
-        const keyValue = opts.keyField ? get(opts.keyField) : "";
-        const existingId = keyValue ? keyIndex.get(normalizeKeyValue(keyValue)) : undefined;
-        if (opts.dryRun) {
-            result.previews.push({
-                action: existingId ? "update" : "create",
-                ...parsed,
-                ...(opts.keyField ? { key: keyValue } : {}),
-                ...(opts.source ? { csv_source: opts.source } : {}),
-            });
-            if (existingId)
-                result.updated++;
-            else
-                result.imported++;
-            continue;
-        }
-        try {
-            if (existingId) {
-                upsertUpdate(pmRoot, existingId, parsed, opts.source);
-                result.updated++;
-            }
-            else {
-                const newId = upsertCreate(pmRoot, parsed, opts.keyField ? keyValue : undefined, opts.source);
-                if (opts.keyField && keyValue && newId)
-                    keyIndex.set(normalizeKeyValue(keyValue), newId);
-                result.imported++;
-            }
-        }
-        catch (err) {
-            const msg = `Row ${lineNo}: ${existingId ? "update" : "create"} failed — ${err instanceof Error ? err.message : String(err)}`;
-            console.error(msg);
-            result.errors.push(msg);
-            result.skipped++;
-        }
+        const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
+        processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
     }
+    return result;
+}
+/**
+ * Streaming import: reads the file via a readable stream so large CSV files
+ * are never fully loaded into memory. The header row (or positional
+ * {@link IMPORT_COLUMNS} when `--skip-headers` is set) is resolved from the
+ * first row, then every subsequent row is processed and upserted immediately.
+ */
+async function importCSVStreaming(pmRoot, filePath, opts) {
+    const result = {
+        imported: 0,
+        updated: 0,
+        skipped: 0,
+        filtered: 0,
+        autoMappings: [],
+        errors: [],
+        previews: [],
+        fieldMapWarnings: [],
+    };
+    let headers = [];
+    let headerResolved = opts.skipHeaders ?? false;
+    let dataRowIndex = 0;
+    if (headerResolved) {
+        // --skip-headers: no header row in the file; use positional column order.
+        headers = [...IMPORT_COLUMNS];
+        result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
+        const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
+        headers = applyFieldMap(headers, mapResolution.fieldMap);
+        result.autoMappings = mapResolution.autoMappings;
+        assertImportHeaders(headers, opts);
+    }
+    // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
+    const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map();
+    await streamCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", (row) => {
+        // Skip fully-empty rows (mirrors the in-memory filter).
+        if (!row.some((f) => f.trim() !== ""))
+            return;
+        if (!headerResolved) {
+            headers = row.map((h) => h.trim().toLowerCase());
+            result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
+            const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
+            headers = applyFieldMap(headers, mapResolution.fieldMap);
+            result.autoMappings = mapResolution.autoMappings;
+            assertImportHeaders(headers, opts);
+            headerResolved = true;
+            return;
+        }
+        const lineNo = opts.skipHeaders ? dataRowIndex + 1 : dataRowIndex + 2;
+        processImportRow(pmRoot, headers, row, lineNo, opts, keyIndex, result);
+        dataRowIndex++;
+    });
     return result;
 }
 /**
@@ -695,10 +995,15 @@ function upsertUpdate(pmRoot, id, p, source) {
  * lower-level {@link validateParsedCSV} helper below.
  */
 function validateCSV(filePath, opts) {
-    const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8");
+    const { headers: rawHeaders, dataRows } = readCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", opts.skipHeaders ?? false);
     const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
     const report = validateParsedCSV(rawHeaders, dataRows, mapResolution.fieldMap);
-    return { ...report, autoMappings: mapResolution.autoMappings };
+    report.autoMappings = mapResolution.autoMappings;
+    report.fieldMapWarnings = [
+        ...validateFieldMapTargets(opts.fieldMap),
+        ...checkMapSourcesPresent(rawHeaders, opts.fieldMap),
+    ];
+    return report;
 }
 /**
  * Core validation logic over already-parsed headers + rows. Pure and
@@ -780,6 +1085,7 @@ function validateParsedCSV(rawHeaders, dataRows, fieldMap) {
         rowsWithNonIntegerPriority,
         rowsWithOutOfRangePriority,
         autoMappings: [],
+        fieldMapWarnings: [],
         issues,
     };
 }
@@ -1012,6 +1318,8 @@ export default defineExtension({
                 "pm csv import tasks.csv --type Feature --priority 1",
                 "pm csv import tasks.csv --strict",
                 "pm csv import items.csv --dry-run",
+                "pm csv import headerless.csv --skip-headers   # no header row, positional columns",
+                "pm csv import big.csv --stream   # stream large files without loading into memory",
             ],
             flags: [
                 { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
@@ -1025,6 +1333,8 @@ export default defineExtension({
                 { long: "--priority", value_name: "n", description: "Import only rows whose integer priority equals this value" },
                 { long: "--strict", description: "Abort before writing if validation finds missing titles, unknown statuses, bad priorities, or duplicate mapped columns" },
                 { long: "--dry-run", description: "Preview without writing" },
+                { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order (title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by)" },
+                { long: "--stream", description: "Stream the file row-by-row instead of loading it fully into memory (recommended for large CSV files)" },
             ],
             async run(ctx) {
                 const filePath = ctx.args[0];
@@ -1039,14 +1349,16 @@ export default defineExtension({
                 const encoding = resolveEncoding(ctx.options["encoding"]);
                 const source = (ctx.options["source"] ?? "").trim() || undefined;
                 const strict = readBoolOption(ctx.options, "strict");
+                const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
+                const stream = readBoolOption(ctx.options, "stream");
                 const filter = parseImportFilter(ctx.options["status"], ctx.options["type"], ctx.options["priority"]);
                 const absolutePath = resolve(filePath);
-                console.error(`Reading CSV from: ${absolutePath}`);
+                console.error(`Reading CSV from: ${absolutePath}${stream ? " (streaming)" : ""}`);
                 let res;
                 try {
                     if (strict)
-                        assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap });
-                    res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, autoMap, keyField, encoding, source, filter });
+                        assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
+                    res = await importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun, fieldMap, autoMap, keyField, encoding, source, filter, skipHeaders, stream });
                 }
                 catch (err) {
                     if (err instanceof CommandError)
@@ -1070,6 +1382,7 @@ export default defineExtension({
                         filtered: res.filtered,
                         previews: res.previews,
                         autoMapped,
+                        fieldMapWarnings: res.fieldMapWarnings,
                     };
                 }
                 console.error(`Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`);
@@ -1080,6 +1393,7 @@ export default defineExtension({
                     filtered: res.filtered,
                     errors: res.errors,
                     autoMapped,
+                    fieldMapWarnings: res.fieldMapWarnings,
                 };
             },
         });
@@ -1099,12 +1413,14 @@ export default defineExtension({
                 "pm csv validate jira.csv --map 'Summary=title'",
                 "pm csv validate jira.csv --auto-map",
                 "pm csv validate data.tsv --delimiter tab --json",
+                "pm csv validate headerless.csv --skip-headers",
             ],
             flags: [
                 { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
                 { long: "--map", value_name: "col=field", description: "Remap a CSV header to a pm field (repeatable, comma-joined) before validating" },
                 { long: "--auto-map", description: "Auto-map common third-party headers (e.g. summary->title) when unambiguous" },
                 { long: "--encoding", value_name: "enc", description: "Source file encoding: utf-8 (default) | utf16le | latin1" },
+                { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order" },
                 { long: "--json", description: "Emit the report as JSON" },
             ],
             async run(ctx) {
@@ -1116,11 +1432,12 @@ export default defineExtension({
                 const fieldMap = parseFieldMap(ctx.options["map"]);
                 const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
                 const encoding = resolveEncoding(ctx.options["encoding"]);
+                const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
                 const asJson = readBoolOption(ctx.options, "json");
                 const absolutePath = resolve(filePath);
                 let report;
                 try {
-                    report = validateCSV(absolutePath, { delimiter, fieldMap, autoMap, encoding });
+                    report = validateCSV(absolutePath, { delimiter, fieldMap, autoMap, encoding, skipHeaders });
                 }
                 catch (err) {
                     if (err instanceof CommandError)
@@ -1144,6 +1461,8 @@ export default defineExtension({
                 console.error(`Duplicate mapped columns: ${report.duplicateMappedColumns.join(", ") || "(none)"}`);
                 for (const issue of report.issues)
                     console.error(`  - ${issue}`);
+                for (const w of report.fieldMapWarnings)
+                    console.error(`  Warning: ${w}`);
                 console.error(report.ok ? "Validation OK." : "Validation FAILED (structural problems).");
                 // Structural problems (no title column / empty) → non-zero exit.
                 if (!report.ok) {
@@ -1269,14 +1588,16 @@ export default defineExtension({
             const encoding = resolveEncoding(ctx.options["encoding"]);
             const source = (ctx.options["source"] ?? "").trim() || undefined;
             const strict = readBoolOption(ctx.options, "strict");
+            const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
+            const stream = readBoolOption(ctx.options, "stream");
             const filter = parseImportFilter(ctx.options["status"], ctx.options["type"], ctx.options["priority"]);
             const absolutePath = resolve(filePath);
-            console.error(`csv-import: reading ${absolutePath}`);
+            console.error(`csv-import: reading ${absolutePath}${stream ? " (streaming)" : ""}`);
             let res;
             try {
                 if (strict)
-                    assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap });
-                res = importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, autoMap, keyField, encoding, source, filter });
+                    assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
+                res = await importCSV(ctx.pm_root, absolutePath, { delimiter, dryRun: false, fieldMap, autoMap, keyField, encoding, source, filter, skipHeaders, stream });
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -1294,5 +1615,5 @@ export default defineExtension({
 // ---------------------------------------------------------------------------
 // Named exports — pure helpers exposed for unit testing (no side effects).
 // ---------------------------------------------------------------------------
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, StreamingCSVParser, streamCSVFile, levenshtein, suggestClosest, validateFieldMapTargets, checkMapSourcesPresent, };
 //# sourceMappingURL=index.js.map
