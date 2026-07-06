@@ -959,7 +959,7 @@ function buildCsvExport(pmRoot, opts) {
 }
 export default defineExtension({
     name: "pm-csv",
-    version: "2026.6.14",
+    version: "2026.7.6",
     activate(api) {
         // -----------------------------------------------------------------------
         // Schema: register an optional `csv_source` provenance field so imported
