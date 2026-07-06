@@ -1,0 +1,15 @@
+id: pm-csv-137e
+title: Regenerate CHANGELOG after pm close item
+description: ""
+type: Task
+status: closed
+priority: 1
+tags[3]: changelog,ci,release
+created_at: "2026-07-05T23:39:36.476Z"
+updated_at: "2026-07-05T23:39:37.487Z"
+author: codex
+acceptance_criteria: "Package-local pm tracking item is closed and CHANGELOG.md is regenerated with pm-changelog so npm run changelog:check passes on current main."
+notes[1]{created_at,author,text}:
+  "2026-07-05T23:39:37.179Z",codex,"Current main CI fails npm run changelog:check after a pm close commit changed .agents/pm history without regenerating CHANGELOG.md. Repair is intentionally limited to pm tracking for this task plus generated CHANGELOG.md."
+close_reason: "Regenerated CHANGELOG.md with pm-changelog and verified changelog:check passes locally."
+body: ""
