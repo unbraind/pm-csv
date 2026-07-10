@@ -6,11 +6,12 @@ status: in_progress
 priority: 1
 tags[3]: ecosystem,ecosystem-pass-2026-06-10,production
 created_at: "2026-06-09T22:38:04.589Z"
-updated_at: "2026-07-10T10:50:11.975Z"
+updated_at: "2026-07-10T10:53:48.838Z"
 assignee: codex-5-3-sweep
 author: codex-5-3-sweep
-comments[1]{created_at,author,text}:
+comments[2]{created_at,author,text}:
   "2026-07-10T10:50:11.974Z",codex,"PR #21 finishing pass (2026-07-10): recovered and critically reviewed partial uncommitted fixes from a prior interrupted agent run. Kept fixes for streamed escaped-quote pairs split at chunk boundaries, CRLF split at chunk boundaries, physical CSV row-number tracking across blank rows, deferred --key index loading until headers validate, and the Levenshtein test comment typo; regenerated dist artifacts. Added exact-boundary regression tests. Verification: npm ci, npm run build, npm test => 89/89 pass; fresh /tmp/fx-pm-csv local install; timeout 20 pm --help returned successfully; real --skip-headers --stream dry-run and import created 2 items including title Stream \"two\"; blank-line streaming dry-run reported empty title at physical Row 5 and create 1/skip 1; malformed header with --stream --key title exited 2 with a single structured CommandError and no stack trace; default no-new-flags dry-run stdout matched origin/main exactly. npm run changelog:full and changelog:check passed. Bot findings accepted: Gemini/Greptile split CRLF, split quote, physical line numbering; cubic those plus deferred key-index load and comment typo. Hound ES6/dist warnings are configuration false positives because TypeScript targets ES2022 and generated dist intentionally uses modern syntax."
+  "2026-07-10T10:53:48.831Z",codex,"Post-push CI follow-up: GitHub tested the synthetic merge with origin/main (package 2026.7.7) and correctly failed changelog:check because the PR branch was still based on 2026.7.6. Merged origin/main without conflicts, reran npm ci/build/test (89/89 pass), regenerated CHANGELOG.md for 2026.7.7, and changelog:check passed."
 files[4]{path,scope,note}:
   index.ts,project,auto-map alias resolution
   README.md,project,auto-map docs
