@@ -287,11 +287,11 @@ class StreamingCSVParser {
  */
 function streamCSVFile(filePath, delimiter, encoding, onRow) {
     const bufEnc = encoding === "utf-8" ? "utf8" : encoding;
-    const stream = createReadStream(filePath, { encoding: bufEnc });
-    const parser = new StreamingCSVParser(delimiter, onRow);
-    let bomChecked = false;
-    let stopped = false;
     return new Promise((resolve, reject) => {
+        const stream = createReadStream(filePath, { encoding: bufEnc });
+        const parser = new StreamingCSVParser(delimiter, onRow);
+        let bomChecked = false;
+        let stopped = false;
         const fail = (err) => {
             if (stopped)
                 return;
@@ -474,8 +474,9 @@ function levenshtein(a, b) {
 function suggestClosest(input, valid) {
     let best;
     let bestDist = Infinity;
+    const normalizedInput = input.toLowerCase();
     for (const candidate of valid) {
-        const dist = levenshtein(input, candidate);
+        const dist = levenshtein(normalizedInput, candidate.toLowerCase());
         if (dist < bestDist) {
             bestDist = dist;
             best = candidate;

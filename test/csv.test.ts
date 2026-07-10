@@ -763,6 +763,11 @@ test("suggestClosest: finds the nearest valid match", () => {
   assert.equal(suggestClosest("stat", ["title", "status", "priority"]), "status");
 });
 
+test("suggestClosest: matches candidates case-insensitively", () => {
+  assert.equal(suggestClosest("TITLE", ["title", "status", "priority"]), "title");
+  assert.equal(suggestClosest("Stat", ["TITLE", "Status"]), "Status");
+});
+
 test("suggestClosest: returns undefined when nothing is close", () => {
   assert.equal(suggestClosest("completelyunrelated", ["title", "status"]), undefined);
 });

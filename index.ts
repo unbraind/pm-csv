@@ -360,12 +360,13 @@ function streamCSVFile(
   onRow: (row: string[]) => void,
 ): Promise<void> {
   const bufEnc: BufferEncoding = encoding === "utf-8" ? "utf8" : (encoding as BufferEncoding);
-  const stream = createReadStream(filePath, { encoding: bufEnc });
-  const parser = new StreamingCSVParser(delimiter, onRow);
-  let bomChecked = false;
-  let stopped = false;
 
   return new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(filePath, { encoding: bufEnc });
+    const parser = new StreamingCSVParser(delimiter, onRow);
+    let bomChecked = false;
+    let stopped = false;
+
     const fail = (err: unknown) => {
       if (stopped) return;
       stopped = true;
@@ -549,8 +550,9 @@ function levenshtein(a: string, b: string): number {
 function suggestClosest(input: string, valid: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestDist = Infinity;
+  const normalizedInput = input.toLowerCase();
   for (const candidate of valid) {
-    const dist = levenshtein(input, candidate);
+    const dist = levenshtein(normalizedInput, candidate.toLowerCase());
     if (dist < bestDist) {
       bestDist = dist;
       best = candidate;
