@@ -11,3 +11,4 @@ dist-test/
 .env
 .env.*
 !.env.example
+.agents/pm/extensions/
