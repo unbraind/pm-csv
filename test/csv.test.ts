@@ -25,6 +25,12 @@ import {
   discoverCustomFields,
   EXPORT_COLUMNS,
   IMPORT_COLUMNS,
+  StreamingCSVParser,
+  streamCSVFile,
+  levenshtein,
+  suggestClosest,
+  validateFieldMapTargets,
+  checkMapSourcesPresent,
 } from "../dist/index.js";
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -599,4 +605,204 @@ test("selectExportColumns: extraValid lets a custom field be selected", () => {
 
 test("selectExportColumns: unknown column still rejected with custom fields present", () => {
   assert.throws(() => selectExportColumns("title,nope", ["story_points"]), /Unknown export column/);
+});
+
+// ---------------------------------------------------------------------------
+// Streaming CSV parser (StreamingCSVParser / streamCSVFile)
+// ---------------------------------------------------------------------------
+
+test("StreamingCSVParser: matches parseCSV for simple rows", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push("a,b,c\n1,2,3");
+  parser.end();
+  assert.deepEqual(rows, [
+    ["a", "b", "c"],
+    ["1", "2", "3"],
+  ]);
+});
+
+test("StreamingCSVParser: handles quoted fields with embedded delimiters and newlines", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push('title,body\n"Fix, now","line1\nline2"');
+  parser.end();
+  assert.deepEqual(rows, [
+    ["title", "body"],
+    ["Fix, now", "line1\nline2"],
+  ]);
+});
+
+test("StreamingCSVParser: handles quoted field split across chunk boundary", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  // The quoted field is split mid-way through the chunk.
+  parser.push('title,body\n"A","line1\n');
+  parser.push('line2"');
+  parser.end();
+  assert.deepEqual(rows, [
+    ["title", "body"],
+    ["A", "line1\nline2"],
+  ]);
+});
+
+test("StreamingCSVParser: handles escaped quotes split across chunks", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  // The escaped-quote pair "" is split across the chunk boundary.
+  parser.push('a\n"She said ""');
+  parser.push('hi"""');
+  parser.end();
+  assert.deepEqual(rows, [
+    ["a"],
+    ['She said "hi"'],
+  ]);
+});
+
+test("StreamingCSVParser: handles an escaped quote pair split exactly across chunks", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push('a\n"She said "');
+  parser.push('"hi"""');
+  parser.end();
+  assert.deepEqual(rows, [["a"], ['She said "hi"']]);
+});
+
+test("StreamingCSVParser: custom delimiter (semicolon)", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(";", (r) => rows.push(r));
+  parser.push("a;b\n1;2");
+  parser.end();
+  assert.deepEqual(rows, [
+    ["a", "b"],
+    ["1", "2"],
+  ]);
+});
+
+test("StreamingCSVParser: CRLF line endings", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push("a,b\r\n1,2\r\n");
+  parser.end();
+  assert.deepEqual(rows, [
+    ["a", "b"],
+    ["1", "2"],
+  ]);
+});
+
+test("StreamingCSVParser: handles CRLF split exactly across chunks", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push("a,b\r");
+  parser.push("\n1,2\r");
+  parser.push("\n");
+  parser.end();
+  assert.deepEqual(rows, [["a", "b"], ["1", "2"]]);
+});
+
+test("StreamingCSVParser: empty input produces no rows", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push("");
+  parser.end();
+  assert.deepEqual(rows, []);
+});
+
+test("streamCSVFile: reads a file and emits rows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-stream-"));
+  const filePath = join(root, "data.csv");
+  writeFileSync(filePath, "title,status\nTask 1,open\nTask 2,closed\n");
+  const rows: string[][] = [];
+  try {
+    await streamCSVFile(filePath, ",", "utf-8", (r) => rows.push(r));
+    assert.deepEqual(rows, [
+      ["title", "status"],
+      ["Task 1", "open"],
+      ["Task 2", "closed"],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("streamCSVFile: strips BOM from the first chunk", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-stream-"));
+  const filePath = join(root, "bom.csv");
+  writeFileSync(filePath, "\uFEFFtitle,status\nX,open\n");
+  const rows: string[][] = [];
+  try {
+    await streamCSVFile(filePath, ",", "utf-8", (r) => rows.push(r));
+    assert.equal(rows[0][0], "title");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("streamCSVFile: rejects on a non-existent file", async () => {
+  await assert.rejects(
+    () => streamCSVFile("/nonexistent/path/file.csv", ",", "utf-8", () => {}),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Field mapping validation (levenshtein, suggestClosest, validateFieldMapTargets, checkMapSourcesPresent)
+// ---------------------------------------------------------------------------
+
+test("levenshtein: identical strings have distance 0", () => {
+  assert.equal(levenshtein("title", "title"), 0);
+});
+
+test("levenshtein: known edit distances", () => {
+  assert.equal(levenshtein("title", "titel"), 2); // swap l/e = 2 edits
+  assert.equal(levenshtein("", "abc"), 3);
+  assert.equal(levenshtein("abc", ""), 3);
+});
+
+test("suggestClosest: finds the nearest valid match", () => {
+  assert.equal(suggestClosest("titel", ["title", "status", "priority"]), "title");
+  assert.equal(suggestClosest("stat", ["title", "status", "priority"]), "status");
+});
+
+test("suggestClosest: matches candidates case-insensitively", () => {
+  assert.equal(suggestClosest("TITLE", ["title", "status", "priority"]), "title");
+  assert.equal(suggestClosest("Stat", ["TITLE", "Status"]), "Status");
+});
+
+test("suggestClosest: returns undefined when nothing is close", () => {
+  assert.equal(suggestClosest("completelyunrelated", ["title", "status"]), undefined);
+});
+
+test("validateFieldMapTargets: valid targets produce no warnings", () => {
+  assert.deepEqual(validateFieldMapTargets({ summary: "title", owner: "tags" }), []);
+});
+
+test("validateFieldMapTargets: unknown target warns with suggestion", () => {
+  const warnings = validateFieldMapTargets({ summary: "titel" });
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes("'titel'"), "warning should mention the bad target");
+  assert.ok(warnings[0].includes("Did you mean 'title'?"), "warning should suggest 'title'");
+  assert.ok(warnings[0].includes("Valid fields:"), "warning should list valid fields");
+});
+
+test("validateFieldMapTargets: multiple bad targets each produce a warning", () => {
+  const warnings = validateFieldMapTargets({ a: "titel", b: "stat" });
+  assert.equal(warnings.length, 2);
+});
+
+test("checkMapSourcesPresent: present sources produce no warnings", () => {
+  assert.deepEqual(checkMapSourcesPresent(["summary", "status"], { summary: "title" }), []);
+});
+
+test("checkMapSourcesPresent: missing source warns with suggestion", () => {
+  const warnings = checkMapSourcesPresent(["summary", "status"], { summry: "title" });
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes("'summry'"), "warning should mention the missing source");
+  assert.ok(warnings[0].includes("Did you mean 'summary'?"), "warning should suggest the closest header");
+  assert.ok(warnings[0].includes("Found:"), "warning should list found headers");
+});
+
+test("checkMapSourcesPresent: empty headers still warn without suggestion", () => {
+  const warnings = checkMapSourcesPresent([], { foo: "title" });
+  assert.equal(warnings.length, 1);
+  assert.ok(!warnings[0].includes("Did you mean"));
 });

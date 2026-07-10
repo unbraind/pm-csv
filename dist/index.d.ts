@@ -53,6 +53,29 @@ interface SerializeOptions {
  */
 declare function serializeCSV(rows: string[][], delimiterOrOpts: string | SerializeOptions): string;
 /**
+ * Incremental CSV state machine. Feed text via {@link push} and call
+ * {@link end} when the input is exhausted. Each complete row is emitted to the
+ * `onRow` callback exactly as in {@link parseCSV}.
+ */
+declare class StreamingCSVParser {
+    private delimiter;
+    private onRow;
+    private field;
+    private row;
+    private inQuotes;
+    private pendingBoundaryChar;
+    constructor(delimiter: string, onRow: (row: string[]) => void);
+    push(text: string): void;
+    end(): void;
+}
+/**
+ * Stream a CSV file from disk, emitting each parsed row to `onRow`. Uses a
+ * readable stream so the file is never fully loaded into memory. The BOM is
+ * stripped from the first chunk. If `onRow` throws, the stream is destroyed and
+ * the returned promise rejects with that error.
+ */
+declare function streamCSVFile(filePath: string, delimiter: string, encoding: SupportedEncoding, onRow: (row: string[]) => void): Promise<void>;
+/**
  * Resolve a user-supplied delimiter, accepting friendly aliases so TSV is easy:
  *   --delimiter tab   --delimiter "\t"   --delimiter ";"
  * A literal backslash-t is interpreted as a tab.
@@ -78,6 +101,28 @@ declare function parseFieldMap(spec: string | string[] | undefined): Record<stri
  * (canonical) header used for column lookup.
  */
 declare function applyFieldMap(headers: string[], fieldMap: Record<string, string>): string[];
+/**
+ * Compute a simple Levenshtein edit distance between two lowercase strings.
+ * Used only for "did you mean …?" suggestions, so a naive O(m*n) DP is fine.
+ */
+declare function levenshtein(a: string, b: string): number;
+/**
+ * Suggest the closest match from `valid` for an unknown `input` string, or
+ * undefined when nothing is close enough (distance > 3 and > half the input
+ * length). Exposed for unit testing.
+ */
+declare function suggestClosest(input: string, valid: readonly string[]): string | undefined;
+/**
+ * Validate that every `--map` target is a known pm import field. Returns a
+ * list of helpful warning strings (empty when all targets are valid). Each
+ * warning includes a "did you mean" suggestion when one is close.
+ */
+declare function validateFieldMapTargets(fieldMap: Record<string, string>): string[];
+/**
+ * Detect `--map` source headers that are not present in the CSV file. Returns a
+ * list of warning strings with a suggestion for the closest actual header.
+ */
+declare function checkMapSourcesPresent(headers: string[], fieldMap: Record<string, string>): string[];
 interface AutoFieldMapping {
     from: string;
     to: string;
@@ -168,6 +213,8 @@ interface CsvValidateReport {
     rowsWithNonIntegerPriority: number;
     rowsWithOutOfRangePriority: number;
     autoMappings: AutoFieldMapping[];
+    /** Helpful warnings about unknown --map targets or missing source headers. */
+    fieldMapWarnings: string[];
     issues: string[];
 }
 /**
@@ -210,6 +257,6 @@ declare const _default: {
     activate(api: import("@unbrained/pm-cli/sdk").ExtensionApi): void;
 };
 export default _default;
-export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, };
+export { parseCSV, serializeCSV, serializeField, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap, applyFieldMap, normalizeStatus, parseTags, stringifyTags, encodeKeyTagValue, decodeKeyTagValue, normalizeKeyValue, selectExportColumns, resolveEncoding, validateParsedCSV, strictValidationIssues, parseImportFilter, rowMatchesFilter, discoverCustomFields, EXPORT_COLUMNS, IMPORT_COLUMNS, StreamingCSVParser, streamCSVFile, levenshtein, suggestClosest, validateFieldMapTargets, checkMapSourcesPresent, };
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };
 //# sourceMappingURL=index.d.ts.map
