@@ -63,6 +63,7 @@ declare class StreamingCSVParser {
     private field;
     private row;
     private inQuotes;
+    private pendingBoundaryChar;
     constructor(delimiter: string, onRow: (row: string[]) => void);
     push(text: string): void;
     end(): void;

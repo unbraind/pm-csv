@@ -659,6 +659,15 @@ test("StreamingCSVParser: handles escaped quotes split across chunks", () => {
   ]);
 });
 
+test("StreamingCSVParser: handles an escaped quote pair split exactly across chunks", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push('a\n"She said "');
+  parser.push('"hi"""');
+  parser.end();
+  assert.deepEqual(rows, [["a"], ['She said "hi"']]);
+});
+
 test("StreamingCSVParser: custom delimiter (semicolon)", () => {
   const rows: string[][] = [];
   const parser = new StreamingCSVParser(";", (r) => rows.push(r));
@@ -679,6 +688,16 @@ test("StreamingCSVParser: CRLF line endings", () => {
     ["a", "b"],
     ["1", "2"],
   ]);
+});
+
+test("StreamingCSVParser: handles CRLF split exactly across chunks", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (r) => rows.push(r));
+  parser.push("a,b\r");
+  parser.push("\n1,2\r");
+  parser.push("\n");
+  parser.end();
+  assert.deepEqual(rows, [["a", "b"], ["1", "2"]]);
 });
 
 test("StreamingCSVParser: empty input produces no rows", () => {
@@ -734,7 +753,7 @@ test("levenshtein: identical strings have distance 0", () => {
 });
 
 test("levenshtein: known edit distances", () => {
-  assert.equal(levenshtein("title", "titel"), 2); // swap d/e = 2 edits
+  assert.equal(levenshtein("title", "titel"), 2); // swap l/e = 2 edits
   assert.equal(levenshtein("", "abc"), 3);
   assert.equal(levenshtein("abc", ""), 3);
 });

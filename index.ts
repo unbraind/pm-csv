@@ -263,6 +263,7 @@ class StreamingCSVParser {
   private field = "";
   private row: string[] = [];
   private inQuotes = false;
+  private pendingBoundaryChar = "";
 
   constructor(delimiter: string, onRow: (row: string[]) => void) {
     this.delimiter = delimiter;
@@ -270,11 +271,17 @@ class StreamingCSVParser {
   }
 
   push(text: string): void {
+    text = this.pendingBoundaryChar + text;
+    this.pendingBoundaryChar = "";
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
       if (this.inQuotes) {
         if (ch === '"') {
+          if (i + 1 === text.length) {
+            this.pendingBoundaryChar = ch;
+            return;
+          }
           if (text[i + 1] === '"') {
             this.field += '"';
             i += 2;
@@ -307,6 +314,10 @@ class StreamingCSVParser {
         i += 2;
         continue;
       }
+      if (ch === "\r" && i + 1 === text.length) {
+        this.pendingBoundaryChar = ch;
+        return;
+      }
       if (ch === "\n") {
         this.row.push(this.field);
         this.field = "";
@@ -321,6 +332,12 @@ class StreamingCSVParser {
   }
 
   end(): void {
+    if (this.pendingBoundaryChar === '"' && this.inQuotes) {
+      this.inQuotes = false;
+    } else if (this.pendingBoundaryChar !== "") {
+      this.field += this.pendingBoundaryChar;
+    }
+    this.pendingBoundaryChar = "";
     if (this.field !== "" || this.row.length > 0) {
       this.row.push(this.field);
       this.onRow(this.row);
@@ -1111,7 +1128,7 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
 
   let headers: string[] = [];
   let headerResolved = opts.skipHeaders ?? false;
-  let dataRowIndex = 0;
+  let logicalRowIndex = 0;
 
   if (headerResolved) {
     // --skip-headers: no header row in the file; use positional column order.
@@ -1123,10 +1140,13 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
     assertImportHeaders(headers, opts);
   }
 
-  // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
-  const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map<string, string>();
+  // Load only after the input header has been validated so malformed input
+  // reports its CSV error before any workspace lookup is attempted.
+  let keyIndex = new Map<string, string>();
+  if (headerResolved && opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
 
   await streamCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", (row: string[]) => {
+    logicalRowIndex++;
     // Skip fully-empty rows (mirrors the in-memory filter).
     if (!row.some((f) => f.trim() !== "")) return;
 
@@ -1138,12 +1158,12 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
       result.autoMappings = mapResolution.autoMappings;
       assertImportHeaders(headers, opts);
       headerResolved = true;
+      if (opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
       return;
     }
 
-    const lineNo = opts.skipHeaders ? dataRowIndex + 1 : dataRowIndex + 2;
+    const lineNo = logicalRowIndex;
     processImportRow(pmRoot, headers, row, lineNo, opts, keyIndex, result);
-    dataRowIndex++;
   });
 
   return result;
