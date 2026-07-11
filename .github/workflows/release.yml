@@ -20,7 +20,7 @@ jobs:
       RELEASE_TIMEZONE: Europe/Vienna
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -102,9 +102,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary
-          npx pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --check
-          npx pm-changelog --pm-root .agents/pm --stdout --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm > RELEASE_NOTES.md
+          npx pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary
+          npx pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --check
+          npx pm-changelog --pm-root .agents/pm --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm > RELEASE_NOTES.md
 
       - name: Run release checks
         if: steps.decide.outputs.should_release == 'true'
@@ -117,7 +117,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          paths=(package.json package-lock.json manifest.json dist CHANGELOG.md)
+          paths=(package.json package-lock.json manifest.json CHANGELOG.md)
           [[ -f index.ts ]] && paths+=(index.ts)
           [[ -d src ]] && paths+=(src)
           git add "${paths[@]}"

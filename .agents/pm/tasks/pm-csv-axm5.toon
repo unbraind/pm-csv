@@ -1,0 +1,34 @@
+id: pm-csv-axm5
+title: Adopt current pm SDK and TypeScript 7 toolchain
+description: "Consolidate five overlapping pm-csv updates, synchronize current pm package/manifest contracts, adopt checkout v7, and keep generated dist artifacts out of Git while preserving warning-free native CSV importer/exporter behavior."
+type: Task
+status: closed
+priority: 1
+tags[5]: csv,dependencies,release-readiness,sdk,toolchain
+created_at: "2026-07-11T00:44:31.070Z"
+updated_at: "2026-07-11T00:48:36.565Z"
+closed_at: "2026-07-11T00:48:29.497Z"
+author: codex
+estimated_minutes: 45
+acceptance_criteria: "pm CLI SDK/changelog, TypeScript, Node types, and checkout action are current; peer/dev and manifest minimums agree on 2026.7.10; generated dist is published but untracked; full release and installed extension gates pass without warnings, vulnerabilities, or private data."
+definition_of_ready: Current main activates CSV importer/exporter with zero doctor warnings and all five Dependabot updates are available.
+reviewer: greptile
+risk: low
+confidence: high
+sprint: 2026-07-production
+release: next
+resolution: "Updated pm CLI/SDK and pm-changelog to 2026.7.10, TypeScript to 7.0.2, Node types to 26.1.1, checkout to v7, aligned manifest/peer minimums, stopped tracking generated dist while retaining package builds, and made changelog verification preserve accurate legacy sections across rewritten history."
+expected_result: "Current contracts, warning-free importer/exporter activation, reproducible release checks, generated package artifacts, and no loss of valid changelog history."
+actual_result: "All 90 tests, typecheck, production audit, package dry-run, and real installed doctor passed; package exposes native importer/exporter and commands without warnings; legacy tag ancestry was handled with prepend-window validation."
+learnings[1]{created_at,author,text}:
+  "2026-07-11T00:48:36.565Z",codex,"After repository history rewrites, full changelog regeneration cannot reconstruct releases whose tags are no longer ancestors. Validate and generate the next release with the same since-previous-tag prepend window so authoritative historical sections remain intact."
+files[5]{path,scope,note}:
+  package.json,project,SDK and toolchain contracts
+  package-lock.json,project,Consolidated dependency graph
+  manifest.json,project,Runtime compatibility minimum
+  .github/workflows/ci.yml,project,Current checkout action
+  .github/workflows/release.yml,project,Daily release artifact policy
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode}:
+  "npm run release:check",package.json,project,300,schema
+close_reason: Current SDK/toolchain contracts and history-safe changelog validation implemented
+body: ""
