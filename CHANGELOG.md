@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fix --no-header: host rejects bare --no- flag as negation of missing --header ([pm-csv-ik4l](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ik4l.toon))
+
+### Other
+
+- Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-csv-m7i9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-m7i9.toon))
+
 ## 2026.7.11 - 2026-07-11
 
 ### Other
