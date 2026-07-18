@@ -2,27 +2,31 @@ id: pm-csv-m7i9
 title: Harden release bun-verify so registry-mirror lag cannot block the GitHub release
 description: Make the Daily Release resilient to bun registry-mirror lag so a cosmetic verify failure never blocks the actual GitHub release.
 type: Chore
-status: open
+status: closed
 priority: 1
 tags[2]: ci,release-readiness
 created_at: "2026-06-13T22:29:05.937Z"
-updated_at: "2026-06-13T22:29:05.937Z"
+updated_at: "2026-07-18T09:57:18.903Z"
 deadline: "2026-06-15T00:00:00.000Z"
-assignee: claude
+closed_at: "2026-07-18T09:57:18.902Z"
 author: claude
 estimated_minutes: 30
 acceptance_criteria: "bun-verify retries 8x then falls back to authoritative 'npm view pkg@version'; npm-confirmed publishes emit ::warning:: and exit 0 so Create GitHub release runs; only a genuinely-absent npm version fails the job; CI green; no secrets."
-expected_result: release.yml verify step exits 0 on npm-confirmed publishes despite bun mirror lag; GitHub release is created.
-comments[1]{created_at,author,text}:
+resolution: release.yml verify step falls back to authoritative npm view after bun-verify retries
+expected_result: bun-verify never blocks the GitHub release on registry-mirror lag
+actual_result: Fallback shipped fleet-wide 2026-06-14; Daily Releases green since (verified 2026-07-18)
+comments[2]{created_at,author,text}:
   "2026-06-13T22:29:05.937Z",claude,Identical release.yml verify block across all active pm repos; same deterministic transform applied.
+  "2026-07-18T09:57:18.421Z",pi-agent,"Verified done 2026-07-18: .github/workflows/release.yml contains the npm-authoritative fallback (npm view fallback after bun-verify retries), shipped fleet-wide 2026-06-14; multiple successful Daily Releases since (latest July 2026). Acceptance criteria met."
 notes[1]{created_at,author,text}:
   "2026-06-13T22:29:05.937Z",claude,See pm-changelog PR #49 for the lead fix and full rationale.
 learnings[1]{created_at,author,text}:
   "2026-06-13T22:29:05.937Z",claude,"Calendar -N suffixes are semver prereleases; bun resolves them via a registry mirror that lags npm publish,making the verify smoke test the flakiest for -N releases."
 files[1]{path,scope,note}:
   .github/workflows/release.yml,project,verify step npm-authoritative fallback
-tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
-  bun --version,null,project,60,null,null,null,null,null,null,null,null,null,null,null,null
+tests[1]{command,scope,timeout_seconds}:
+  bun --version,project,60
 docs[1]{path,scope,note}:
   .github/workflows/release.yml,project,release workflow being hardened
+close_reason: npm-authoritative bun-verify fallback shipped; acceptance criteria met
 body: "The 'Verify bun install of published package' step was fatal (5x30s then exit 1) and ordered before 'Create GitHub release', so bun registry-mirror lag (worst for prerelease -N versions) could block the real release after npm publish + tag + changelog commit already succeeded. This actually blocked pm-changelog 2026.6.13-1's GitHub release. Fleet-wide propagation of the pm-changelog#49 fix (npm-authoritative fallback)."
