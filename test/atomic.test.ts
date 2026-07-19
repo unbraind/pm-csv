@@ -465,3 +465,40 @@ test("--atomic in-batch duplicate-key guard: a repeated NEW key is skipped, not 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("--atomic post-rollback retry re-imports the FULL batch (compensated rows are not skipped)", async () => {
+  const root = freshTracker();
+  // Same file path across both runs => same derived transactionId, so this
+  // exercises resume detection (not a fresh transaction).
+  const file = join(root, "retry.csv");
+
+  // Run 1: row 3 (priority 99) is rejected by `pm create` mid-import, so the
+  // whole batch is rolled back — every applied create is compensated (closed).
+  writeFileSync(
+    file,
+    "title,status,priority\nRetry 1,open,2\nRetry 2,open,3\nBad,open,99\nRetry 3,open,1\n",
+  );
+  try {
+    const first = await runImport(root, file, { atomic: true });
+    assert.ok(first.error, "run 1 fails and rolls back");
+    const openAfterRollback = listItems(root).filter((i) => i.status !== "closed");
+    assert.equal(openAfterRollback.length, 0, "rollback leaves zero open items");
+
+    // Run 2: same file path (same transactionId), now all rows valid. The
+    // compensated (closed) items from run 1 still carry csv-txrow tags; they
+    // must NOT be treated as already-applied, so the retry re-imports the
+    // WHOLE batch rather than only the rows after the original failure.
+    writeFileSync(
+      file,
+      "title,status,priority\nRetry 1,open,2\nRetry 2,open,3\nRetry 3fixed,open,1\nRetry 4,open,1\n",
+    );
+    const second = await runImport(root, file, { atomic: true });
+    assert.ifError(second.error);
+    assert.equal(second.result.imported, 4, "retry re-imports all 4 rows, not a partial tail");
+
+    const open = listItems(root).filter((i) => i.status !== "closed");
+    assert.equal(open.length, 4, "all 4 rows exist as open items after the retry");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

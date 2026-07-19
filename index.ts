@@ -1193,6 +1193,16 @@ function deriveTransactionId(absoluteFilePath: string): string {
  * NOT used for matching. Only items carrying a per-row marker for THIS
  * transaction are included, so pre-existing items this transaction never
  * touched are never mistaken for already-applied steps.
+ *
+ * Closed items are EXCLUDED: `compensateCreate()` rolls a create back by
+ * `pm close` (not delete, to avoid history resurrection), which leaves the
+ * `csv-txrow:*` tag on the now-closed item. If those compensated items counted
+ * as "applied", re-running the same file after a full rollback would skip every
+ * rolled-back row and import only the rows after the original failure — instead
+ * of redoing the whole batch. Skipping closed items means a post-rollback retry
+ * re-creates the rolled-back rows (the closed tombstones are left in place).
+ * Genuinely interrupted runs (crash before compensation) leave their items OPEN,
+ * so real resume detection is unaffected.
  */
 function loadAppliedByTransaction(
   pmRoot: string,
@@ -1212,6 +1222,9 @@ function loadAppliedByTransaction(
     return { byRowIndex };
   }
   for (const item of items) {
+    // A compensated (rolled-back) create is closed but keeps its row tag; it
+    // must NOT count as applied, or a post-rollback retry would skip it.
+    if (item.status === "closed") continue;
     for (const tag of item.tags ?? []) {
       if (!tag.startsWith(rowMarkerPrefix)) continue;
       const rowIndexStr = tag.slice(rowMarkerPrefix.length);
