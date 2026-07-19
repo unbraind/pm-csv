@@ -2151,7 +2151,7 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
 
 export default defineExtension({
   name: "pm-csv",
-  version: "2026.7.19",
+  version: "2026.7.19-1",
 
   activate(api) {
     // -----------------------------------------------------------------------
