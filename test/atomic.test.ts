@@ -502,3 +502,36 @@ test("--atomic post-rollback retry re-imports the FULL batch (compensated rows a
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("--atomic closed-status rows resume idempotently (marker presence, not status, is the applied signal)", async () => {
+  const root = freshTracker();
+  // A row whose CSV status is `closed` is legitimately imported as a closed
+  // item. Resume must recognize it via its csv-txrow marker and NOT re-import
+  // it — matching by marker presence rather than excluding closed items.
+  const file = join(root, "closed-rows.csv");
+  writeFileSync(
+    file,
+    "title,status,priority\nDone task,closed,2\nActive task,open,3\n",
+  );
+  try {
+    const first = await runImport(root, file, { atomic: true });
+    assert.ifError(first.error);
+    assert.equal(first.result.imported, 2, "first run imports both rows");
+    const afterFirst = listItems(root);
+    assert.equal(afterFirst.length, 2, "two items exist after the first run");
+    assert.equal(
+      afterFirst.filter((i) => i.status === "closed").length,
+      1,
+      "the closed-status row was imported as a closed item",
+    );
+
+    // Re-run the same file: both rows (including the closed one) are already
+    // applied and must be skipped, with no duplicates.
+    const second = await runImport(root, file, { atomic: true });
+    assert.ifError(second.error);
+    assert.equal(second.result.imported, 0, "resumed run imports nothing new");
+    assert.equal(listItems(root).length, 2, "no duplicate of the closed-status row");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

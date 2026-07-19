@@ -1194,15 +1194,15 @@ function deriveTransactionId(absoluteFilePath: string): string {
  * transaction are included, so pre-existing items this transaction never
  * touched are never mistaken for already-applied steps.
  *
- * Closed items are EXCLUDED: `compensateCreate()` rolls a create back by
- * `pm close` (not delete, to avoid history resurrection), which leaves the
- * `csv-txrow:*` tag on the now-closed item. If those compensated items counted
- * as "applied", re-running the same file after a full rollback would skip every
- * rolled-back row and import only the rows after the original failure — instead
- * of redoing the whole batch. Skipping closed items means a post-rollback retry
- * re-creates the rolled-back rows (the closed tombstones are left in place).
- * Genuinely interrupted runs (crash before compensation) leave their items OPEN,
- * so real resume detection is unaffected.
+ * Presence of the row marker — NOT item status — is the applied signal. A row
+ * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
+ * closed item (upsertCreate/upsertUpdate pass the row's status), so it must
+ * still be recognized on resume and never re-imported. Conversely a rolled-back
+ * create must NOT be recognized: `compensateCreate()` therefore STRIPS the
+ * `csv-tx`/`csv-txrow` markers before closing the item, so a compensated
+ * tombstone carries no marker and a post-rollback retry re-imports its row.
+ * (This is why matching by marker-presence is correct for both a
+ * legitimately-closed applied row and a rolled-back one; see compensateCreate.)
  */
 function loadAppliedByTransaction(
   pmRoot: string,
@@ -1222,9 +1222,6 @@ function loadAppliedByTransaction(
     return { byRowIndex };
   }
   for (const item of items) {
-    // A compensated (rolled-back) create is closed but keeps its row tag; it
-    // must NOT count as applied, or a post-rollback retry would skip it.
-    if (item.status === "closed") continue;
     for (const tag of item.tags ?? []) {
       if (!tag.startsWith(rowMarkerPrefix)) continue;
       const rowIndexStr = tag.slice(rowMarkerPrefix.length);
@@ -1253,14 +1250,31 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
 }
 
 /**
- * Idempotently undo one row's create by closing the item it produced. Uses
- * `pm close` (NOT delete) to avoid the known history-resurrection issue, and
- * only acts when the item still exists and is not already closed, so a
+ * Idempotently undo one row's create. First STRIPS this transaction's ownership
+ * markers (`markers`) from the item, then closes it via `pm close` (NOT delete,
+ * to avoid the known history-resurrection issue) when it is still open.
+ *
+ * Stripping the markers is what makes marker-presence a correct "applied"
+ * signal: a rolled-back row no longer carries a marker, so a post-rollback
+ * retry re-imports it, while a *successfully* imported row (even one whose CSV
+ * status is `closed`/`canceled`) keeps its marker and is resumed idempotently.
+ * The strip runs whether the item is open or already closed (a closed-status
+ * create being rolled back must also lose its marker); the close only runs for
+ * a still-open item. Every step tolerates a missing item / absent tag, so a
  * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
  */
-function compensateCreate(pmRoot: string, id: string): void {
+function compensateCreate(pmRoot: string, id: string, markers: readonly string[] = []): void {
   const status = itemStatus(pmRoot, id);
-  if (status === undefined || status === "closed") return;
+  if (status === undefined) return; // item no longer exists
+  if (markers.length > 0) {
+    // Best-effort: remove the tx markers so this row is no longer "applied".
+    spawnSync(
+      "pm",
+      ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
+      { encoding: "utf-8" },
+    );
+  }
+  if (status === "closed") return; // terminal already; markers stripped above
   const r = spawnSync(
     "pm",
     ["--path", pmRoot, "close", id, "--reason", "atomic csv import rolled back"],
@@ -1448,7 +1462,9 @@ async function importCSVAtomic(
       // Prefer the id captured by apply() in this run; fall back to the
       // pre-run per-row lookup (resume-compensation of a prior run's applied step).
       const id = appliedId ?? applied.byRowIndex.get(row.rowIndex);
-      if (typeof id === "string" && id) compensateCreate(pmRoot, id);
+      // Strip both markers so the rolled-back row is no longer recognized as
+      // applied on a retry (marker-presence — not status — is the applied signal).
+      if (typeof id === "string" && id) compensateCreate(pmRoot, id, [rowTag, ownershipTag]);
     };
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
