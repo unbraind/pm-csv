@@ -1,8 +1,15 @@
 import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/sdk";
+import type {
+  WorkspaceTransactionStep,
+  WorkspaceTransactionCommitResult,
+  WorkspaceTransactionStepInspection,
+  WorkspaceTransactionJsonValue,
+} from "@unbrained/pm-cli/sdk";
 
 const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
@@ -455,6 +462,13 @@ const KEY_TAG_PREFIX = "csv-key:";
 // pm 2026.5.31) does not expose a `pm create --csv_source` setter, so we
 // persist the label as a queryable tag. Stripped from exports like csv-key.
 const SOURCE_TAG_PREFIX = "csv-source:";
+// Ownership tag prefix stamped by the `--atomic` import path. Every item
+// created/updated inside one atomic transaction is tagged
+// `csv-tx:<transactionId>` so a resumed run can detect (via inspect()) that the
+// step already applied and skip it — and so compensation can find the exact
+// items this transaction created. Like the other csv- prefixes it is stripped
+// from exports and never surfaces in the user-facing tags column.
+const TX_TAG_PREFIX = "csv-tx:";
 const PM_LIST_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
@@ -798,6 +812,30 @@ interface CsvImportOptions {
   skipHeaders?: boolean;
   /** Stream the file row-by-row instead of loading it fully into memory. */
   stream?: boolean;
+  /**
+   * Import all creates atomically under one workspace writer-locked,
+   * crash-recoverable transaction (pm-cli >= 2026.7.19
+   * `commitWorkspaceTransaction`). On failure every applied create is
+   * compensated (closed) and the tracker is left with no committed items from
+   * this import; an interrupted run resumes from the durable journal.
+   * Incompatible with `--stream` (an unbounded stream cannot be one transaction).
+   */
+  atomic?: boolean;
+  /**
+   * Bound commit coordinator for the atomic path. Bound by the command path
+   * from the host-injected `ctx.sdk` (runtime-safe); the importer path resolves
+   * it via a dynamic `import("@unbrained/pm-cli/sdk")`. When `atomic` is set but
+   * this is absent, the atomic path dynamically imports the SDK itself.
+   */
+  commitTransaction?: (options: {
+    transactionId: string;
+    author: string;
+    steps: readonly WorkspaceTransactionStep[];
+    lockTtlSeconds?: number;
+    lockWaitMs?: number;
+  }) => Promise<WorkspaceTransactionCommitResult>;
+  /** Author attributed to the atomic transaction journal (defaults to `pm-csv`). */
+  atomicAuthor?: string;
 }
 
 /**
@@ -1063,6 +1101,15 @@ function computeFieldMapWarnings(
 }
 
 function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
+  if (opts.atomic && opts.stream) {
+    return Promise.reject(
+      new CommandError(
+        "--atomic cannot be combined with --stream: an unbounded stream cannot be committed as one all-or-nothing transaction.",
+        EXIT_CODE.USAGE,
+      ),
+    );
+  }
+  if (opts.atomic) return importCSVAtomic(pmRoot, filePath, opts);
   if (opts.stream) return importCSVStreaming(pmRoot, filePath, opts);
   return Promise.resolve(importCSVInMemory(pmRoot, filePath, opts));
 }
@@ -1108,6 +1155,311 @@ function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOpti
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic import (pm-cli >= 2026.7.19 commitWorkspaceTransaction)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a stable, resumable transaction id from the absolute import file
+ * path: `csv-import-<sha1(absPath)>` (first 12 hex chars). Re-running the
+ * same `--atomic` import against the same file reuses this id, so an
+ * interrupted transaction resumes from its durable journal instead of
+ * duplicating already-applied rows. A different file (or a copy at a new
+ * absolute path) gets a fresh transaction id.
+ */
+function deriveTransactionId(absoluteFilePath: string): string {
+  const hash = createHash("sha1").update(absoluteFilePath).digest("hex").slice(0, 12);
+  return `csv-import-${hash}`;
+}
+
+/**
+ * Load every item tagged with this transaction's ownership marker
+ * (`csv-tx:<transactionId>`) and build two lookups the step `inspect()` uses to
+ * detect rows already applied by a prior (interrupted) run:
+ *   - byTitle: title -> item id (for create rows without --key)
+ *   - byKey:   normalized csv-key value -> item id (for --key upsert rows)
+ * Only items carrying the marker are included, so pre-existing items that this
+ * transaction never touched are never mistaken for already-applied steps.
+ */
+function loadAppliedByTransaction(
+  pmRoot: string,
+  transactionId: string,
+): { byTitle: Map<string, string>; byKey: Map<string, string> } {
+  const byTitle = new Map<string, string>();
+  const byKey = new Map<string, string>();
+  const marker = `${TX_TAG_PREFIX}${transactionId}`;
+  const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
+    encoding: "utf-8",
+    maxBuffer: PM_LIST_MAX_BUFFER,
+  });
+  if (r.error || r.status !== 0) return { byTitle, byKey };
+  let items: PmItem[] = [];
+  try {
+    items = JSON.parse(r.stdout).items ?? [];
+  } catch {
+    return { byTitle, byKey };
+  }
+  for (const item of items) {
+    const tags = item.tags ?? [];
+    if (!tags.includes(marker)) continue;
+    if (item.title) byTitle.set(item.title, item.id);
+    for (const tag of tags) {
+      if (tag.startsWith(KEY_TAG_PREFIX)) {
+        byKey.set(
+          normalizeKeyValue(decodeKeyTagValue(tag.slice(KEY_TAG_PREFIX.length))),
+          item.id,
+        );
+      }
+    }
+  }
+  return { byTitle, byKey };
+}
+
+/**
+ * Return the current status of an item id, or `undefined` when the item no
+ * longer exists. Used by the compensation guard so `pm close` is only invoked
+ * on items that still exist and are not already closed (closing a closed item
+ * is a pm error).
+ */
+function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
+  const r = spawnSync("pm", ["--path", pmRoot, "get", id, "--json"], { encoding: "utf-8" });
+  if (r.status !== 0) return undefined;
+  try {
+    const parsed = JSON.parse(r.stdout);
+    return (parsed.item?.status ?? parsed.status) as ItemStatus | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Idempotently undo one row's create by closing the item it produced. Uses
+ * `pm close` (NOT delete) to avoid the known history-resurrection issue, and
+ * only acts when the item still exists and is not already closed, so a
+ * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
+ */
+function compensateCreate(pmRoot: string, id: string): void {
+  const status = itemStatus(pmRoot, id);
+  if (status === undefined || status === "closed") return;
+  const r = spawnSync(
+    "pm",
+    ["--path", pmRoot, "close", id, "--reason", "atomic csv import rolled back"],
+    { encoding: "utf-8" },
+  );
+  if (r.status !== 0 && r.status !== 4) {
+    // Exit 4 is "already closed" / invalid state — treat as already compensated.
+    console.error(`atomic import: compensation close failed for ${id}: ${r.stderr?.trim() || r.stdout?.trim()}`);
+  }
+}
+
+/**
+ * Atomic in-memory import: every row that would CREATE an item becomes one
+ * {@link WorkspaceTransactionStep} committed under a single workspace
+ * writer-locked, crash-recoverable transaction. On success the same
+ * {@link ImportResult} as the non-atomic path is returned (counts derived from
+ * the committed step results). On failure every applied create is compensated
+ * (closed) so no committed items remain, and a clear error is thrown. An
+ * interrupted run resumes from the durable journal (inspect() skips already
+ * applied rows).
+ */
+async function importCSVAtomic(
+  pmRoot: string,
+  filePath: string,
+  opts: CsvImportOptions,
+): Promise<ImportResult> {
+  const { headers: rawHeaders, dataRows } = readCSVFile(
+    filePath,
+    opts.delimiter,
+    opts.encoding ?? "utf-8",
+    opts.skipHeaders ?? false,
+  );
+  const result: ImportResult = {
+    imported: 0,
+    updated: 0,
+    skipped: 0,
+    filtered: 0,
+    autoMappings: [],
+    errors: [],
+    previews: [],
+    fieldMapWarnings: [],
+  };
+
+  if (rawHeaders.length === 0) return result;
+
+  result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
+  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
+  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
+  result.autoMappings = mapResolution.autoMappings;
+  assertImportHeaders(headers, opts);
+
+  // A dry-run atomic import just previews like the non-atomic path (no
+  // transaction is committed, nothing is written).
+  if (opts.dryRun) {
+    const keyIndex = new Map<string, string>();
+    for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+      const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
+      processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
+    }
+    return result;
+  }
+
+  const transactionId = deriveTransactionId(resolve(filePath));
+  const author = opts.atomicAuthor ?? "pm-csv";
+  const ownershipTag = `${TX_TAG_PREFIX}${transactionId}`;
+
+  // Detect rows a prior interrupted run already applied (resumability) plus
+  // the dedup index for --key upsert decisions, both from one fresh scan.
+  const applied = loadAppliedByTransaction(pmRoot, transactionId);
+  const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
+
+  interface PlannedRow {
+    rowIndex: number;
+    lineNo: number;
+    parsed: ParsedRow;
+    keyValue: string;
+    existingId: string | undefined;
+    isUpdate: boolean;
+  }
+  const planned: PlannedRow[] = [];
+
+  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+    const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
+    const row = dataRows[rowIndex];
+    const { parsed } = rowFields(headers, row);
+
+    if (!parsed.title) {
+      console.error(`Row ${lineNo}: skipping — 'title' is empty`);
+      result.skipped++;
+      continue;
+    }
+    if (!rowMatchesFilter(parsed, opts.filter)) {
+      result.skipped++;
+      result.filtered++;
+      continue;
+    }
+    const keyValue = opts.keyField ? (rowFields(headers, row).get(opts.keyField) ?? "") : "";
+    const existingId = keyValue ? keyIndex.get(normalizeKeyValue(keyValue)) : undefined;
+    planned.push({ rowIndex, lineNo, parsed, keyValue, existingId, isUpdate: Boolean(existingId) });
+  }
+
+  // Build one transaction step per row to be written (create or update).
+  //   - create: apply() shells out to the same `pm create` as the non-atomic
+  //     path (parity) plus the csv-tx ownership marker; compensate() closes
+  //     the created id.
+  //   - update (--key match): apply() updates the pre-existing item and stamps
+  //     the marker; compensate() is a no-op (an arbitrary update cannot be
+  //     safely reverted without capturing prior state, and the spec scopes
+  //     all-or-nothing compensation to creates).
+  //
+  // Each step keeps a closure-local `appliedId` set by apply() so that the
+  // coordinator's compensation pass (which re-runs inspect() to decide whether
+  // a step needs compensating) sees `state: "applied"` for items created during
+  // THIS run — not just for items left over from a prior interrupted run (which
+  // the pre-run `applied` lookup already detects).
+  const steps: WorkspaceTransactionStep[] = planned.map((row) => {
+    const stepId = `csv-import-row-${row.rowIndex}`;
+    // Set by apply() in this run; undefined before that or on a fresh resume.
+    let appliedId: string | undefined;
+    const inspect = async (): Promise<WorkspaceTransactionStepInspection> => {
+      // A step applied earlier in THIS run (apply() captured the id).
+      if (appliedId) return { state: "applied", result: appliedId };
+      // A prior interrupted run already applied this row: an item carries this
+      // transaction's ownership marker AND matches this row.
+      if (row.isUpdate) {
+        const tagged = applied.byKey.get(normalizeKeyValue(row.keyValue));
+        if (tagged === row.existingId) return { state: "applied", result: tagged };
+      } else {
+        const id = applied.byTitle.get(row.parsed.title);
+        if (id) return { state: "applied", result: id };
+      }
+      return { state: "pending" };
+    };
+    const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => {
+      if (row.isUpdate) {
+        upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, [ownershipTag]);
+        appliedId = row.existingId!;
+        return row.existingId!;
+      }
+      const newId = upsertCreate(
+        pmRoot,
+        row.parsed,
+        opts.keyField ? row.keyValue : undefined,
+        opts.source,
+        [ownershipTag],
+      );
+      if (!newId) throw new Error(`pm create returned no id for row ${row.lineNo}`);
+      appliedId = newId;
+      return newId;
+    };
+    const prepareCompensation = async (): Promise<WorkspaceTransactionJsonValue | undefined> => undefined;
+    const compensate = async (): Promise<void> => {
+      // Only creates are compensated (closed); updates to pre-existing items
+      // are intentionally left in place (documented limitation).
+      if (row.isUpdate) return;
+      // Prefer the id captured by apply() in this run; fall back to the
+      // pre-run lookup (resume-compensation of a prior run's applied step).
+      const id = appliedId ?? applied.byTitle.get(row.parsed.title);
+      if (typeof id === "string" && id) compensateCreate(pmRoot, id);
+    };
+    return { id: stepId, inspect, apply, prepareCompensation, compensate };
+  });
+
+  const commitTransaction =
+    opts.commitTransaction ??
+    (await resolveCommitWorkspaceTransaction(pmRoot));
+
+  let committed: WorkspaceTransactionCommitResult;
+  try {
+    committed = await commitTransaction({ transactionId, author, steps });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Every applied create has been compensated by the coordinator; no
+    // committed items from this import remain in the tracker.
+    throw new CommandError(
+      `Atomic CSV import failed and was rolled back — every applied create was compensated (closed); the tracker has no committed items from this import. Transaction id: ${transactionId}. Underlying error: ${msg}`,
+      EXIT_CODE.GENERIC_FAILURE,
+    );
+  }
+
+  // Tally the ImportResult from the committed step results. Each committed
+  // result is the created/updated item id. Only rows that were NOT already
+  // applied at the start of this run (i.e. newly committed by this attempt)
+  // count toward imported/updated — resumed rows from a prior interrupted run
+  // are already in the tracker and must not be double-counted.
+  for (const row of planned) {
+    const stepId = `csv-import-row-${row.rowIndex}`;
+    const res = committed.results[stepId];
+    if (res === undefined) continue;
+    const alreadyApplied = row.isUpdate
+      ? applied.byKey.get(normalizeKeyValue(row.keyValue)) === row.existingId
+      : Boolean(applied.byTitle.get(row.parsed.title));
+    if (alreadyApplied) continue;
+    if (row.isUpdate) result.updated++;
+    else result.imported++;
+  }
+  return result;
+}
+
+/**
+ * Dynamically resolve the SDK commit coordinator bound to a tracker root, for
+ * the importer path (which has no host-injected `ctx.sdk`). Falls back to a
+ * dynamic `import("@unbrained/pm-cli/sdk")` so a standalone-installed extension
+ * still works when the SDK package is resolvable.
+ */
+async function resolveCommitWorkspaceTransaction(
+  pmRoot: string,
+): Promise<(opts: {
+  transactionId: string;
+  author: string;
+  steps: readonly WorkspaceTransactionStep[];
+  lockTtlSeconds?: number;
+  lockWaitMs?: number;
+}) => Promise<WorkspaceTransactionCommitResult>> {
+  const mod: typeof import("@unbrained/pm-cli/sdk") = await import("@unbrained/pm-cli/sdk");
+  const commit = mod.commitWorkspaceTransaction;
+  return (opts) => commit({ pmRoot, ...opts });
 }
 
 /**
@@ -1185,7 +1537,13 @@ function appendRelationalArgs(args: string[], p: ParsedRow): void {
 }
 
 /** Create a new item, optionally carrying a csv-key provenance tag. Returns the new id. */
-function upsertCreate(pmRoot: string, p: ParsedRow, keyValue?: string, source?: string): string {
+function upsertCreate(
+  pmRoot: string,
+  p: ParsedRow,
+  keyValue?: string,
+  source?: string,
+  extraTags?: string[],
+): string {
   const tags = [...p.tags];
   // Encode the lower-cased key so the stored tag matches the lookup index
   // regardless of pm's tag case-folding (see normalizeKeyValue).
@@ -1193,6 +1551,9 @@ function upsertCreate(pmRoot: string, p: ParsedRow, keyValue?: string, source?: 
   // Provenance for the schema-registered csv_source field, persisted as a tag
   // since the CLI exposes no scalar setter for extension-registered fields.
   if (source) tags.push(`${SOURCE_TAG_PREFIX}${encodeKeyTagValue(source)}`);
+  // Atomic-import ownership marker (csv-tx:<transactionId>) stamped on every
+  // item created inside a transaction so inspect()/compensate() can find it.
+  if (extraTags && extraTags.length > 0) tags.push(...extraTags);
 
   const args = ["--path", pmRoot, "create", "--title", p.title, "--status", p.status, "--json"];
   if (p.body) args.push("--body", p.body);
@@ -1213,7 +1574,13 @@ function upsertCreate(pmRoot: string, p: ParsedRow, keyValue?: string, source?: 
 }
 
 /** Update an existing item in place (status via update; close handled separately). */
-function upsertUpdate(pmRoot: string, id: string, p: ParsedRow, source?: string): void {
+function upsertUpdate(
+  pmRoot: string,
+  id: string,
+  p: ParsedRow,
+  source?: string,
+  extraTags?: string[],
+): void {
   const args = ["--path", pmRoot, "update", id, "--title", p.title];
   if (p.body !== undefined) args.push("--body", p.body);
   if (p.priority !== undefined) args.push("--priority", String(p.priority));
@@ -1223,6 +1590,7 @@ function upsertUpdate(pmRoot: string, id: string, p: ParsedRow, source?: string)
   // Preserve the csv-key tag (additive) and refresh the user tags.
   const addTags = [...p.tags];
   if (source) addTags.push(`${SOURCE_TAG_PREFIX}${encodeKeyTagValue(source)}`);
+  if (extraTags && extraTags.length > 0) addTags.push(...extraTags);
   if (addTags.length > 0) args.push("--add-tags", addTags.join(","));
   // `update` cannot set a closed status; only set non-closed statuses here.
   if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
@@ -1685,6 +2053,7 @@ export default defineExtension({
         "pm csv import items.csv --dry-run",
         "pm csv import headerless.csv --skip-headers   # no header row, positional columns",
         "pm csv import big.csv --stream   # stream large files without loading into memory",
+        "pm csv import tasks.csv --atomic # all-or-nothing import (pm-cli >= 2026.7.19)",
       ],
       flags: [
         { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
@@ -1700,6 +2069,7 @@ export default defineExtension({
         { long: "--dry-run", description: "Preview without writing" },
         { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order (title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by)" },
         { long: "--stream", description: "Stream the file row-by-row instead of loading it fully into memory (recommended for large CSV files)" },
+        { long: "--atomic", description: "Import all creates atomically under one workspace writer-locked, crash-recoverable transaction (pm-cli >= 2026.7.19). On failure every applied create is compensated (closed); interrupted runs resume. Incompatible with --stream" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
@@ -1720,6 +2090,7 @@ export default defineExtension({
         const strict = readBoolOption(ctx.options, "strict");
         const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
         const stream = readBoolOption(ctx.options, "stream");
+        const atomic = readBoolOption(ctx.options, "atomic");
         const filter = parseImportFilter(
           ctx.options["status"] as string | undefined,
           ctx.options["type"] as string | undefined,
@@ -1727,7 +2098,7 @@ export default defineExtension({
         );
         const absolutePath = resolve(filePath);
 
-        console.error(`Reading CSV from: ${absolutePath}${stream ? " (streaming)" : ""}`);
+        console.error(`Reading CSV from: ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
         let res: ImportResult;
         try {
@@ -1735,7 +2106,25 @@ export default defineExtension({
           res = await importCSV(
             ctx.pm_root,
             absolutePath,
-            { delimiter, dryRun, fieldMap, autoMap, keyField, encoding, source, filter, skipHeaders, stream },
+            {
+              delimiter,
+              dryRun,
+              fieldMap,
+              autoMap,
+              keyField,
+              encoding,
+              source,
+              filter,
+              skipHeaders,
+              stream,
+              atomic,
+              // Prefer the host-injected SDK coordinator (bound to the
+              // tracker root) so a standalone-installed extension never relies
+              // on package resolution; the atomic path falls back to a dynamic
+              // import when ctx.sdk is absent.
+              commitTransaction: ctx.sdk?.commitWorkspaceTransaction,
+              atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
+            },
           );
         } catch (err: unknown) {
           if (err instanceof CommandError) throw err;
@@ -2001,6 +2390,7 @@ export default defineExtension({
       const strict = readBoolOption(ctx.options, "strict");
       const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
       const stream = readBoolOption(ctx.options, "stream");
+      const atomic = readBoolOption(ctx.options, "atomic");
       const filter = parseImportFilter(
         ctx.options["status"] as string | undefined,
         ctx.options["type"] as string | undefined,
@@ -2008,7 +2398,7 @@ export default defineExtension({
       );
       const absolutePath = resolve(filePath);
 
-      console.error(`csv-import: reading ${absolutePath}${stream ? " (streaming)" : ""}`);
+      console.error(`csv-import: reading ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
       let res: ImportResult;
       try {
@@ -2016,7 +2406,20 @@ export default defineExtension({
         res = await importCSV(
           ctx.pm_root,
           absolutePath,
-          { delimiter, dryRun: false, fieldMap, autoMap, keyField, encoding, source, filter, skipHeaders, stream },
+          {
+            delimiter,
+            dryRun: false,
+            fieldMap,
+            autoMap,
+            keyField,
+            encoding,
+            source,
+            filter,
+            skipHeaders,
+            stream,
+            atomic,
+            atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
+          },
         );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

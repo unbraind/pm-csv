@@ -2,6 +2,10 @@
 
 ## 2026.7.19 - 2026-07-19
 
+### Added
+
+- atomic CSV import via commitWorkspaceTransaction (pm-cli 2026.7.19) ([pm-csv-4bvs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-4bvs.toon))
+
 ### Fixed
 
 - Fix --no-header: host rejects bare --no- flag as negation of missing --header ([pm-csv-ik4l](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ik4l.toon))

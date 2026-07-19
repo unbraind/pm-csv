@@ -1,0 +1,17 @@
+id: pm-csv-4bvs
+title: atomic CSV import via commitWorkspaceTransaction (pm-cli 2026.7.19)
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags[4]: 2026.7.19,concurrency,feature,sdk
+created_at: "2026-07-19T06:17:34.138Z"
+updated_at: "2026-07-19T06:32:41.375Z"
+assignee: pi-agent
+author: pi-agent
+expected_result: "--atomic flag on csv import: all-or-nothing via commitWorkspaceTransaction (pm-cli 2026.7.19), resumable, compensates on failure; default path byte-identical; 97 tests green."
+actual_result: Implemented. Build+typecheck clean. 97/97 tests pass (7 new atomic tests). Byte-identical default proven. Branch feat/atomic-csv-import. Left in_progress for owner verification + merge.
+comments[2]{created_at,author,text}:
+  "2026-07-19T06:24:43.933Z",pi-agent,"Implementation in progress: --atomic flag added. Uses commitWorkspaceTransaction (pm-cli 2026.7.19). Build + typecheck clean, 90 existing tests green. Manual E2E verified: happy path, mid-import failure compensation, resumability, --atomic+--stream rejected."
+  "2026-07-19T06:32:34.250Z",pi-agent,"Quality gates: build clean, typecheck clean, npm test 97/97 pass (90 existing + 7 new atomic). Byte-identical default proven (non-atomic diff empty after normalizing random temp paths + pm ids). --atomic+--stream rejected. Changelog Added entry added (pm-csv-4bvs tagged feature); will be regenerated at next release once item closed."
+body: ""
