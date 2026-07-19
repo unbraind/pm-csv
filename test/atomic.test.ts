@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import extension from "../dist/index.js";
+import extension, { atomicTransactionId } from "../dist/index.js";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the `--atomic` CSV import path (pm-cli >= 2026.7.19
@@ -167,6 +167,13 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
     );
     // No Good Row 3 (after the failure) was created either.
     assert.ok(!items.some((i) => i.title === "Good Row 3"), "rows after the failure were not created");
+    // Compensation STRIPS the tx markers, so a same-content retry after a
+    // transient failure re-imports rather than treating these tombstones as
+    // already-applied. No compensated item retains a csv-tx/csv-txrow marker.
+    assert.ok(
+      !items.some((i) => (i.tags ?? []).some((t: string) => t.startsWith("csv-tx"))),
+      "compensated items have their transaction markers stripped",
+    );
     void result;
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -249,8 +256,7 @@ test("--atomic resumability: partial application resumes without duplicating", a
     // `csv-txrow:<txId>#<rowIndex>` (source of truth) plus the batch marker
     // `csv-tx:<txId>` (for scanning), so we stamp both exactly as the importer
     // would.
-    const { createHash } = await import("node:crypto");
-    const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
+    const txId = atomicTransactionId(file);
     const batchTag = `csv-tx:${txId}`;
     const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
     const preTitles = ["Partial 1", "Partial 2"];
@@ -330,8 +336,7 @@ test("--atomic duplicate-title partial resume: only row 0 tagged => resume creat
     // per-row marker. With the OLD title-based matching, row 1's inspect()
     // would find row 0's item via byTitle and WRONGLY skip it, leaving just one
     // item. With per-row matching, row 1 is pending and gets created.
-    const { createHash } = await import("node:crypto");
-    const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
+    const txId = atomicTransactionId(file);
     const batchTag = `csv-tx:${txId}`;
     const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
     const r = spawnSync(
@@ -413,8 +418,7 @@ test("--atomic resume detection via per-row tag (not title or key): partial run 
     // by stamping their per-row markers. A title- or key-based matcher would
     // not be able to express this sparse partial application; only the per-row
     // tag does. Resume must create exactly rows 1 and 3.
-    const { createHash } = await import("node:crypto");
-    const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
+    const txId = atomicTransactionId(file);
     const batchTag = `csv-tx:${txId}`;
     const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
     const seed = [
@@ -531,6 +535,32 @@ test("--atomic closed-status rows resume idempotently (marker presence, not stat
     assert.ifError(second.error);
     assert.equal(second.result.imported, 0, "resumed run imports nothing new");
     assert.equal(listItems(root).length, 2, "no duplicate of the closed-status row");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--atomic editing the file in place re-imports new content (transaction id folds a content fingerprint)", async () => {
+  const root = freshTracker();
+  // Import succeeds, then the SAME path is overwritten with different rows.
+  // Because the transaction id folds a content fingerprint, the second import
+  // gets a fresh id and applies the new content instead of matching the old
+  // per-row markers and skipping the changed rows.
+  const file = join(root, "tasks.csv");
+  writeFileSync(file, "title,status,priority\nOld A,open,2\nOld B,open,3\n");
+  try {
+    const first = await runImport(root, file, { atomic: true });
+    assert.ifError(first.error);
+    assert.equal(first.result.imported, 2, "first import creates the original rows");
+
+    // Overwrite the same path with entirely different rows.
+    writeFileSync(file, "title,status,priority\nNew C,open,1\nNew D,open,2\n");
+    const second = await runImport(root, file, { atomic: true });
+    assert.ifError(second.error);
+    assert.equal(second.result.imported, 2, "edited content is imported, not skipped as 'already applied'");
+
+    const titles = listItems(root).map((i) => i.title).sort();
+    assert.deepEqual(titles, ["New C", "New D", "Old A", "Old B"], "the new rows are present, not silently dropped");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

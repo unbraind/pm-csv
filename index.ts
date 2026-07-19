@@ -1168,16 +1168,57 @@ function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOpti
 // ---------------------------------------------------------------------------
 
 /**
- * Derive a stable, resumable transaction id from the absolute import file
- * path: `csv-import-<sha1(absPath)>` (first 12 hex chars). Re-running the
- * same `--atomic` import against the same file reuses this id, so an
- * interrupted transaction resumes from its durable journal instead of
- * duplicating already-applied rows. A different file (or a copy at a new
- * absolute path) gets a fresh transaction id.
+ * SHA-1 fingerprint of the exact parsed content being imported (raw headers +
+ * every data row). Folded into the transaction id so editing a file in place
+ * changes the id (see deriveTransactionId).
  */
-function deriveTransactionId(absoluteFilePath: string): string {
-  const hash = createHash("sha1").update(absoluteFilePath).digest("hex").slice(0, 12);
+function fingerprintContent(rawHeaders: string[], dataRows: string[][]): string {
+  return createHash("sha1")
+    .update(JSON.stringify({ headers: rawHeaders, rows: dataRows }))
+    .digest("hex");
+}
+
+/**
+ * Derive a stable, resumable transaction id from the absolute import file path
+ * AND a fingerprint of the exact rows being imported:
+ * `csv-import-<sha1(absPath + separator + contentFingerprint)>` (12 hex chars).
+ *
+ * The content fingerprint is essential. Resume matching keys on `rowIndex`, so
+ * an id derived from the path ALONE would let a later import of *different*
+ * content at the same path reuse the old `csv-txrow:#<n>` markers — `inspect()`
+ * would treat the new rows as already applied and silently skip them, reporting
+ * a successful import that changed nothing. Folding the content into the id
+ * means: the SAME file re-run after a crash keeps the same id (resumes from the
+ * journal, no duplicates), while editing the file in place yields a NEW id (a
+ * fresh import that applies the new contents) — never a stale skip.
+ */
+function deriveTransactionId(absoluteFilePath: string, contentFingerprint: string): string {
+  const hash = createHash("sha1")
+    .update(absoluteFilePath)
+    .update("\x1f")  // unit-separator between path and content
+    .update(contentFingerprint)
+    .digest("hex")
+    .slice(0, 12);
   return `csv-import-${hash}`;
+}
+
+/**
+ * Public helper: the atomic transaction id that `pm csv import <file> --atomic`
+ * derives for the given file and options (reads and parses the file exactly as
+ * the importer does). Exposed so callers/tests can correlate items to their
+ * originating atomic import without re-implementing the derivation.
+ */
+export function atomicTransactionId(
+  filePath: string,
+  opts: { delimiter?: string; encoding?: SupportedEncoding; skipHeaders?: boolean } = {},
+): string {
+  const { headers: rawHeaders, dataRows } = readCSVFile(
+    filePath,
+    resolveDelimiter(opts.delimiter),
+    opts.encoding ?? "utf-8",
+    opts.skipHeaders ?? false,
+  );
+  return deriveTransactionId(resolve(filePath), fingerprintContent(rawHeaders, dataRows));
 }
 
 /**
@@ -1337,7 +1378,13 @@ async function importCSVAtomic(
     return result;
   }
 
-  const transactionId = deriveTransactionId(resolve(filePath));
+  // Fingerprint the exact parsed content (raw headers + all data rows) so that
+  // editing the file in place yields a fresh transaction id instead of reusing
+  // stale per-row markers from a previous import of different content.
+  const transactionId = deriveTransactionId(
+    resolve(filePath),
+    fingerprintContent(rawHeaders, dataRows),
+  );
   const author = opts.atomicAuthor ?? "pm-csv";
   const ownershipTag = `${TX_TAG_PREFIX}${transactionId}`;
   // Per-row ownership marker source of truth: `csv-txrow:<transactionId>#<rowIndex>`.
