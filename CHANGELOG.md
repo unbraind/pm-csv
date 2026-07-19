@@ -1,10 +1,16 @@
 # Changelog
 
-## 2026.7.19 - 2026-07-19
+## 2026.7.19-1 - 2026-07-19
 
 ### Added
 
 - atomic CSV import via commitWorkspaceTransaction (pm-cli 2026.7.19) ([pm-csv-4bvs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-4bvs.toon))
+
+### Fixed
+
+- atomic import: per-row resume/compensation tag + in-batch dup-key guard + SDK resolve hardening (2026.7.19-1) ([pm-csv-j3pi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-j3pi.toon))
+
+## 2026.7.19 - 2026-07-19
 
 ### Fixed
 

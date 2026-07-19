@@ -463,12 +463,18 @@ const KEY_TAG_PREFIX = "csv-key:";
 // persist the label as a queryable tag. Stripped from exports like csv-key.
 const SOURCE_TAG_PREFIX = "csv-source:";
 // Ownership tag prefix stamped by the `--atomic` import path. Every item
-// created/updated inside one atomic transaction is tagged
-// `csv-tx:<transactionId>` so a resumed run can detect (via inspect()) that the
-// step already applied and skip it — and so compensation can find the exact
-// items this transaction created. Like the other csv- prefixes it is stripped
-// from exports and never surfaces in the user-facing tags column.
+// created/updated inside one atomic transaction is tagged with BOTH:
+//   - a batch-level marker `csv-tx:<transactionId>` (useful for scanning), and
+//   - a per-row marker `csv-txrow:<transactionId>#<rowIndex>` (source of truth).
+// The per-row marker makes resume/compensation per-row-precise, so a CSV with
+// duplicate titles or duplicate keys cannot trick inspect() into skipping the
+// wrong row or compensating the wrong item. Like the other csv- prefixes both
+// are stripped from exports and never surface in the user-facing tags column.
+// pm lower-cases tags on storage; transactionId is `csv-import-<hex>` (already
+// lower-case) and rowIndex is numeric, so the marker round-trips unchanged.
 const TX_TAG_PREFIX = "csv-tx:";
+const TX_ROW_TAG_PREFIX = "csv-txrow:";
+const TX_ROW_TAG_SEPARATOR = "#";
 const PM_LIST_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
@@ -1175,46 +1181,45 @@ function deriveTransactionId(absoluteFilePath: string): string {
 }
 
 /**
- * Load every item tagged with this transaction's ownership marker
- * (`csv-tx:<transactionId>`) and build two lookups the step `inspect()` uses to
- * detect rows already applied by a prior (interrupted) run:
- *   - byTitle: title -> item id (for create rows without --key)
- *   - byKey:   normalized csv-key value -> item id (for --key upsert rows)
- * Only items carrying the marker are included, so pre-existing items that this
- * transaction never touched are never mistaken for already-applied steps.
+ * Load every item stamped with this transaction's per-row ownership marker
+ * (`csv-txrow:<transactionId>#<rowIndex>`) and build a single lookup the step
+ * `inspect()` uses to detect rows already applied by a prior (interrupted) run:
+ *   - byRowIndex: rowIndex -> item id
+ *
+ * The per-row marker is the source of truth for resume/compensation: it makes
+ * matching per-row-precise, so a CSV with duplicate titles or duplicate keys
+ * can never trick inspect() into skipping the wrong row. The batch-level
+ * `csv-tx:<transactionId>` marker is also stamped (handy for scanning) but is
+ * NOT used for matching. Only items carrying a per-row marker for THIS
+ * transaction are included, so pre-existing items this transaction never
+ * touched are never mistaken for already-applied steps.
  */
 function loadAppliedByTransaction(
   pmRoot: string,
   transactionId: string,
-): { byTitle: Map<string, string>; byKey: Map<string, string> } {
-  const byTitle = new Map<string, string>();
-  const byKey = new Map<string, string>();
-  const marker = `${TX_TAG_PREFIX}${transactionId}`;
+): { byRowIndex: Map<number, string> } {
+  const byRowIndex = new Map<number, string>();
+  const rowMarkerPrefix = `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`;
   const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
     encoding: "utf-8",
     maxBuffer: PM_LIST_MAX_BUFFER,
   });
-  if (r.error || r.status !== 0) return { byTitle, byKey };
+  if (r.error || r.status !== 0) return { byRowIndex };
   let items: PmItem[] = [];
   try {
     items = JSON.parse(r.stdout).items ?? [];
   } catch {
-    return { byTitle, byKey };
+    return { byRowIndex };
   }
   for (const item of items) {
-    const tags = item.tags ?? [];
-    if (!tags.includes(marker)) continue;
-    if (item.title) byTitle.set(item.title, item.id);
-    for (const tag of tags) {
-      if (tag.startsWith(KEY_TAG_PREFIX)) {
-        byKey.set(
-          normalizeKeyValue(decodeKeyTagValue(tag.slice(KEY_TAG_PREFIX.length))),
-          item.id,
-        );
-      }
+    for (const tag of item.tags ?? []) {
+      if (!tag.startsWith(rowMarkerPrefix)) continue;
+      const rowIndexStr = tag.slice(rowMarkerPrefix.length);
+      const rowIndex = Number.parseInt(rowIndexStr, 10);
+      if (Number.isInteger(rowIndex)) byRowIndex.set(rowIndex, item.id);
     }
   }
-  return { byTitle, byKey };
+  return { byRowIndex };
 }
 
 /**
@@ -1308,11 +1313,20 @@ async function importCSVAtomic(
   const transactionId = deriveTransactionId(resolve(filePath));
   const author = opts.atomicAuthor ?? "pm-csv";
   const ownershipTag = `${TX_TAG_PREFIX}${transactionId}`;
+  // Per-row ownership marker source of truth: `csv-txrow:<transactionId>#<rowIndex>`.
+  const rowTagFor = (rowIndex: number): string =>
+    `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}${rowIndex}`;
 
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
   const applied = loadAppliedByTransaction(pmRoot, transactionId);
   const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
+  // In-batch duplicate-KEY guard: keys already claimed by an earlier planned
+  // CREATE in THIS run (the keyIndex is not updated during planning, so
+  // without this guard two rows sharing a not-yet-existing key would both
+  // plan as create and produce duplicate items). A later row repeating a
+  // claimed key is skipped with a clear per-row warning (see README).
+  const claimedKeys = new Map<string, number>();
 
   interface PlannedRow {
     rowIndex: number;
@@ -1327,7 +1341,9 @@ async function importCSVAtomic(
   for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
     const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
     const row = dataRows[rowIndex];
-    const { parsed } = rowFields(headers, row);
+    // Compute the field accessor once and reuse for both `parsed` and the
+    // --key value (previously rowFields() was called twice per row).
+    const { get, parsed } = rowFields(headers, row);
 
     if (!parsed.title) {
       console.error(`Row ${lineNo}: skipping — 'title' is empty`);
@@ -1339,46 +1355,64 @@ async function importCSVAtomic(
       result.filtered++;
       continue;
     }
-    const keyValue = opts.keyField ? (rowFields(headers, row).get(opts.keyField) ?? "") : "";
-    const existingId = keyValue ? keyIndex.get(normalizeKeyValue(keyValue)) : undefined;
+    const keyValue = opts.keyField ? (get(opts.keyField) ?? "") : "";
+    const normalizedKey = keyValue ? normalizeKeyValue(keyValue) : "";
+    // In-batch duplicate-key guard: an earlier planned CREATE in this run
+    // already claimed this key. The first item does not exist yet at apply
+    // time, so rather than fold a dependent update (the transaction primitive
+    // treats steps as independent) we skip the duplicate with a clear warning.
+    if (normalizedKey && claimedKeys.has(normalizedKey)) {
+      const firstRow = claimedKeys.get(normalizedKey)!;
+      console.error(
+        `Row ${lineNo}: skipping — key '${keyValue}' duplicates row ${
+          opts.skipHeaders ? firstRow + 1 : firstRow + 2
+        } which is already planned as a create in this --atomic import`,
+      );
+      result.skipped++;
+      continue;
+    }
+    const existingId = normalizedKey ? keyIndex.get(normalizedKey) : undefined;
+    if (normalizedKey && !existingId) claimedKeys.set(normalizedKey, rowIndex);
     planned.push({ rowIndex, lineNo, parsed, keyValue, existingId, isUpdate: Boolean(existingId) });
   }
 
   // Build one transaction step per row to be written (create or update).
   //   - create: apply() shells out to the same `pm create` as the non-atomic
-  //     path (parity) plus the csv-tx ownership marker; compensate() closes
-  //     the created id.
+  //     path (parity) plus the csv-tx batch marker AND the per-row marker;
+  //     compensate() closes the created id.
   //   - update (--key match): apply() updates the pre-existing item and stamps
-  //     the marker; compensate() is a no-op (an arbitrary update cannot be
+  //     both markers; compensate() is a no-op (an arbitrary update cannot be
   //     safely reverted without capturing prior state, and the spec scopes
   //     all-or-nothing compensation to creates).
   //
-  // Each step keeps a closure-local `appliedId` set by apply() so that the
-  // coordinator's compensation pass (which re-runs inspect() to decide whether
-  // a step needs compensating) sees `state: "applied"` for items created during
-  // THIS run — not just for items left over from a prior interrupted run (which
-  // the pre-run `applied` lookup already detects).
+  // Resume/compensation matching is per-row-precise via the per-row marker
+  // (csv-txrow:<transactionId>#<rowIndex>), so duplicate titles or duplicate
+  // keys in the CSV cannot trick inspect() into skipping the wrong row or
+  // compensate() into closing the wrong item. Each step keeps a closure-local
+  // `appliedId` set by apply() so the coordinator's compensation pass (which
+  // re-runs inspect() to decide whether a step needs compensating) sees
+  // `state: "applied"` for items created during THIS run — not just for items
+  // left over from a prior interrupted run (which the pre-run `applied` lookup
+  // already detects).
   const steps: WorkspaceTransactionStep[] = planned.map((row) => {
     const stepId = `csv-import-row-${row.rowIndex}`;
+    const rowTag = rowTagFor(row.rowIndex);
     // Set by apply() in this run; undefined before that or on a fresh resume.
     let appliedId: string | undefined;
     const inspect = async (): Promise<WorkspaceTransactionStepInspection> => {
       // A step applied earlier in THIS run (apply() captured the id).
       if (appliedId) return { state: "applied", result: appliedId };
       // A prior interrupted run already applied this row: an item carries this
-      // transaction's ownership marker AND matches this row.
-      if (row.isUpdate) {
-        const tagged = applied.byKey.get(normalizeKeyValue(row.keyValue));
-        if (tagged === row.existingId) return { state: "applied", result: tagged };
-      } else {
-        const id = applied.byTitle.get(row.parsed.title);
-        if (id) return { state: "applied", result: id };
-      }
+      // transaction's per-row marker for THIS rowIndex. Per-row-precise, so
+      // duplicate titles/keys cannot match the wrong row.
+      const id = applied.byRowIndex.get(row.rowIndex);
+      if (id) return { state: "applied", result: id };
       return { state: "pending" };
     };
     const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => {
+      const ownershipTags = [ownershipTag, rowTag];
       if (row.isUpdate) {
-        upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, [ownershipTag]);
+        upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, ownershipTags);
         appliedId = row.existingId!;
         return row.existingId!;
       }
@@ -1387,7 +1421,7 @@ async function importCSVAtomic(
         row.parsed,
         opts.keyField ? row.keyValue : undefined,
         opts.source,
-        [ownershipTag],
+        ownershipTags,
       );
       if (!newId) throw new Error(`pm create returned no id for row ${row.lineNo}`);
       appliedId = newId;
@@ -1399,8 +1433,8 @@ async function importCSVAtomic(
       // are intentionally left in place (documented limitation).
       if (row.isUpdate) return;
       // Prefer the id captured by apply() in this run; fall back to the
-      // pre-run lookup (resume-compensation of a prior run's applied step).
-      const id = appliedId ?? applied.byTitle.get(row.parsed.title);
+      // pre-run per-row lookup (resume-compensation of a prior run's applied step).
+      const id = appliedId ?? applied.byRowIndex.get(row.rowIndex);
       if (typeof id === "string" && id) compensateCreate(pmRoot, id);
     };
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
@@ -1432,9 +1466,7 @@ async function importCSVAtomic(
     const stepId = `csv-import-row-${row.rowIndex}`;
     const res = committed.results[stepId];
     if (res === undefined) continue;
-    const alreadyApplied = row.isUpdate
-      ? applied.byKey.get(normalizeKeyValue(row.keyValue)) === row.existingId
-      : Boolean(applied.byTitle.get(row.parsed.title));
+    const alreadyApplied = applied.byRowIndex.has(row.rowIndex);
     if (alreadyApplied) continue;
     if (row.isUpdate) result.updated++;
     else result.imported++;
@@ -1443,10 +1475,31 @@ async function importCSVAtomic(
 }
 
 /**
+ * Cached SDK commit coordinator. Resolved once per process via a dynamic
+ * `import("@unbrained/pm-cli/sdk")` so repeated --atomic calls don't re-import.
+ * `null` means a previous attempt failed and the failure is not retried within
+ * this process (each CLI invocation is a fresh process, so this is safe).
+ */
+let cachedCommitWorkspaceTransaction:
+  | ((options: {
+      pmRoot: string;
+      transactionId: string;
+      author: string;
+      steps: readonly WorkspaceTransactionStep[];
+      lockTtlSeconds?: number;
+      lockWaitMs?: number;
+    }) => Promise<WorkspaceTransactionCommitResult>)
+  | null
+  | undefined;
+
+/**
  * Dynamically resolve the SDK commit coordinator bound to a tracker root, for
  * the importer path (which has no host-injected `ctx.sdk`). Falls back to a
  * dynamic `import("@unbrained/pm-cli/sdk")` so a standalone-installed extension
- * still works when the SDK package is resolvable.
+ * still works when the SDK package is resolvable. The resolved function is
+ * cached at module scope so repeated --atomic calls don't re-import. If the
+ * import fails or `commitWorkspaceTransaction` is not exported, a clear,
+ * actionable CommandError is thrown.
  */
 async function resolveCommitWorkspaceTransaction(
   pmRoot: string,
@@ -1457,8 +1510,36 @@ async function resolveCommitWorkspaceTransaction(
   lockTtlSeconds?: number;
   lockWaitMs?: number;
 }) => Promise<WorkspaceTransactionCommitResult>> {
-  const mod: typeof import("@unbrained/pm-cli/sdk") = await import("@unbrained/pm-cli/sdk");
+  if (cachedCommitWorkspaceTransaction === null) {
+    throw new CommandError(
+      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but it could not be resolved (a prior attempt in this process failed). Ensure @unbrained/pm-cli is installed and up to date.",
+      EXIT_CODE.USAGE,
+    );
+  }
+  if (cachedCommitWorkspaceTransaction) {
+    const cached = cachedCommitWorkspaceTransaction;
+    return (opts) => cached({ pmRoot, ...opts });
+  }
+  let mod: typeof import("@unbrained/pm-cli/sdk");
+  try {
+    mod = await import("@unbrained/pm-cli/sdk");
+  } catch (err: unknown) {
+    cachedCommitWorkspaceTransaction = null;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CommandError(
+      `--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the SDK could not be imported: ${msg}. Install or upgrade @unbrained/pm-cli.`,
+      EXIT_CODE.USAGE,
+    );
+  }
   const commit = mod.commitWorkspaceTransaction;
+  if (typeof commit !== "function") {
+    cachedCommitWorkspaceTransaction = null;
+    throw new CommandError(
+      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the installed SDK does not export it as a function. Upgrade @unbrained/pm-cli to >=2026.7.19.",
+      EXIT_CODE.USAGE,
+    );
+  }
+  cachedCommitWorkspaceTransaction = commit;
   return (opts) => commit({ pmRoot, ...opts });
 }
 
@@ -1970,7 +2051,9 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
           (t) =>
             typeof t === "string" &&
             !t.startsWith(KEY_TAG_PREFIX) &&
-            !t.startsWith(SOURCE_TAG_PREFIX),
+            !t.startsWith(SOURCE_TAG_PREFIX) &&
+            !t.startsWith(TX_TAG_PREFIX) &&
+            !t.startsWith(TX_ROW_TAG_PREFIX),
         ) as string[];
         return stringifyTags(visible);
       }

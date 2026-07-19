@@ -243,19 +243,24 @@ test("--atomic resumability: partial application resumes without duplicating", a
   );
   try {
     // Simulate a prior interrupted run that applied only the first 2 rows by
-    // creating them with the transaction's ownership tag. The transaction id is
-    // derived from the absolute file path (csv-import-<sha1(absPath)[:12]>),
-    // so we compute the same tag the importer would stamp.
+    // creating them with the transaction's per-row ownership tags. The
+    // transaction id is derived from the absolute file path
+    // (csv-import-<sha1(absPath)[:12]>); resume matches via the per-row marker
+    // `csv-txrow:<txId>#<rowIndex>` (source of truth) plus the batch marker
+    // `csv-tx:<txId>` (for scanning), so we stamp both exactly as the importer
+    // would.
     const { createHash } = await import("node:crypto");
     const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
-    const tag = `csv-tx:${txId}`;
-    for (const title of ["Partial 1", "Partial 2"]) {
+    const batchTag = `csv-tx:${txId}`;
+    const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
+    const preTitles = ["Partial 1", "Partial 2"];
+    for (let i = 0; i < preTitles.length; i++) {
       const r = spawnSync(
         "pm",
-        ["--path", root, "create", "--title", title, "--status", "open", "--priority", "2", "--tags", tag, "--json"],
+        ["--path", root, "create", "--title", preTitles[i], "--status", "open", "--priority", "2", "--tags", `${batchTag},${rowTag(i)}`, "--json"],
         { encoding: "utf-8" },
       );
-      assert.equal(r.status, 0, `pre-create ${title} should succeed: ${r.stderr}`);
+      assert.equal(r.status, 0, `pre-create ${preTitles[i]} should succeed: ${r.stderr}`);
     }
     assert.equal(listItems(root).length, 2, "2 items pre-exist (simulated partial run)");
 
@@ -281,6 +286,181 @@ test("--atomic combined with --stream fails fast with a clear usage error", asyn
     assert.ok(error, "--atomic + --stream should error");
     assert.equal((error as any).exitCode, 2, "usage error exit code");
     assert.match(error!.message, /--atomic cannot be combined with --stream/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+// ---------------------------------------------------------------------------
+// New tests for the per-row ownership tag + in-batch duplicate-key guard
+// (pm-csv 2026.7.19-1: resume/compensation correctness for duplicate titles
+// and duplicate keys).
+// ---------------------------------------------------------------------------
+
+test("--atomic duplicate-title creates: two rows same title yield TWO items; resume does not skip or duplicate", async () => {
+  const root = freshTracker();
+  const file = join(root, "duptitles.csv");
+  writeFileSync(file, "title,status,priority\nDup,open,2\nDup,open,3\n");
+  try {
+    // Fresh run: two rows same title, no --key. Both must create (titles are
+    // NOT a uniqueness key). With the old title-based resume match this would
+    // also create two on a fresh run; the bug only manifests on resume.
+    const first = await runImport(root, file, { atomic: true });
+    assert.ifError(first.error);
+    assert.equal(first.result.imported, 2, "fresh run creates both duplicate-title rows");
+    assert.equal(listItems(root).length, 2, "two items exist for two same-titled rows");
+
+    // Re-run (resume): both rows already applied; inspect() must skip BOTH via
+    // the per-row marker (not byTitle, which would map the shared title to a
+    // single id). No duplication, no spurious create.
+    const second = await runImport(root, file, { atomic: true });
+    assert.ifError(second.error);
+    assert.equal(second.result.imported, 0, "resume imports 0 (both rows already applied)");
+    assert.equal(listItems(root).length, 2, "still exactly 2 items after resume");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--atomic duplicate-title partial resume: only row 0 tagged => resume creates row 1 (per-row tag, not title)", async () => {
+  const root = freshTracker();
+  const file = join(root, "duptitles2.csv");
+  writeFileSync(file, "title,status,priority\nDup,open,2\nDup,open,3\n");
+  try {
+    // Simulate a prior interrupted run that applied ONLY row 0 by stamping its
+    // per-row marker. With the OLD title-based matching, row 1's inspect()
+    // would find row 0's item via byTitle and WRONGLY skip it, leaving just one
+    // item. With per-row matching, row 1 is pending and gets created.
+    const { createHash } = await import("node:crypto");
+    const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
+    const batchTag = `csv-tx:${txId}`;
+    const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
+    const r = spawnSync(
+      "pm",
+      ["--path", root, "create", "--title", "Dup", "--status", "open", "--priority", "2", "--tags", `${batchTag},${rowTag(0)}`, "--json"],
+      { encoding: "utf-8" },
+    );
+    assert.equal(r.status, 0, `pre-create row 0 should succeed: ${r.stderr}`);
+    assert.equal(listItems(root).length, 1, "1 item pre-exists (only row 0 applied)");
+
+    const resumed = await runImport(root, file, { atomic: true });
+    assert.ifError(resumed.error);
+    assert.equal(resumed.result.imported, 1, "resume creates the missing row 1 (NOT skipped by title)");
+    assert.equal(listItems(root).length, 2, "exactly 2 items after resume — row 1 not skipped, row 0 not duplicated");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--atomic --key upsert mid-import failure: created rows compensated, pre-existing updated rows NOT rolled back", async () => {
+  const root = freshTracker();
+  // Pre-create an item carrying a csv-key tag so it is matched as an UPDATE.
+  const preR = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Pre Existing", "--status", "open", "--priority", "1", "--tags", "csv-key:keepme", "--json"],
+    { encoding: "utf-8" },
+  );
+  assert.equal(preR.status, 0, "pre-create existing item should succeed");
+  const preId = (JSON.parse(preR.stdout).item ?? JSON.parse(preR.stdout)).id;
+  assert.ok(preId, "pre-existing item has an id");
+
+  const file = join(root, "upsert-fail.csv");
+  // Row 0: key 'keepme' matches pre-existing => UPDATE (priority 3).
+  // Row 1: key 'newkey' does not exist => CREATE (priority 2).
+  // Row 2: key 'badkey' does not exist => CREATE with priority 99 (rejected by
+  //   `pm create`, out of 0..4 range) => apply() throws mid-import.
+  writeFileSync(
+    file,
+    "title,status,priority,key\nUpdate Me,open,3,keepme\nNew One,open,2,newkey\nBad One,open,99,badkey\n",
+  );
+  try {
+    const { error } = await runImport(root, file, { atomic: true, key: "key" });
+    assert.ok(error, "atomic upsert with a failing row should error");
+    assert.match(error!.message, /rolled back/i);
+
+    const items = listItems(root);
+    // The pre-existing updated item must remain OPEN (update not reverted) and
+    // retain the updated priority (3). Compensation does NOT roll back updates.
+    const updated = items.find((i) => i.id === preId);
+    assert.ok(updated, "the pre-existing updated item still exists");
+    assert.equal(updated!.status, "open", "pre-existing updated item is NOT rolled back (still open)");
+    assert.equal(updated!.priority, 3, "pre-existing updated item retains the updated priority");
+
+    // The created row (New One) was compensated (closed); the bad row was never
+    // created. No committed (open) items from this import remain.
+    const newOne = items.find((i) => i.title === "New One");
+    assert.ok(newOne, "the created row exists (compensated, not deleted)");
+    assert.equal(newOne!.status, "closed", "the created row was compensated (closed)");
+    assert.ok(!items.some((i) => i.title === "Bad One"), "the failing row was never created");
+
+    const openFromImport = items.filter(
+      (i) => i.status !== "closed" && i.id !== preId,
+    );
+    assert.equal(openFromImport.length, 0, "no uncompensated created items remain");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--atomic resume detection via per-row tag (not title or key): partial run with distinct keys resumes correctly", async () => {
+  const root = freshTracker();
+  const file = join(root, "resumekeys.csv");
+  writeFileSync(
+    file,
+    "title,status,priority,key\nA,open,2,k1\nB,open,3,k2\nC,open,1,k3\nD,open,2,k4\n",
+  );
+  try {
+    // Simulate a prior interrupted run that applied rows 0 and 2 (NOT 1 and 3)
+    // by stamping their per-row markers. A title- or key-based matcher would
+    // not be able to express this sparse partial application; only the per-row
+    // tag does. Resume must create exactly rows 1 and 3.
+    const { createHash } = await import("node:crypto");
+    const txId = `csv-import-${createHash("sha1").update(file).digest("hex").slice(0, 12)}`;
+    const batchTag = `csv-tx:${txId}`;
+    const rowTag = (i: number) => `csv-txrow:${txId}#${i}`;
+    const seed = [
+      { i: 0, title: "A", key: "k1", pri: "2" },
+      { i: 2, title: "C", key: "k3", pri: "1" },
+    ];
+    for (const s of seed) {
+      const r = spawnSync(
+        "pm",
+        ["--path", root, "create", "--title", s.title, "--status", "open", "--priority", s.pri, "--tags", `csv-key:${s.key},${batchTag},${rowTag(s.i)}`, "--json"],
+        { encoding: "utf-8" },
+      );
+      assert.equal(r.status, 0, `pre-create row ${s.i} should succeed: ${r.stderr}`);
+    }
+    assert.equal(listItems(root).length, 2, "2 items pre-exist (rows 0 and 2 applied)");
+
+    const resumed = await runImport(root, file, { atomic: true, key: "key" });
+    assert.ifError(resumed.error);
+    assert.equal(resumed.result.imported, 2, "resume creates exactly the 2 missing rows (1 and 3)");
+    assert.equal(resumed.result.updated, 0, "already-applied rows are skipped, not re-updated");
+    assert.equal(listItems(root).length, 4, "exactly 4 items after resume (no duplicates)");
+    const titles = listItems(root).map((i) => i.title).sort();
+    assert.deepEqual(titles, ["A", "B", "C", "D"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--atomic in-batch duplicate-key guard: a repeated NEW key is skipped, not double-created", async () => {
+  const root = freshTracker();
+  const file = join(root, "dupkeys.csv");
+  // Two rows share key 'dup' which does NOT pre-exist in the tracker. Without
+  // the in-batch guard both would plan as create (keyIndex is not updated during
+  // planning) and produce two items with the same csv-key tag. The guard skips
+  // the second occurrence with a clear warning.
+  writeFileSync(file, "title,status,priority,key\nFirst,open,2,dup\nSecond,open,3,dup\n");
+  try {
+    const { result, error } = await runImport(root, file, { atomic: true, key: "key" });
+    assert.ifError(error);
+    assert.equal(result.imported, 1, "only the first duplicate-key row creates an item");
+    assert.equal(result.skipped, 1, "the second duplicate-key row is skipped");
+
+    const items = listItems(root);
+    assert.equal(items.length, 1, "exactly one item exists (no duplicate creation)");
+    assert.ok(items.some((i) => i.title === "First"), "the first row was created");
+    assert.ok(!items.some((i) => i.title === "Second"), "the second row was not created");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

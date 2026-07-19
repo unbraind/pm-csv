@@ -81,9 +81,22 @@ workspace writer-locked, crash-recoverable journal, or none are.
   message. No committed (open) items from the import remain in the tracker.
 - **Crash-recoverable / resumable:** the transaction id is stable and derivable
   from the absolute file path (`csv-import-<sha1(absPath)>`), so re-running the
-  same `--atomic` import against the same file resumes from the durable journal:
-  rows a prior interrupted run already applied are detected via an ownership
-  marker (`csv-tx:<transactionId>`) and skipped — no duplicates are created.
+  same `--atomic` import against the same file resumes from the durable journal.
+  Resume/compensation matching is **per-row-precise**: every item this
+  transaction writes is stamped with a per-row ownership marker
+  `csv-txrow:<transactionId>#<rowIndex>` (plus a batch-level
+  `csv-tx:<transactionId>` marker for scanning), and a resumed run detects
+  already-applied rows by parsing the rowIndex out of that marker. This means a
+  CSV with **duplicate titles or duplicate keys** is handled correctly — a row
+  is only skipped when its exact rowIndex was already applied, never because a
+  same-titled/same-keyed sibling happens to match.
+- **In-batch duplicate `--key` guard:** when `--key` is set, two rows in the same
+  file that share a key which does NOT already exist in the tracker would both
+  plan as a create (the key index is not updated during planning). The atomic
+  planner tracks keys claimed by earlier planned creates in the same run and
+  **skips a later duplicate with a clear per-row warning** (counted in
+  `skipped`), so only one item is created per new key. Rows whose key already
+  exists in the tracker still update normally.
 - **Parity:** `--atomic` shells out to the same `pm create` the non-atomic path
   uses; without `--atomic`, import output and exit codes are unchanged.
 - **Incompatible with `--stream`:** an unbounded stream cannot be committed as
