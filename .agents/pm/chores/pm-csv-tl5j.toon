@@ -1,0 +1,12 @@
+id: pm-csv-tl5j
+title: Redact local host paths (/home/steve) from tracker item history
+description: "Full-fleet privacy audit (2026-07-21) found the maintainer username embedded as /home/steve/container/... host paths inside pm-item CONTENTS (test command on pm-csv-xim5, readiness note on pm-csv-7jbc). User-approved non-destructive HEAD redaction: pm history-redact replaced /home/steve/container->/workspace and /home/steve/.pm-cli->~/.pm-cli, chain-safe (verify_ok). No filter-repo/force-push (old blobs left intentionally). Tracked fleet-wide by companion pm-cli-website-z9v0."
+type: Chore
+status: open
+priority: 2
+tags[3]: git-history,pii,privacy
+created_at: "2026-07-21T17:41:27.582Z"
+updated_at: "2026-07-21T17:41:27.582Z"
+author: claude
+acceptance_criteria: "git grep /home/steve returns 0 tracked hits; pm history --verify ok for both items; release:check green"
+body: ""
