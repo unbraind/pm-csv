@@ -17,6 +17,6 @@ actual_result: "release:check passed and manual smoke produced imported=2/update
 notes[1]{created_at,author,text}:
   "2026-06-09T21:46:30.474Z",codex-5-3,"Manual mapping smoke in /tmp/pmcsv-map-BVCwhx: imported custom headers via --map + --key external_key, re-import updated 2 items with no duplicates, and --columns export emitted subset schema cleanly."
 tests[1]{command,scope}:
-  "PM_PATH=/workspace/pm-csv/.agents/pm PM_GLOBAL_PATH=~/.pm-cli npm run release:check",project
+  "PM_PATH=/workspace/pm-csv/.agents/pm PM_GLOBAL_PATH=$HOME/.pm-cli npm run release:check",project
 close_reason: Verified RFC-4180 + mapping/upsert/export behavior against real CSV data.
 body: "Current: 2 commands (csv import/export), 1 importer (csv-import), 1 exporter (csv-export), --columns selection. manifest capabilities = commands, schema, importers (schema is claimed but nothing registered).\n\nSDK finding: registerRenderer only accepts format 'toon'|'json' (loader.js isOutputRendererFormat). A 'csv'/'tsv' output format for 'pm list --format csv' is NOT supportable in 2026.5.31 -> report upstream, do NOT register a broken/filler renderer.\n\nPlan: deepen import (BOM, --map, --key upsert, coercion, counts), deepen export (TSV, --no-header, --crlf), drop the unbacked 'schema' capability claim, keep capabilities = commands, importers."
