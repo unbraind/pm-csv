@@ -1,0 +1,29 @@
+id: pm-csv-3lxi
+title: Adopt pm field-aware merge driver for multi-agent branch-merge safety
+description: "Add the pm-cli 2026.7.20+ field-aware git merge driver (.gitattributes fence mapping tracker artifacts to pm-item-toon/pm-item-markdown/pm-history/pm-relationship/pm-json). Bump @unbrained/pm-cli devDep floor from ^2026.7.19 to ^2026.7.21 (driver requires 2026.7.20+). Enables conflict-free field-level merge of concurrent-branch tracker edits, append-only union of history+relationship jsonl, key-level JSON config merge. Companion epic pm-cli-website-juz0."
+type: Chore
+status: in_progress
+priority: 3
+tags[3]: 2026.7.21,merge-driver,multi-agent-merge
+created_at: "2026-07-21T21:16:52.937Z"
+updated_at: "2026-07-21T21:16:52.937Z"
+deadline: "2026-07-28T00:00:00.000Z"
+assignee: claude-orchestrator
+author: claude-orchestrator
+estimated_minutes: 30
+acceptance_criteria: "Committed .gitattributes has pm-cli:merge-drivers fence; @unbrained/pm-cli devDep floor ^2026.7.21; lockfile synced; changelog:check passes; CI green."
+dependencies[1]{id,kind,created_at,author,source_kind}:
+  pm-csv-w1re,related,"2026-07-21T21:16:52.937Z",claude-orchestrator,null
+comments[1]{created_at,author,text}:
+  "2026-07-21T21:16:52.937Z",claude-orchestrator,Part of fleet-wide juz0 epic; pm-github (PR #5) is the reference adoption.
+notes[1]{created_at,author,text}:
+  "2026-07-21T21:16:52.937Z",claude-orchestrator,git config is per-clone; each fresh clone/CI runs pm merge install once. Post-merge run pm history-repair --all (upstream auto-hook tracked as pm-cli#623).
+learnings[1]{created_at,author,text}:
+  "2026-07-21T21:16:52.937Z",claude-orchestrator,Field-aware driver reconciles divergent scalar fields AND unions array fields without conflict; devDep bump requires npm install --package-lock-only or npm ci fails.
+files[1]{path,scope,note}:
+  .gitattributes,project,merge-driver fence written by pm merge install
+tests[1]{command,scope,timeout_seconds}:
+  git merge concurrent-branch,project,60
+docs[1]{path,scope,note}:
+  README.md,project,multi-agent merge safety
+body: "Validated 2026-07-21: two branches editing the same item (priority vs assignee + divergent notes) merged field-level with zero conflicts; both survived, notes[] unioned; pm validate ok:true after pm history-repair --all. Fleet reference: pm-github PR #5; pm-changelog PR #83."
