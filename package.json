@@ -34,7 +34,7 @@
     "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check",
     "prepublishOnly": "npm run release:check",
     "release:notes": "pm-changelog --pm-root .agents/pm --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary",
-    "prepare": "pm merge install",
+    "prepare": "if command -v pm >/dev/null 2>&1; then pm merge install; fi",
     "merge:install": "pm merge install"
   },
   "peerDependencies": {
