@@ -1,0 +1,16 @@
+id: pm-csv-9c2s
+title: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs
+description: "pm-cli 2026.7.22 shipped GH-623 pm merge reconcile, a purpose-built audited post-merge reconciliation that previews affected streams (dry-run), applies field-aware repair, and leaves pm history --verify plus pm validate green in one command. Verified end-to-end on a 2-branch concurrent edit: the field-aware driver unions notes and scalar fields with zero conflicts, then reconcile re-greens the hash chain with zero data loss (both authors content and attribution preserved). The Multi-agent merge safety README section (added in the 5cx1 rollout) previously recommended the blunt history-repair all-items primitive; this updates it to the dry-run then apply then verify reconcile workflow and links the authoritative upstream MERGE_SAFETY guide. Fleet fan-out from canary pm-beads#42."
+type: Issue
+status: closed
+priority: 2
+tags[3]: agent-ux,docs,multi-agent
+created_at: "2026-07-22T19:41:37.775Z"
+updated_at: "2026-07-22T19:41:38.512Z"
+closed_at: "2026-07-22T19:41:38.511Z"
+author: claude-opus-20260722
+acceptance_criteria: "README Multi-agent merge safety section recommends pm merge reconcile with a dry-run preview, apply, and pm history --verify plus pm validate confirmation; links upstream MERGE_SAFETY.md; CI green; PR reviewed by bots."
+notes[1]{created_at,author,text}:
+  "2026-07-22T19:41:38.129Z",claude-opus-20260722,Fan-out from canary unbraind/pm-beads#42. README Multi-agent merge safety section closing recommendation migrated to the pm merge reconcile dry-run->apply->verify workflow; links upstream docs/MERGE_SAFETY.md; keeps history-repair --all as a lower-level primitive.
+close_reason: Docs updated to recommend the 2026.7.22 pm merge reconcile workflow (fleet fan-out from pm-beads#42).
+body: ""

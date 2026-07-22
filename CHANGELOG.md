@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-csv-9c2s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-9c2s.toon))
+
 ### Other
 
 - Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-csv-3lxi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3lxi.toon))
