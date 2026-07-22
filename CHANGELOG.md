@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-csv-3lxi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3lxi.toon))
+
 ## 2026.7.19-1 - 2026-07-19
 
 ### Added
