@@ -384,8 +384,9 @@ on POSIX shells and Windows `cmd.exe`). To (re)run manually: `npm run merge:inst
 
 After merging a branch that touched `.agents/pm/`, reconcile any residual history-hash drift with
 **`pm merge reconcile`** (pm-cli ≥ 2026.7.22): preview with `pm merge reconcile --dry-run`, apply with
-`pm merge reconcile --message "post-merge reconcile"`, then confirm the chain is green with
-`pm history --verify <id>` and `pm validate`. The field-aware driver already unions every author's
+`pm merge reconcile --message "post-merge reconcile"`, then confirm with `pm validate`, which scans the
+whole tracker and flags remaining history drift across **every** affected item (`pm merge reconcile`
+itself lists each affected stream in its output; `pm history --verify <id>` spot-checks one item). The field-aware driver already unions every author's
 content, so `reconcile` only re-greens the hash chain (no data loss) — see the authoritative
 [pm-cli merge-safety guide](https://github.com/unbraind/pm-cli/blob/main/docs/MERGE_SAFETY.md). The
 older blunt `pm history-repair --all` remains available as a lower-level primitive.
