@@ -2,22 +2,26 @@ id: pm-csv-3lxi
 title: Adopt pm field-aware merge driver for multi-agent branch-merge safety
 description: "Add the pm-cli 2026.7.20+ field-aware git merge driver (.gitattributes fence mapping tracker artifacts to pm-item-toon/pm-item-markdown/pm-history/pm-relationship/pm-json). Bump @unbrained/pm-cli devDep floor from ^2026.7.19 to ^2026.7.21 (driver requires 2026.7.20+). Enables conflict-free field-level merge of concurrent-branch tracker edits, append-only union of history+relationship jsonl, key-level JSON config merge. Companion epic pm-cli-website-juz0."
 type: Chore
-status: in_progress
+status: closed
 priority: 3
 tags[3]: 2026.7.21,merge-driver,multi-agent-merge
 created_at: "2026-07-21T21:16:52.937Z"
-updated_at: "2026-07-21T21:16:52.937Z"
+updated_at: "2026-07-22T16:48:16.973Z"
 deadline: "2026-07-28T00:00:00.000Z"
-assignee: claude-orchestrator
+closed_at: "2026-07-22T16:48:16.973Z"
 author: claude-orchestrator
 estimated_minutes: 30
 acceptance_criteria: "Committed .gitattributes has pm-cli:merge-drivers fence; @unbrained/pm-cli devDep floor ^2026.7.21; lockfile synced; changelog:check passes; CI green."
+resolution: Field-aware merge driver adopted + prepare hook made cross-platform-correct via portable Node guard (scripts/prepare-merge-driver.mjs). Multi-agent branch-merge safety now works on POSIX and Windows cmd.exe.
+expected_result: "prepare hook wires merge drivers when pm present, skips cleanly when absent, fails loud when pm broken, on all platforms; .gitattributes fence committed; CI green"
+actual_result: "Validated real-data (canary pm-beads PR #40, identical script): present->drivers wired (exit0), absent->silent skip (exit0), pm-broken->fail-loud (exit1), sh -c identical."
 dependencies[1]{id,kind,created_at,author,source_kind}:
   pm-csv-w1re,related,"2026-07-21T21:16:52.937Z",claude-orchestrator,null
 comments[1]{created_at,author,text}:
   "2026-07-21T21:16:52.937Z",claude-orchestrator,Part of fleet-wide juz0 epic; pm-github (PR #5) is the reference adoption.
-notes[1]{created_at,author,text}:
+notes[2]{created_at,author,text}:
   "2026-07-21T21:16:52.937Z",claude-orchestrator,git config is per-clone; each fresh clone/CI runs pm merge install once. Post-merge run pm history-repair --all (upstream auto-hook tracked as pm-cli#623).
+  "2026-07-22T16:48:16.663Z",claude-orchestrator,"Portable prepare-hook shipped (companion pm-cli-website-5cx1): replaced guarded POSIX 'if command -v pm; then pm merge install; fi' with 'node scripts/prepare-merge-driver.mjs'. Resolves pm presence via PATH scan (PATHEXT-aware) so absent->skip, present-but-broken->fail-loud; cross-shell on POSIX + Windows cmd.exe. Validated real-data on canary pm-beads PR #40 (identical script). Completes cross-platform half of merge-driver adoption."
 learnings[1]{created_at,author,text}:
   "2026-07-21T21:16:52.937Z",claude-orchestrator,Field-aware driver reconciles divergent scalar fields AND unions array fields without conflict; devDep bump requires npm install --package-lock-only or npm ci fails.
 files[1]{path,scope,note}:
@@ -26,4 +30,5 @@ tests[1]{command,scope,timeout_seconds}:
   git merge concurrent-branch,project,60
 docs[1]{path,scope,note}:
   README.md,project,multi-agent merge safety
+close_reason: completed
 body: "Validated 2026-07-21: two branches editing the same item (priority vs assignee + divergent notes) merged field-level with zero conflicts; both survived, notes[] unioned; pm validate ok:true after pm history-repair --all. Fleet reference: pm-github PR #5; pm-changelog PR #83."
