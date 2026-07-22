@@ -380,5 +380,12 @@ tracker edits merge cleanly instead of hard-conflicting. The driver **definition
 per-clone Git config; `npm install` / `npm ci` wires them automatically via the `prepare` script (a portable Node guard, `scripts/prepare-merge-driver.mjs`: it runs
 `pm merge install` only when the `pm` CLI is on `PATH`, and no-ops cleanly otherwise so
 production / `--omit=dev` installs are not broken; being Node-based it behaves identically
-on POSIX shells and Windows `cmd.exe`). To (re)run manually: `npm run merge:install`. After merging a branch that
-touched `.agents/pm/`, run `pm history-repair --all` to reconcile history verification.
+on POSIX shells and Windows `cmd.exe`). To (re)run manually: `npm run merge:install`.
+
+After merging a branch that touched `.agents/pm/`, reconcile any residual history-hash drift with
+**`pm merge reconcile`** (pm-cli ≥ 2026.7.22): preview with `pm merge reconcile --dry-run`, apply with
+`pm merge reconcile --message "post-merge reconcile"`, then confirm the chain is green with
+`pm history --verify <id>` and `pm validate`. The field-aware driver already unions every author's
+content, so `reconcile` only re-greens the hash chain (no data loss) — see the authoritative
+[pm-cli merge-safety guide](https://github.com/unbraind/pm-cli/blob/main/docs/MERGE_SAFETY.md). The
+older blunt `pm history-repair --all` remains available as a lower-level primitive.
