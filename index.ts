@@ -475,7 +475,13 @@ const SOURCE_TAG_PREFIX = "csv-source:";
 const TX_TAG_PREFIX = "csv-tx:";
 const TX_ROW_TAG_PREFIX = "csv-txrow:";
 const TX_ROW_TAG_SEPARATOR = "#";
-const PM_LIST_MAX_BUFFER = 16 * 1024 * 1024;
+/** 16 MiB by default; override with the `PM_LIST_MAX_BUFFER` env var (bytes) for
+ * workspaces larger than that. Invalid or non-positive values fall back to the
+ * default rather than silently disabling the guard. */
+const PM_LIST_MAX_BUFFER = (() => {
+  const raw = Number.parseInt(process.env.PM_LIST_MAX_BUFFER ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
+})();
 
 /**
  * Normalize a dedup key value for stable matching. pm lower-cases tags on
