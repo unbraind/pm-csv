@@ -6,6 +6,10 @@
 
 - pm item reads are capped at Node's 1 MiB spawnSync default, so a mature tracker fails with no diagnosis ([pm-csv-m13h](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-m13h.toon))
 
+### Other
+
+- Redact local host paths (/home/<user\>) from tracker item history ([pm-csv-tl5j](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-tl5j.toon))
+
 ## 2026.7.23 - 2026-07-23
 
 ### Fixed
@@ -64,6 +68,10 @@
 ### Added
 
 - Add strict CSV import gate for production data ([pm-csv-z9ad](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-z9ad.toon))
+
+### Fixed
+
+- Export --excel/--crlf wrote a lone LF as the final line terminator ([pm-csv-69ln](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-69ln.toon))
 
 ### Other
 

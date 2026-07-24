@@ -2,11 +2,19 @@ id: pm-csv-69ln
 title: Export --excel/--crlf wrote a lone LF as the final line terminator
 description: "buildCsvExport joins records with CRLF for --excel/--crlf, but both write sites appended a hardcoded '\\n', so the FINAL record ended in a lone LF while all others ended CRLF — mixed line endings that break the strict-CRLF promise of --excel (RFC 4180 / Excel)."
 type: Issue
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-06-05T14:43:11.807Z"
-updated_at: "2026-06-05T14:43:18.302Z"
+updated_at: "2026-07-24T21:33:28.836Z"
+closed_at: "2026-07-24T21:17:28.013Z"
 author: codex
 acceptance_criteria: "--excel/--crlf output is uniformly CRLF incl. the trailing terminator (no lone LF); default (LF) export unchanged; build+tests green"
+release: 2026.06.07
+resolution: Fixed in 2026.6.7 — export terminator derived from the same eol as record separators
+expected_result: "--excel/--crlf output is uniformly CRLF including the trailing terminator (no lone LF); default (LF) export unchanged"
+actual_result: "Real-data test on published pm-csv against a throwaway tracker with 2 items: excel.csv = 319 bytes, crlf=3, lone_lf=0, ends_crlf=True; plain.csv = 313 bytes, cr=0, lf=3, ends_lf=True. Default export unchanged."
+notes[1]{created_at,author,text}:
+  "2026-07-24T21:33:28.836Z",claude,"Release field uses the zero-padded git-tag spelling 2026.06.07 rather than the unpadded 2026.6.7 shown in the changelog heading. Reason: pm-changelog 2026.7.24 compares release keys literally, so only the padded form matches the window built from tag v2026.06.07 (tracked as pm-changelog pmc-2sfc, fix in pm-changelog PR 94). Once that fix publishes either spelling resolves to the same key and no change is needed here."
+close_reason: "Fix shipped in v2026.06.07 (commit 616b05f, PR #6): buildCsvExport now derives eol from opts.crlf||opts.excel and both write sites use it, so the final record terminator matches the rest of the file. Tracker closed late; --release 2026.6.7 pins changelog attribution to the release that actually shipped it."
 body: ""

@@ -1,0 +1,16 @@
+id: pm-csv-qnax
+title: Adopt --respect-item-release in changelog scripts and close the shipped-but-stale export terminator tracker
+description: "Adopts pm-changelog 2026.7.24 --respect-item-release across the changelog scripts and bumps the devDependency, then uses the new capability to close pm-csv-69ln, whose fix shipped in v2026.06.07 but whose tracker stayed open because closing it would have retro-dated the work into the current release window."
+type: Chore
+status: in_progress
+priority: 2
+tags[3]: changelog,fleet-consistency,release-hygiene
+created_at: "2026-07-24T21:34:17.382Z"
+updated_at: "2026-07-24T21:42:55.293Z"
+assignee: claude
+author: claude
+acceptance_criteria: "all four changelog scripts pass --respect-item-release; pm-changelog devDependency is ^2026.7.24; pm-csv-69ln is closed and appears under the 2026.6.7 heading not Unreleased; changelog:check green"
+notes[2]{created_at,author,text}:
+  "2026-07-24T21:34:18.200Z",claude,"Verified with the PUBLISHED pm-changelog 2026.7.24 (what CI runs): regenerating places pm-csv-69ln under '## 2026.6.7 - 2026-06-07' as a Fixed entry, and changelog:check exits 0. The 69ln release field uses the padded git-tag spelling because 2026.7.24 compares release keys literally (pm-changelog pmc-2sfc / PR 94 fixes that; afterwards either spelling works). Underlying fix independently re-verified against real data before closing: excel export = 3 CRLF, 0 lone LF, ends CRLF; default export = 0 CR, LF only."
+  "2026-07-24T21:42:55.292Z",claude,"Greptile review finding adopted: the daily release workflow invokes pm-changelog DIRECTLY (npx pm-changelog, three times) rather than through the npm scripts, so patching only package.json left the generation path that actually produces the published CHANGELOG.md and RELEASE_NOTES.md without the flag while release:check validated with it. Added --respect-item-release to all three release.yml invocations so generation and validation agree. YAML re-validated."
+body: ""
