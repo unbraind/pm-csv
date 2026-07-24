@@ -2099,8 +2099,18 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
   const result = spawnSync(
     "pm",
     ["--path", pmRoot, "list-all", "--json", "--include-body"],
-    { encoding: "utf-8" },
+    { encoding: "utf-8", maxBuffer: PM_LIST_MAX_BUFFER },
   );
+  // A stdout overrun kills the child with status null and EMPTY stderr, so name
+  // the real cause instead of reporting an unexplained "pm list-all failed".
+  if (result.error) {
+    const code = (result.error as NodeJS.ErrnoException).code;
+    throw new CommandError(
+      code === "ENOBUFS"
+        ? `pm list-all output exceeded the ${PM_LIST_MAX_BUFFER} byte read buffer; narrow the export (--status/--type) or raise PM_LIST_MAX_BUFFER.`
+        : `pm list-all failed: ${result.error.message}`,
+    );
+  }
   if (result.status !== 0) {
     throw new CommandError(result.stderr || "pm list-all failed");
   }
