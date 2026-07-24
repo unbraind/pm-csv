@@ -2,11 +2,16 @@ id: pm-csv-tl5j
 title: Redact local host paths (/home/<user>) from tracker item history
 description: "Full-fleet privacy audit (2026-07-21) found the maintainer username embedded as /home/<user>/container/... host paths inside pm-item CONTENTS (test command on pm-csv-xim5, readiness note on pm-csv-7jbc). User-approved non-destructive HEAD redaction: pm history-redact replaced /home/<user>/container->/workspace and /home/<user>/.pm-cli->$HOME/.pm-cli, chain-safe (verify_ok). No filter-repo/force-push (old blobs left intentionally). Tracked fleet-wide by companion pm-cli-website-z9v0."
 type: Chore
-status: open
+status: closed
 priority: 2
 tags[3]: git-history,pii,privacy
 created_at: "2026-07-21T17:41:27.582Z"
-updated_at: "2026-07-21T17:41:27.582Z"
+updated_at: "2026-07-24T21:07:33.161Z"
+closed_at: "2026-07-24T21:06:40.266Z"
 author: claude
 acceptance_criteria: "git grep /home/<user> returns 0 tracked hits; pm history --verify ok for both items; release:check green"
+resolution: HEAD-only history redaction (2026-07-21) verified durable; no further action needed
+expected_result: "git grep /home/<user> returns 0 tracked hits; pm history --verify ok for pm-csv-xim5 and pm-csv-7jbc; changelog:check green"
+actual_result: "0 tracked hits; verification.ok=true + current_matches_latest=true for both items (9 and 4 entries); changelog:check rc=0"
+close_reason: "Verified complete: 0 tracked /home/<user> hits (git grep across all tracked files), pm history --verify ok:true for pm-csv-xim5 (9 entries) and pm-csv-7jbc (4 entries) with current_matches_latest, and changelog:check green. HEAD redaction from 2026-07-21 confirmed durable."
 body: ""
