@@ -1,0 +1,16 @@
+id: pm-csv-m13h
+title: "pm item reads are capped at Node's 1 MiB spawnSync default, so a mature tracker fails with no diagnosis"
+description: "buildCsvExport (the CSV export itself) spawns the pm CLI to read items but passes no maxBuffer, so Node's 1 MiB spawnSync default applies. Measured against a real 443-item pm workspace, this package's exact argv returns 1054002 bytes (ENOBUFS today). Past the cap the child is killed with status null, signal SIGTERM, error.code ENOBUFS and EMPTY stderr, so the failure surfaces with nothing to diagnose; at larger sizes stdout is genuinely truncated mid-document (verified: a 100 KiB cap yields 'Unterminated string in JSON at position 130829'). Sibling packages pm-changelog, pm-context, pm-brief, pm-graph and pm-linear already cap explicitly; this package was a straggler. Fix: cap at 64 MiB and name an ENOBUFS overrun explicitly instead of reporting an unexplained failure (or, for the never-throw demo/search paths, an empty result set)."
+type: Issue
+status: closed
+priority: 1
+tags[4]: agent-ux,maxbuffer,production-readiness,real-data
+created_at: "2026-07-24T20:24:39.493Z"
+updated_at: "2026-07-24T20:24:39.891Z"
+closed_at: "2026-07-24T20:24:39.890Z"
+author: claude-opus-5
+resolution: Added PM_JSON_MAX_BUFFER (64 MiB) and passed it to the pm read; ENOBUFS is now reported as a buffer overrun naming the limit and the remedy.
+expected_result: "Reads of a mature tracker succeed, and any future overrun reports its real cause instead of an unexplained failure or a silent empty result."
+actual_result: "Verified with the package's exact argv against the real 443-item workspace: default cap -> status null / ENOBUFS; 64 MiB cap -> status 0 with the complete payload. Typecheck and the full test suite pass."
+close_reason: Capped the pm read at 64 MiB and made an ENOBUFS overrun self-describing
+body: ""

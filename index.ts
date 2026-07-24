@@ -475,7 +475,17 @@ const SOURCE_TAG_PREFIX = "csv-source:";
 const TX_TAG_PREFIX = "csv-tx:";
 const TX_ROW_TAG_PREFIX = "csv-txrow:";
 const TX_ROW_TAG_SEPARATOR = "#";
-const PM_LIST_MAX_BUFFER = 16 * 1024 * 1024;
+/** Read-buffer cap for `pm` output, in bytes. 16 MiB by default; override with the
+ * `PM_LIST_MAX_BUFFER` env var. Resolved per call so the override takes effect
+ * without an import-order dependency. Invalid or non-positive values fall back to
+ * the default rather than silently disabling the guard. */
+function pmListMaxBuffer(): number {
+  // Number(), not parseInt(): parseInt("16MiB") silently yields 16, which would
+  // impose a 16-BYTE cap and break every ordinary read while appearing to honor
+  // the documented invalid-value fallback. Number() rejects the whole string.
+  const raw = Number(process.env.PM_LIST_MAX_BUFFER);
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
+}
 
 /**
  * Normalize a dedup key value for stable matching. pm lower-cases tags on
@@ -981,7 +991,7 @@ function loadKeyIndex(pmRoot: string): Map<string, string> {
   const result = spawnSync(
     "pm",
     ["--path", pmRoot, "list-all", "--json"],
-    { encoding: "utf-8", maxBuffer: PM_LIST_MAX_BUFFER },
+    { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   if (result.error) throw new CommandError(`pm list-all failed: ${result.error.message}`);
   if (result.status !== 0) {
@@ -1253,7 +1263,7 @@ function loadAppliedByTransaction(
   const rowMarkerPrefix = `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`;
   const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
     encoding: "utf-8",
-    maxBuffer: PM_LIST_MAX_BUFFER,
+    maxBuffer: pmListMaxBuffer(),
   });
   if (r.error || r.status !== 0) return { byRowIndex };
   let items: PmItem[] = [];
@@ -2099,8 +2109,18 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
   const result = spawnSync(
     "pm",
     ["--path", pmRoot, "list-all", "--json", "--include-body"],
-    { encoding: "utf-8" },
+    { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
+  // A stdout overrun kills the child with status null and EMPTY stderr, so name
+  // the real cause instead of reporting an unexplained "pm list-all failed".
+  if (result.error) {
+    const code = (result.error as NodeJS.ErrnoException).code;
+    throw new CommandError(
+      code === "ENOBUFS"
+        ? `pm list-all output exceeded the ${pmListMaxBuffer()} byte read buffer; narrow the export (--status/--type) or raise the PM_LIST_MAX_BUFFER env var.`
+        : `pm list-all failed: ${result.error.message}`,
+    );
+  }
   if (result.status !== 0) {
     throw new CommandError(result.stderr || "pm list-all failed");
   }
