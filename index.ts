@@ -480,8 +480,11 @@ const TX_ROW_TAG_SEPARATOR = "#";
  * without an import-order dependency. Invalid or non-positive values fall back to
  * the default rather than silently disabling the guard. */
 function pmListMaxBuffer(): number {
-  const raw = Number.parseInt(process.env.PM_LIST_MAX_BUFFER ?? "", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
+  // Number(), not parseInt(): parseInt("16MiB") silently yields 16, which would
+  // impose a 16-BYTE cap and break every ordinary read while appearing to honor
+  // the documented invalid-value fallback. Number() rejects the whole string.
+  const raw = Number(process.env.PM_LIST_MAX_BUFFER);
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
 }
 
 /**
