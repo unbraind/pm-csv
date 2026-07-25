@@ -1,0 +1,17 @@
+id: pm-csv-agf5
+title: "Documented install command fails: pm install github.com/unbraind/pm-csv cannot resolve an entry file"
+description: ""
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-07-25T23:48:50.067Z"
+updated_at: "2026-07-25T23:48:51.479Z"
+closed_at: "2026-07-25T23:48:51.478Z"
+author: claude
+notes[3]{created_at,author,text}:
+  "2026-07-25T23:48:50.451Z",claude,"REPRODUCED on pm 2026.7.25: `pm install github.com/unbraind/pm-csv --project` fails with `Extension entry file is missing at \".../dist/index.js\"`. Root cause: `dist/` is in .gitignore and no build output is committed, and pm never runs a build when installing from a GitHub source - it copies the repository as-is."
+  "2026-07-25T23:48:50.768Z",claude,"FIX: document `pm install npm:pm-csv`, verified working end to end. npm is the actual distribution channel for this package - the Daily Release workflow publishes it and `prepack` builds dist into the tarball - so the npm source needs no build output in git. Rejected committing dist/: build artifacts under version control invite drift (pm-web already tracks 72 dist files against 30 produced by a clean build) and add a conflict surface to the multi-agent merge workflow."
+  "2026-07-25T23:48:51.086Z",claude,"Bare-name installs do NOT reach npm: `pm install pm-csv --project` fails with `Local extension source does not exist`, because a bare target resolves only a local directory or a bundled alias. The `npm:` prefix is required."
+close_reason: "Documented pm install npm:pm-csv, verified working; GitHub source cannot work without committed build output"
+body: ""

@@ -9,13 +9,13 @@ Import pm items from a CSV file, export them back out, or wire up a programmatic
 ## Installation
 
 ```bash
-pm install github.com/unbraind/pm-csv --global
+pm install npm:pm-csv --global
 ```
 
 Or install per-project:
 
 ```bash
-pm install github.com/unbraind/pm-csv --project
+pm install npm:pm-csv --project
 ```
 
 ---
