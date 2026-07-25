@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25 ([pm-csv-kjqq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-kjqq.toon))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Fixed

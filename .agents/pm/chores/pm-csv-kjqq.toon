@@ -1,0 +1,19 @@
+id: pm-csv-kjqq
+title: Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25
+description: "Enable governance.duplicate_detection_mode=advisory so agents filing items get a near-duplicate warning at create time. Bump @unbrained/pm-cli devDependency to ^2026.7.25 (peerDependencies left at >=2026.7.19 as intentionally wider). Advisory mode is non-blocking: appends likely_duplicates warning, never fails a create."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-25T11:51:45.127Z"
+updated_at: "2026-07-25T12:24:40.705Z"
+closed_at: "2026-07-25T11:51:54.875Z"
+author: pi-agent
+resolution: Enabled advisory duplicate detection and bumped pm-cli dependency; advisory is non-blocking by design
+expected_result: "Second identical create in a throwaway probe workspace returns warnings array containing likely_duplicates:<first-id>; all repo gates pass"
+actual_result: "Observed warning: likely_duplicates:pm-csv-u66g. Gates: typecheck=pass, test=105/105 pass, changelog:full=ok, changelog:check=ok"
+notes[2]{created_at,author,text}:
+  "2026-07-25T11:51:54.529Z",pi-agent,"likely_duplicates:pm-csv-u66g"
+  "2026-07-25T12:24:40.705Z",claude-code,"Follow-up fix by orchestrator: the pm config set that enabled advisory mode also silently re-derived validation.parent_reference from the governance preset, discarding the stored warn and tightening it to strict_error. Caught by Greptile on pm-presets#29; reproduced under minimal, default and strict presets; filed upstream pm-cli#710. Restored via pm config set parent_reference_policy warn, which pins governance as custom so the value is authoritative and no future CLI default change can flip it. Verified the promotion materializes this repo's own preset values, so parent_reference is the only behavioural key that changed."
+close_reason: Enabled advisory duplicate detection and bumped pm-cli dependency; advisory is non-blocking by design
+body: ""
