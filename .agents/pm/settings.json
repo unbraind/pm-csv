@@ -1,20 +1,37 @@
 {
   "version": 1,
   "id_prefix": "pm-csv-",
+  "ids": {
+    "token_length": 4
+  },
   "author_default": "codex",
+  "mutation_guard": {
+    "require_attributed_author": false,
+    "secret_guard": "advise",
+    "stale_in_progress_hours": 72
+  },
   "item_format": "toon",
   "locks": {
-    "ttl_seconds": 1800
+    "ttl_seconds": 1800,
+    "wait_ms": 3000
+  },
+  "checkpoints": {
+    "retention_days": 14
   },
   "output": {
     "default_format": "toon"
   },
   "history": {
-    "missing_stream": "auto_create"
+    "missing_stream": "auto_create",
+    "compact_policy": {
+      "enabled": false,
+      "max_entries": 500,
+      "trigger": "health_warn"
+    }
   },
   "validation": {
     "sprint_release_format": "warn",
-    "parent_reference": "warn",
+    "parent_reference": "strict_error",
     "metadata_profile": "core",
     "metadata_required_fields": [],
     "lifecycle_stale_blocker_reason_patterns": [
@@ -37,10 +54,14 @@
       "closed and recorded",
       "work completed",
       "work completed and recorded"
-    ]
+    ],
+    "estimate_defaults_by_type": {}
   },
   "governance": {
-    "preset": "default"
+    "preset": "default",
+    "duplicate_detection_mode": "advisory",
+    "duplicate_detection_threshold": 0.8,
+    "duplicate_detection_limit": 3
   },
   "workflow": {
     "definition_of_done": []
@@ -152,7 +173,9 @@
       "files": true,
       "workload": true,
       "staleness": true,
-      "tests": true
+      "tests": true,
+      "recently_created": true,
+      "unparented": true
     }
   },
   "extensions": {
@@ -187,7 +210,17 @@
     "embedding_batch_size": 32,
     "embedding_timeout_ms": 30000,
     "scanner_max_batch_retries": 3,
-    "provider": ""
+    "provider": "",
+    "mutation_refresh_policy": "semantic_configured",
+    "query_expansion": {
+      "enabled": false,
+      "provider": ""
+    },
+    "rerank": {
+      "enabled": false,
+      "model": "",
+      "top_k": 20
+    }
   },
   "providers": {
     "openai": {
@@ -202,6 +235,7 @@
   },
   "vector_store": {
     "adapter": "",
+    "collection_name": "pm_items",
     "qdrant": {
       "url": "",
       "api_key": ""
