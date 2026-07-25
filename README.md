@@ -12,6 +12,11 @@ Import pm items from a CSV file, export them back out, or wire up a programmatic
 pm install npm:pm-csv --global
 ```
 
+> The `npm:` prefix is required. A bare `pm install pm-csv` resolves only a local
+> directory or a bundled alias, never the registry, and a
+> `github.com/unbraind/pm-csv` source cannot work either — pm copies a GitHub
+> source as-is without building it, and this repository does not commit `dist/`.
+
 Or install per-project:
 
 ```bash
