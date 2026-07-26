@@ -1,9 +1,9 @@
+import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
-import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/sdk";
 import type {
   WorkspaceTransactionStep,
   WorkspaceTransactionCommitResult,
@@ -11,7 +11,6 @@ import type {
   WorkspaceTransactionJsonValue,
 } from "@unbrained/pm-cli/sdk";
 
-const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
 // ---------------------------------------------------------------------------
 // Error contract
@@ -2169,11 +2168,21 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
   };
 }
 
+/**
+ * Local stand-in for the SDK's `defineExtension` identity helper.
+ *
+ * Declared here rather than imported so this package keeps a type-only
+ * dependency on `@unbrained/pm-cli` and adds no runtime module edge. The
+ * generic constraint is the SDK's own, so the extension object is contract-
+ * checked against {@link ExtensionModule} exactly as the imported helper would.
+ */
+const defineExtension = <TModule extends ExtensionModule>(module: TModule): TModule => module;
+
 export default defineExtension({
   name: "pm-csv",
   version: "2026.7.26",
 
-  activate(api) {
+  activate(api: ExtensionApi) {
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).

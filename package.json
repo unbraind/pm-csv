@@ -38,12 +38,12 @@
     "merge:install": "pm merge install"
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": ">=2026.7.19"
+    "@unbrained/pm-cli": ">=2026.7.26"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "@unbrained/pm-cli": "^2026.7.25",
-    "pm-changelog": "^2026.7.24",
+    "@unbrained/pm-cli": "^2026.7.26",
+    "pm-changelog": "^2026.7.25",
     "typescript": "^7.0.2"
   },
   "keywords": [
