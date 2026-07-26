@@ -2,6 +2,12 @@
 
 ## 2026.7.26 - 2026-07-26
 
+### Removed
+
+- Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-csv-28sk](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-28sk.toon))
+
+## 2026.7.26 - 2026-07-26
+
 ### Fixed
 
 - Documented install command fails: pm install github.com/unbraind/pm-csv cannot resolve an entry file ([pm-csv-agf5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-agf5.toon))
