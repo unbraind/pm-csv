@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-csv-28sk](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-28sk.toon))
+
 ## 2026.7.26 - 2026-07-26
 
 ### Fixed

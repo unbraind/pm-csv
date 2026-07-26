@@ -1,0 +1,17 @@
+id: pm-csv-28sk
+title: Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim
+description: "Replace the forced-any defineExtension shim with a locally declared identity helper constrained by the SDK ExtensionModule contract, and type activate with the real ExtensionApi. Keeps the package's dependency on @unbrained/pm-cli type-only so no runtime module edge is introduced."
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-26T06:18:56.639Z"
+updated_at: "2026-07-26T06:24:27.350Z"
+closed_at: "2026-07-26T06:24:27.349Z"
+author: codex
+acceptance_criteria: No any casts remain in the extension definition path; activate is typed with the real ExtensionApi; Dependency on @unbrained/pm-cli stays type-only at runtime; typecheck and the full test suite pass
+resolution: "Replaced the forced-any defineExtension shim with a locally declared identity helper constrained by the SDK ExtensionModule contract, and typed activate with the real ExtensionApi from @unbrained/pm-cli/sdk/authoring."
+expected_result: "No any casts in the extension definition path, activate checked against the host contract, and the dependency on @unbrained/pm-cli kept type-only so no runtime module edge is added."
+actual_result: typecheck clean and the full test suite passes; type imports erase at build time so the published extension carries no runtime edge to the CLI.
+close_reason: Implemented and verified in PR #46
+body: ""
