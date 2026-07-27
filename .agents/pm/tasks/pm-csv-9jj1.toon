@@ -6,13 +6,13 @@ status: closed
 priority: 1
 tags[4]: deps-2026-6-7,full-cycle-hardening,hardening-pass,wave-full-cycle-2026-06-07
 created_at: "2026-06-07T07:41:34.875Z"
-updated_at: "2026-07-27T23:21:15.888Z"
-closed_at: "2026-07-27T22:25:24.037Z"
+updated_at: "2026-07-27T23:23:54.868Z"
+closed_at: "2026-07-27T23:23:54.868Z"
 author: codex-5.3-full-cycle
 release: 2026.6.8
-resolution: Work completed and released in 2026.6.7. Release attribution set explicitly so pm-changelog --respect-item-release files the entry under 2026.6.7 rather than the current Unreleased section.
-expected_result: "A closed item whose changelog entry appears under the 2026.6.7 heading it actually shipped in, leaving the Unreleased section untouched."
-actual_result: "Before this change the item sat in_progress since 2026-06-07 with no activity, so the work was invisible to the changelog while still counting as open work in every fleet audit."
+resolution: "Work completed and released in 2026.6.8. Release attribution set explicitly so pm-changelog --respect-item-release files the entry under 2026.6.8, the first release that actually contains the implementing merge c9060ed. An earlier revision of this record said 2026.6.7; that was wrong, because v2026.06.07 was tagged at 07:15:36Z and the merge landed at 08:12Z."
+expected_result: "A closed item whose changelog entry appears under the 2026.6.8 heading, the first release whose tree contains the hardening-wave merge, leaving the current release notes untouched."
+actual_result: "Before this closeout the item had remained in_progress with no activity since its work shipped, so the delivery was missing from the changelog while still counting as open work in every fleet audit. A first attempt then filed it under 2026.6.7, a release cut before the work landed and therefore unable to contain it."
 notes[3]{created_at,author,text}:
   "2026-06-07T07:41:36.337Z",codex-5.3-full-cycle,"Hardening pass complete: release:check succeeded after dependency bump and changelog regeneration."
   "2026-06-07T08:00:41.688Z",codex-5.3-full-cycle,"Security gate: high-confidence token/key regex scan over tracked files and git history found no actionable secrets. Binary-history false positives were traced to embedded wasm base64 blobs, not credentials."
@@ -25,5 +25,5 @@ tests[1]{command,path,scope,timeout_seconds}:
   "npm run release:check",.,project,2400
 docs[1]{path,scope,note}:
   README.md,project,Primary package docs reference
-close_reason: "Retired as shipped. The full-cycle hardening wave for pm-csv completed on 2026-06-07 and shipped in release 2026.6.7 that same day; the item was simply never closed, leaving it in progress for seven weeks and inflating the fleet stale-item count."
+close_reason: "Retired as shipped: the full-cycle hardening wave for pm-csv was completed and released in 2026.6.8, verified by containment (git merge-base --is-ancestor c9060ed v2026.06.08 succeeds while v2026.06.07 fails). The item was never closed and sat in progress for seven weeks, inflating every fleet audit."
 body: Master execution item for full-cycle hardening in pm-csv.
