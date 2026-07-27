@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2026.7.27 - 2026-07-27
+
+### Fixed
+
+- csv validate fails to register on pm-cli 2026.7.27 because it redeclares the host-owned --json global ([pm-csv-0orl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0orl.toon))
 
 ### Removed
 

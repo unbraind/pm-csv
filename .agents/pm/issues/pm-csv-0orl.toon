@@ -1,0 +1,18 @@
+id: pm-csv-0orl
+title: csv validate fails to register on pm-cli 2026.7.27 because it redeclares the host-owned --json global
+description: "pm-cli 2026.7.27 (GH-719) makes the host reject any extension command whose flags shadow a host-owned global. csv validate declared { long: \"--json\" }, so registerCommand threw and the command failed to register against a real host. The suite never caught it because every smoke test asserted against a hand-rolled api double that accepts all registrations unconditionally. Fix: drop the flag declaration, read ctx.global.json, and rebuild the smoke suite on the SDK createExtensionTestHarness so pm's real activation engine validates registration."
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-07-27T04:48:48.376Z"
+updated_at: "2026-07-27T04:55:17.828Z"
+closed_at: "2026-07-27T04:55:17.822Z"
+author: codex
+resolution: Dropped the --json flag declaration from csv validate and switched the handler to ctx.global.json; rebuilt the smoke suite on the SDK createExtensionTestHarness and added a suite-wide host-owned-global guard.
+expected_result: csv validate registers against a real pm 2026.7.27 host and --json still emits JSON.
+actual_result: "Activation probe reports failed=[]; pm install reports failed_count 0; pm csv validate --json emits real JSON; pm csv import round-trips 2 items; 105/105 tests green."
+notes[1]{created_at,author,text}:
+  "2026-07-27T04:48:55.107Z",codex,"Verified end-to-end in a throwaway workspace: pm install reports failed_count: 0; 'pm csv validate data.csv' and '--json' both work reading the host global; 'pm csv import' round-trips 2 real rows. Suite 105/105."
+close_reason: Dropped the --json flag declaration from csv validate and switched the handler to ctx.global.json; rebuilt the smoke suite on the SDK createExtensionTestHarness and added a suite-wide host-owned-global guard.
+body: ""

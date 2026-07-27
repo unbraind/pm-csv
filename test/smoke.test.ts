@@ -1,148 +1,113 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
+
 import extension from "../dist/index.js";
 
-test("extension has required shape", () => {
-  assert.ok(extension, "module should export a default value");
-  assert.strictEqual(typeof extension, "object", "extension should be an object");
-  assert.ok("name" in extension, "extension should have a name property");
-  assert.ok("activate" in extension, "extension should have an activate method");
-  assert.strictEqual(typeof extension.activate, "function", "activate should be a function");
+/**
+ * Activate pm-csv through pm's real host engine with the manifest's declared
+ * capabilities.
+ *
+ * This deliberately replaces the hand-rolled `api` doubles these tests used to
+ * build. A double accepts every registration unconditionally, so it cannot
+ * observe host-side rejection — which is how a `--json` flag that shadows a
+ * host-owned global stayed green in CI while `csv validate` failed to register
+ * against a real pm host. The harness runs the same validation the CLI runs, so
+ * an invalid registration fails the suite here.
+ */
+async function harness() {
+  const created = await createExtensionTestHarness(extension, {
+    name: "pm-csv",
+    capabilities: ["commands", "importers", "schema"],
+  });
+  assert.deepEqual(created.activation.failed, [], "activation must not fail");
+  return created;
+}
+
+test("extension activates cleanly against the real pm host", async () => {
+  const ext = await harness();
+  assert.strictEqual(ext.name, "pm-csv");
+  await ext.deactivate();
 });
 
-test("extension registers at least one capability", () => {
-  const registered: string[] = [];
-  const noop = () => {};
-  // Mirror the full ExtensionApi surface so activate() can register every
-  // capability the extension uses (commands, importer, exporter).
-  const fieldRegistrations: any[] = [];
-  const api = {
-    registerCommand: () => { registered.push("command"); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop,
-    registerItemFields: (fields: any[]) => { registered.push("itemFields"); fieldRegistrations.push(...fields); },
-    registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: () => { registered.push("importer"); },
-    registerExporter: () => { registered.push("exporter"); },
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  extension.activate(api as any);
-  assert.ok(registered.includes("importer"), "should register the csv importer");
-  assert.ok(registered.includes("exporter"), "should register the csv exporter");
-  assert.ok(registered.includes("itemFields"), "should register the csv_source schema field");
-  assert.ok(
-    fieldRegistrations.some((f) => f.name === "csv_source" && f.type === "string" && f.optional === true),
-    "csv_source should be an optional string field",
-  );
+test("extension registers the csv importer, exporter and schema field", async () => {
+  const ext = await harness();
+
+  const { registrations } = ext.activation;
+  assert.strictEqual(registrations.importers.length, 1, "should register the csv importer");
+  assert.strictEqual(registrations.exporters.length, 1, "should register the csv exporter");
+
+  const { field } = ext.assertItemField({ name: "csv_source", type: "string" });
+  assert.strictEqual(field.optional, true, "csv_source should be an optional string field");
+
+  await ext.deactivate();
 });
 
-test("csv export declares --header (not a bare --no-header the host rejects)", () => {
+test("csv export declares --header (not a bare --no-header the host rejects)", async () => {
   // Regression: a bare `{ long: "--no-header" }` flag is unusable because the
   // host parses `--no-header` as the negation of a (missing) `--header` flag
   // ("Unknown option '--header'"). The export command must declare the positive
   // `--header` flag so the host accepts `--no-header` as its negation.
-  const commands: any[] = [];
-  const noop = () => {};
-  const api = {
-    registerCommand: (def: any) => { commands.push(def); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: noop, registerExporter: noop,
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  extension.activate(api as any);
-  const exportCmd = commands.find((c) => c.name === "csv export");
-  assert.ok(exportCmd, "csv export command should be registered");
-  const longs = (exportCmd.flags ?? []).map((f: any) => f.long);
-  assert.ok(longs.includes("--header"), "csv export should declare the positive --header flag");
+  const ext = await harness();
+
+  const { flags } = ext.assertCommandContract({ name: "csv export", flags: ["--header"] });
+  const longs = flags.map((flag) => flag.long);
   assert.ok(!longs.includes("--no-header"), "csv export must not declare a bare --no-header flag (host rejects it)");
+
+  await ext.deactivate();
 });
 
-test("csv import and validate declare --auto-map", () => {
-  const commands: any[] = [];
-  const noop = () => {};
-  const api = {
-    registerCommand: (def: any) => { commands.push(def); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: noop, registerExporter: noop,
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  extension.activate(api as any);
+test("csv import and validate declare --auto-map", async () => {
+  const ext = await harness();
 
-  const importCmd = commands.find((c) => c.name === "csv import");
-  const validateCmd = commands.find((c) => c.name === "csv validate");
-  assert.ok(importCmd, "csv import command should be registered");
-  assert.ok(validateCmd, "csv validate command should be registered");
+  ext.assertCommandContract({ name: "csv import", flags: ["--auto-map"] });
+  ext.assertCommandContract({ name: "csv validate", flags: ["--auto-map"] });
 
-  const importLongs = (importCmd.flags ?? []).map((f: any) => f.long);
-  const validateLongs = (validateCmd.flags ?? []).map((f: any) => f.long);
-  assert.ok(importLongs.includes("--auto-map"), "csv import should expose --auto-map");
-  assert.ok(validateLongs.includes("--auto-map"), "csv validate should expose --auto-map");
+  await ext.deactivate();
 });
 
-test("activate degrades gracefully when registerItemFields is absent", () => {
-  const registered: string[] = [];
-  const noop = () => {};
-  // Older host: no registerItemFields on the api surface.
-  const api = {
-    registerCommand: () => { registered.push("command"); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop, registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: () => { registered.push("importer"); },
-    registerExporter: () => { registered.push("exporter"); },
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  // Must not throw and must still register commands/importer/exporter.
-  extension.activate(api as any);
-  assert.ok(registered.includes("importer"), "importer still registers without schema support");
-  assert.ok(registered.includes("exporter"), "exporter still registers without schema support");
+test("csv import declares --skip-headers and --stream", async () => {
+  const ext = await harness();
+
+  ext.assertCommandContract({ name: "csv import", flags: ["--skip-headers", "--stream"] });
+
+  await ext.deactivate();
 });
 
-test("csv import declares --skip-headers and --stream", () => {
-  const commands: any[] = [];
-  const noop = () => {};
-  const api = {
-    registerCommand: (def: any) => { commands.push(def); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: noop, registerExporter: noop,
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  extension.activate(api as any);
-  const importCmd = commands.find((c) => c.name === "csv import");
-  assert.ok(importCmd, "csv import command should be registered");
-  const longs = (importCmd.flags ?? []).map((f: any) => f.long);
-  assert.ok(longs.includes("--skip-headers"), "csv import should expose --skip-headers");
-  assert.ok(longs.includes("--stream"), "csv import should expose --stream");
+test("csv validate declares --skip-headers", async () => {
+  const ext = await harness();
+
+  ext.assertCommandContract({ name: "csv validate", flags: ["--skip-headers"] });
+
+  await ext.deactivate();
 });
 
-test("csv validate declares --skip-headers", () => {
-  const commands: any[] = [];
-  const noop = () => {};
-  const api = {
-    registerCommand: (def: any) => { commands.push(def); },
-    registerParser: noop, registerPreflight: noop, registerService: noop,
-    registerFlags: noop, registerItemFields: noop, registerItemTypes: noop,
-    registerMigration: noop, registerRenderer: noop,
-    registerImporter: noop, registerExporter: noop,
-    registerSearchProvider: noop, registerVectorStoreAdapter: noop,
-    hooks: { beforeCommand: noop, afterCommand: noop, onWrite: noop, onRead: noop, onIndex: noop },
-  };
-  extension.activate(api as any);
-  const validateCmd = commands.find((c) => c.name === "csv validate");
-  assert.ok(validateCmd, "csv validate command should be registered");
-  const longs = (validateCmd.flags ?? []).map((f: any) => f.long);
-  assert.ok(longs.includes("--skip-headers"), "csv validate should expose --skip-headers");
+test("no command redeclares a host-owned global flag", async () => {
+  // Guards the whole surface, not just the one command that regressed:
+  // registering any of these makes the host reject the command outright, and
+  // the value must be read from ctx.global instead.
+  const hostOwned = new Set([
+    "--json",
+    "--quiet",
+    "--path",
+    "--lean",
+    "--id-only",
+    "--author",
+    "--no-changed-fields",
+    "--full-changed-fields",
+    "--pm-path",
+  ]);
+  const ext = await harness();
+
+  for (const registration of ext.activation.registrations.flags) {
+    for (const flag of registration.flags) {
+      assert.ok(
+        flag.long === undefined || !hostOwned.has(flag.long),
+        `${registration.target_command} must not redeclare host-owned global flag ${flag.long}`,
+      );
+    }
+  }
+
+  await ext.deactivate();
 });
