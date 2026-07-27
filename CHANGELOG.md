@@ -2,6 +2,10 @@
 
 ## 2026.7.27 - 2026-07-27
 
+### Fixed
+
+- csv validate fails to register on pm-cli 2026.7.27 because it redeclares the host-owned --json global ([pm-csv-0orl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0orl.toon))
+
 ### Removed
 
 - Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-csv-28sk](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-28sk.toon))
