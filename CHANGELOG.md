@@ -88,6 +88,12 @@
 
 - Deep RFC-4180 import/export + idempotent upsert (SDK 2026.5.31) ([pm-csv-xim5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-xim5.toon))
 
+## 2026.6.8 - 2026-06-08
+
+### Other
+
+- Full-cycle hardening wave: pm-csv ([pm-csv-9jj1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-9jj1.toon))
+
 ## 2026.6.7 - 2026-06-07
 
 ### Added
@@ -100,7 +106,6 @@
 
 ### Other
 
-- Full-cycle hardening wave: pm-csv ([pm-csv-9jj1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-9jj1.toon))
 - Harden release readiness checks ([pm-csv-wn9s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-wn9s.toon))
 - Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-csv-eio7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-eio7.toon))
 
