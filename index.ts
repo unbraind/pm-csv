@@ -2383,7 +2383,6 @@ export default defineExtension({
         { long: "--auto-map", description: "Auto-map common third-party headers (e.g. summary->title) when unambiguous" },
         { long: "--encoding", value_name: "enc", description: "Source file encoding: utf-8 (default) | utf16le | latin1" },
         { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order" },
-        { long: "--json", description: "Emit the report as JSON" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
@@ -2399,7 +2398,9 @@ export default defineExtension({
         const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
         const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
         const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
-        const asJson = readBoolOption(ctx.options, "json");
+        // `--json` is a host-owned global flag: extensions must not redeclare it
+        // (the host rejects the registration) and must read it from ctx.global.
+        const asJson = ctx.global?.json === true;
         const absolutePath = resolve(filePath);
 
         let report: CsvValidateReport;
