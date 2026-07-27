@@ -6,16 +6,17 @@ status: closed
 priority: 1
 tags[4]: deps-2026-6-7,full-cycle-hardening,hardening-pass,wave-full-cycle-2026-06-07
 created_at: "2026-06-07T07:41:34.875Z"
-updated_at: "2026-07-27T22:25:24.038Z"
+updated_at: "2026-07-27T23:21:15.888Z"
 closed_at: "2026-07-27T22:25:24.037Z"
 author: codex-5.3-full-cycle
-release: 2026.6.7
+release: 2026.6.8
 resolution: Work completed and released in 2026.6.7. Release attribution set explicitly so pm-changelog --respect-item-release files the entry under 2026.6.7 rather than the current Unreleased section.
 expected_result: "A closed item whose changelog entry appears under the 2026.6.7 heading it actually shipped in, leaving the Unreleased section untouched."
 actual_result: "Before this change the item sat in_progress since 2026-06-07 with no activity, so the work was invisible to the changelog while still counting as open work in every fleet audit."
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-06-07T07:41:36.337Z",codex-5.3-full-cycle,"Hardening pass complete: release:check succeeded after dependency bump and changelog regeneration."
   "2026-06-07T08:00:41.688Z",codex-5.3-full-cycle,"Security gate: high-confidence token/key regex scan over tracked files and git history found no actionable secrets. Binary-history false positives were traced to embedded wasm base64 blobs, not credentials."
+  "2026-07-27T23:21:15.887Z",claude-code,"Release attribution corrected from 2026.6.7 to 2026.6.8. The original value came from mapping the item's last-activity DATE to a same-day release, which is unsound to the hour: v2026.06.07 was tagged at 07:15:36Z and the implementing merge c9060ed landed at 08:12Z, so the 2026.6.7 release provably does NOT contain this work. Verified by containment rather than dates - git merge-base --is-ancestor c9060ed v2026.06.07 fails while v2026.06.08 succeeds, making v2026.06.08 the first release that actually carried it. Greptile surfaced this class of error on the sibling pm-web PR #67 by spotting a historical release predating its implementation."
 files[3]{path,scope,note}:
   CHANGELOG.md,project,Regenerated changelog to satisfy release gate
   package-lock.json,project,Regenerated lockfile after dependency alignment
