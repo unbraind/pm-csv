@@ -28,6 +28,7 @@
 
 ### Other
 
+- Adopt --respect-item-release in changelog scripts and close the shipped-but-stale export terminator tracker ([pm-csv-qnax](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-qnax.toon))
 - Redact local host paths (/home/<user\>) from tracker item history ([pm-csv-tl5j](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-tl5j.toon))
 
 ## 2026.7.23 - 2026-07-23
@@ -62,6 +63,10 @@
 
 ## 2026.7.11 - 2026-07-11
 
+### Added
+
+- Full pm ecosystem production pass for pm-csv ([pm-csv-w1re](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-w1re.toon))
+
 ### Other
 
 - Adopt current pm SDK and TypeScript 7 toolchain ([pm-csv-axm5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-axm5.toon))
@@ -95,6 +100,7 @@
 
 ### Other
 
+- Full-cycle hardening wave: pm-csv ([pm-csv-9jj1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-9jj1.toon))
 - Harden release readiness checks ([pm-csv-wn9s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-wn9s.toon))
 - Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-csv-eio7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-eio7.toon))
 
@@ -113,10 +119,15 @@
 
 ### Fixed
 
+- Heavy edge-case tests + functional round-trip + manifest capabilities fix ([pm-csv-f0nz](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-f0nz.toon))
 - Fix --key dedup duplication (pm tag case-folding) ([pm-csv-bvz5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-bvz5.toon))
 
 ### Other
 
+- Robust import: BOM, --map col=field, type coercion, malformed-row handling ([pm-csv-hp73](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-hp73.toon))
+- Idempotent upsert: --key <col\> dedups via csv-key provenance tag ([pm-csv-u0xp](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-u0xp.toon))
+- Export: TSV delimiter, --no-header, --crlf line endings ([pm-csv-bocj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-bocj.toon))
+- Investigate renderers capability (pm list --format csv) ([pm-csv-3d3b](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-3d3b.toon))
 - validate exit-code policy ([pm-csv-yhp9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-yhp9.toon))
 - csv_source persisted as tag, not scalar field ([pm-csv-vp1u](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-vp1u.toon))
 - Which extra pm fields to round-trip ([pm-csv-ry94](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/decisions/pm-csv-ry94.toon))
@@ -149,6 +160,10 @@
 - csv export drops body (no --include-body) and uses nonexistent due_date/milestone create flags ([pm-csv-l4vy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-l4vy.toon))
 - csv import/export return error object instead of throwing (exit 0 on failure) ([pm-csv-e9v4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-e9v4.toon))
 - csv import --dry-run silently ignored (still writes) ([pm-csv-zw3a](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zw3a.toon))
+
+### Other
+
+- Production-readiness audit 2026-05-28 ([pm-csv-7jbc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-7jbc.toon))
 
 ## 2026.5.28 - 2026-05-28
 
