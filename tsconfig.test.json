@@ -4,8 +4,16 @@
     "allowJs": false,
     "declaration": false,
     "declarationMap": false,
-    "noEmit": true
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["test/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "dist-test"]
+  "include": [
+    "test/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-test"
+  ]
 }

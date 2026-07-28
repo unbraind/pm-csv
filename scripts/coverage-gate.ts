@@ -50,11 +50,20 @@ interface CoverageThresholds {
 interface CoverageGateConfig {
   /**
    * Source locations the gate requires to appear in the report. Each entry is
-   * either a directory, which is walked recursively for `.ts` files, or a
-   * single file, which lets a package whose entrypoint sits at the repository
-   * root declare its sources without dragging in `test/` and `scripts/`.
+   * either a directory, walked recursively for `.ts` files, or a single file.
+   *
+   * Prefer a directory — including `"."` for a package whose entrypoint sits at
+   * the repository root. A directory is enumerated at run time, so a source file
+   * added later is required automatically. An explicit file list freezes the
+   * required set at the moment it was written, and a new untested module simply
+   * never enters it, which is the same blind spot this gate exists to close.
    */
   readonly sources: readonly string[];
+  /**
+   * Directory names skipped while walking, on top of {@link DEFAULT_SKIP_DIRS}.
+   * Needed only for a source tree with a non-standard non-source directory.
+   */
+  readonly skipDirs?: readonly string[];
   /** Test file arguments handed to `node --test`. */
   readonly tests: readonly string[];
   /** Threshold enforced on the aggregate report. */
@@ -82,11 +91,35 @@ if (!config) {
 }
 
 /**
+ * Directories never treated as source, so that `sources: ["."]` works for a
+ * package whose entrypoint sits at the repository root.
+ *
+ * These hold tests, build output, tooling and installed dependencies. None of
+ * them contain shipped source, and several would otherwise make the required
+ * set unsatisfiable — a test file cannot appear in its own coverage report.
+ */
+const DEFAULT_SKIP_DIRS: readonly string[] = [
+  "node_modules",
+  "dist",
+  "dist-test",
+  "coverage",
+  "test",
+  "tests",
+  "scripts",
+  "public",
+  ".agents",
+  ".git",
+  ".github",
+];
+
+const skipDirs = new Set([...DEFAULT_SKIP_DIRS, ...(config.skipDirs ?? [])]);
+
+/**
  * Collects every TypeScript source file at a configured location.
  *
- * A file entry resolves to itself; a directory entry is walked recursively.
- * Declaration files are skipped either way: they carry no runtime code and so
- * can never appear in a coverage report.
+ * A file entry resolves to itself; a directory entry is walked recursively with
+ * {@link DEFAULT_SKIP_DIRS} pruned. Declaration files are skipped either way:
+ * they carry no runtime code and so can never appear in a coverage report.
  *
  * @param target - Absolute path to a source file or directory.
  * @returns Repository-relative POSIX paths, in directory order.
@@ -97,11 +130,12 @@ function collectSources(target: string): string[] {
   }
   const found: string[] = [];
   for (const entry of readdirSync(target, { withFileTypes: true })) {
-    const full = join(target, entry.name);
     if (entry.isDirectory()) {
-      found.push(...collectSources(full));
+      if (!skipDirs.has(entry.name)) {
+        found.push(...collectSources(join(target, entry.name)));
+      }
     } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-      found.push(relative(repoRoot, full).split(sep).join("/"));
+      found.push(relative(repoRoot, join(target, entry.name)).split(sep).join("/"));
     }
   }
   return found;
@@ -124,11 +158,11 @@ const result = spawnSync(
   [
     "--test",
     "--experimental-test-coverage",
-    ...config.sources.map((source) =>
-      statSync(join(repoRoot, source)).isDirectory()
-        ? `--test-coverage-include=${source}/**`
-        : `--test-coverage-include=${source}`,
-    ),
+    // Scope the report to exactly the files the presence check requires. Passing
+    // the enumerated paths rather than a directory glob keeps the two in step by
+    // construction, and keeps test files and tooling out of the percentages even
+    // when the source root is the repository root.
+    ...required.map((file) => `--test-coverage-include=${file}`),
     `--test-coverage-lines=${config.thresholds.lines}`,
     `--test-coverage-branches=${config.thresholds.branches}`,
     `--test-coverage-functions=${config.thresholds.functions}`,
@@ -138,7 +172,16 @@ const result = spawnSync(
     `--test-reporter-destination=${lcovPath}`,
     ...config.tests,
   ],
-  { cwd: repoRoot, stdio: "inherit" },
+  {
+    cwd: repoRoot,
+    stdio: "inherit",
+    // Pin the timezone so the measurement is reproducible on any machine.
+    // Code that branches on a timestamp's UTC offset takes different paths under
+    // a local offset than under UTC, which moves the reported percentage between
+    // a contributor's machine and CI. A threshold pinned to one machine's number
+    // then fails on the other for reasons unrelated to the change under review.
+    env: { ...process.env, TZ: "UTC" },
+  },
 );
 
 if (result.error) {
