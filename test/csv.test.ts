@@ -31,7 +31,7 @@ import {
   suggestClosest,
   validateFieldMapTargets,
   checkMapSourcesPresent,
-} from "../dist/index.js";
+} from "../index.ts";
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

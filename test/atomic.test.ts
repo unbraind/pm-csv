@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import extension, { atomicTransactionId } from "../dist/index.js";
+import extension, { atomicTransactionId } from "../index.ts";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the `--atomic` CSV import path (pm-cli >= 2026.7.19
