@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.7.28 - 2026-07-28
+
+### Other
+
+- Adopt pm-cli 2026.7.28 ([pm-csv-oenu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-oenu.toon))
+
 ## 2026.7.27 - 2026-07-27
 
 ### Fixed

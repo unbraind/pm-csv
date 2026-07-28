@@ -1,0 +1,13 @@
+id: pm-csv-oenu
+title: Adopt pm-cli 2026.7.28
+description: "Bump pm-cli dependency and package version from 2026.7.27 to 2026.7.28 across package.json, manifest.json, and index.ts."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-28T03:32:52.442Z"
+updated_at: "2026-07-28T03:32:56.822Z"
+closed_at: "2026-07-28T03:32:56.821Z"
+author: pi-agent
+close_reason: "Bumped @unbrained/pm-cli from ^2026.7.27 to ^2026.7.28 in devDependencies and from >=2026.7.27 to >=2026.7.28 in peerDependencies; bumped package version to 2026.7.28 in package.json, manifest.json, and the version constant in index.ts; npm install resolved pm-cli 2026.7.28; release:check passes (typecheck, build, test, audit, pack dry-run, changelog check)."
+body: ""
