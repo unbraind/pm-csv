@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 
-import extension from "../dist/index.js";
+import extension from "../index.ts";
 
 /**
  * Activate pm-csv through pm's real host engine with the manifest's declared

@@ -4,10 +4,16 @@
     "allowJs": false,
     "declaration": false,
     "declarationMap": false,
-    "noEmit": false,
-    "outDir": "./dist-test",
-    "rootDir": "./test"
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["test/**/*.ts"],
-  "exclude": ["node_modules", "dist", "dist-test"]
+  "include": [
+    "test/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-test"
+  ]
 }

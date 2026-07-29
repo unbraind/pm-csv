@@ -12,6 +12,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the floor declared in `engines` and the first line that strips
+        # TypeScript without a flag; 26 is what the fleet develops against.
+        node-version: [22, 26]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -22,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Setup Bun
@@ -34,11 +40,8 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Build
-        run: npm run build
-
-      - name: Run tests
-        run: npm test
+      - name: Test with coverage gate
+        run: npm run coverage
 
       - name: Production dependency audit
         run: npm run audit:prod
