@@ -191,7 +191,11 @@ for (const file of config.ignore ?? []) {
     );
     process.exit(1);
   }
+  // Block comments are stripped as well as line comments: tsc carries a
+  // file-leading JSDoc into the emit, so a documented type-only module would
+  // otherwise read as runtime code and be rejected for having a comment.
   const body = readFileSync(emitted, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/export\s*\{\s*\}\s*;?/g, "")
     .trim();
