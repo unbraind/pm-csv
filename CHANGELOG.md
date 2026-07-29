@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Enforce a real coverage gate by running tests against TypeScript sources ([pm-csv-0pmb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-0pmb.toon))
+
+### Other
+
+- Adopt pm-cli 2026.7.29 ([pm-csv-vdnh](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-vdnh.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Other

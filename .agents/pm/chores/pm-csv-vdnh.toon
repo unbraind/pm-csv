@@ -1,0 +1,16 @@
+id: pm-csv-vdnh
+title: Adopt pm-cli 2026.7.29
+description: "Bump @unbrained/pm-cli devDependency to 2026.7.29 and peerDependency to >=2026.7.29. Audit for removed --all flag usage, audit for newly-fixed upstream workarounds (GH-651/672/676/785/792/794), run all quality gates, regenerate changelog."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-29T04:37:30.148Z"
+updated_at: "2026-07-29T04:39:50.791Z"
+closed_at: "2026-07-29T04:39:50.778Z"
+completed_at: "2026-07-29T04:39:50.778Z"
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-07-29T04:38:00.203Z",pi-agent,"Audit results: --all flag: no hits. Package already uses list-all. GH-651 (signed window): no hits, not applicable. GH-672 (context low_level): no hits - blocked_by is a CSV column name mapping, not pm context low_level rows. GH-676 (list --tag CSV): no hits - tag references are about CSV import/export tags and pm create --tags, not pm list --tag. GH-785/792 (health runtime/extension dirs): no hits - pre-create in tests is about creating test items, not pre-creating runtime/ dirs. No pm health or --warn-only usage. GH-794 (output_format override): no hits. No workarounds removed."
+close_reason: "Bumped @unbrained/pm-cli devDependency to ^2026.7.29 and peerDependency to >=2026.7.29. Audited for removed --all flag: no hits (package already uses list-all). Audited for GH-651/672/676/785/792/794 workarounds: none applicable, none removed. All quality gates green: 105 tests pass, coverage lines 81.72%, branches 74.63%, functions 88.30% (thresholds met). Changelog check and audit:prod clean."
+body: ""
