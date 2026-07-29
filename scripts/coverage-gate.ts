@@ -28,8 +28,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * Minimum acceptable percentage for each coverage dimension Node reports.
@@ -125,6 +125,12 @@ const skipDirs = new Set([...DEFAULT_SKIP_DIRS, ...(config.skipDirs ?? [])]);
  * @returns Repository-relative POSIX paths, in directory order.
  */
 function collectSources(target: string): string[] {
+  if (!existsSync(target)) {
+    console.error(
+      `coverage-gate: \`coverageGate.sources\` names ${relative(repoRoot, target)}, which does not exist.`,
+    );
+    process.exit(1);
+  }
   if (!statSync(target).isDirectory()) {
     return [relative(repoRoot, target).split(sep).join("/")];
   }
@@ -192,21 +198,33 @@ if (result.error) {
 /**
  * Source files the run actually reported on, read back from the lcov output.
  *
- * A missing or unreadable lcov file means the runner died before writing a
- * report; that is surfaced as an empty set so the presence check below fails
- * loudly rather than treating "no data" as "nothing missing".
+ * `SF:` paths are normalised to repository-relative POSIX form so they can be
+ * compared against the walk. The lcov reporter emits them relative to the
+ * working directory on Linux, but that is not contractual and Windows runners
+ * have been seen to emit absolute paths; without normalising, the presence
+ * check would invert into a permanently red build that blames every source file
+ * for never loading.
  */
 const reported = new Set<string>();
 try {
   statSync(lcovPath);
   for (const line of readFileSync(lcovPath, "utf8").split("\n")) {
-    if (line.startsWith("SF:")) {
-      reported.add(line.slice(3).trim().split(sep).join("/"));
-    }
+    if (!line.startsWith("SF:")) continue;
+    const raw = line.slice(3).trim();
+    const abs = isAbsolute(raw) ? raw : join(repoRoot, raw);
+    reported.add(relative(repoRoot, abs).split(sep).join("/"));
   }
 } catch {
   console.error(`coverage-gate: no coverage report was written to ${relative(repoRoot, lcovPath)}.`);
   process.exit(1);
+}
+
+// Surface a runner failure before the presence check. A failing suite or an
+// unmet threshold can legitimately leave sources out of the lcov output, and
+// reporting "never loaded" in that case blames a missing import for what is
+// actually a test failure the author needs to see first.
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
 }
 
 const missing = required.filter((file) => !reported.has(file));
@@ -225,10 +243,6 @@ if (missing.length > 0) {
     ].join("\n"),
   );
   process.exit(1);
-}
-
-if (result.status !== 0) {
-  process.exit(result.status ?? 1);
 }
 
 console.log(`\ncoverage-gate: ${required.length} source file(s) reported, thresholds met.`);
