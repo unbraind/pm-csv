@@ -2180,7 +2180,7 @@ const defineExtension = <TModule extends ExtensionModule>(module: TModule): TMod
 
 export default defineExtension({
   name: "pm-csv",
-  version: "2026.7.28",
+  version: "2026.7.29",
 
   activate(api: ExtensionApi) {
     // -----------------------------------------------------------------------
