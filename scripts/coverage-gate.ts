@@ -28,7 +28,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
@@ -90,6 +90,15 @@ if (!config) {
   process.exit(1);
 }
 
+/** Compiler paths used to locate a source file's emitted output. */
+interface TsConfig {
+  readonly compilerOptions?: { readonly outDir?: string; readonly rootDir?: string };
+}
+
+const tsConfig = JSON.parse(readFileSync(join(repoRoot, "tsconfig.json"), "utf8")) as TsConfig;
+const tsOutDir = tsConfig.compilerOptions?.outDir ?? "dist";
+const tsRootDir = tsConfig.compilerOptions?.rootDir ?? ".";
+
 /**
  * Directories never treated as source, so that `sources: ["."]` works for a
  * package whose entrypoint sits at the repository root.
@@ -132,6 +141,12 @@ function collectSources(target: string): string[] {
     process.exit(1);
   }
   if (!statSync(target).isDirectory()) {
+    if (!target.endsWith(".ts") || target.endsWith(".d.ts")) {
+      console.error(
+        `coverage-gate: \`coverageGate.sources\` names ${relative(repoRoot, target)}, which is not a TypeScript source file. A declaration file or non-TypeScript entry can never appear in a coverage report, so requiring it would make the gate unsatisfiable.`,
+      );
+      process.exit(1);
+    }
     return [relative(repoRoot, target).split(sep).join("/")];
   }
   const found: string[] = [];
@@ -151,6 +166,43 @@ const expected = config.sources.flatMap((source) => collectSources(join(repoRoot
 const exempt = new Set(config.ignore ?? []);
 const required = expected.filter((file) => !exempt.has(file));
 
+/**
+ * Rejects an `ignore` entry that still carries runtime code.
+ *
+ * The exemption exists for type-only modules, which erase to nothing and so can
+ * never appear in a coverage report. Left untested, it is also the one way to
+ * remove an executable module from both the measured set and the required set —
+ * exactly the escape this gate exists to prevent. TypeScript emits `export {};`
+ * and nothing else for a module that erases completely, so the compiled output
+ * settles the question rather than the author's say-so.
+ */
+for (const file of config.ignore ?? []) {
+  if (!expected.includes(file)) {
+    console.error(`coverage-gate: \`coverageGate.ignore\` names ${file}, which is not under \`sources\`.`);
+    process.exit(1);
+  }
+  const emitted = join(repoRoot, tsOutDir, relative(join(repoRoot, tsRootDir), join(repoRoot, file))).replace(
+    /\.ts$/,
+    ".js",
+  );
+  if (!existsSync(emitted)) {
+    console.error(
+      `coverage-gate: cannot verify that ignored file ${file} is type-only — no compiled output at ${relative(repoRoot, emitted)}. Build before running the gate, or correct \`outDir\`/\`rootDir\`.`,
+    );
+    process.exit(1);
+  }
+  const body = readFileSync(emitted, "utf8")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/export\s*\{\s*\}\s*;?/g, "")
+    .trim();
+  if (body.length > 0) {
+    console.error(
+      `coverage-gate: \`coverageGate.ignore\` names ${file}, but it emits runtime code to ${relative(repoRoot, emitted)}. Only type-only modules may be exempt; anything executable must be covered.`,
+    );
+    process.exit(1);
+  }
+}
+
 if (required.length === 0) {
   console.error("coverage-gate: source walk found no files; check `coverageGate.sources`.");
   process.exit(1);
@@ -158,6 +210,10 @@ if (required.length === 0) {
 
 const lcovPath = join(repoRoot, "coverage", "lcov.info");
 mkdirSync(join(repoRoot, "coverage"), { recursive: true });
+// Delete any previous report first. If this run writes none, a leftover file
+// from an earlier, broader run would satisfy the presence check on stale data —
+// the gate would pass by reading history rather than by measuring anything.
+rmSync(lcovPath, { force: true });
 
 const result = spawnSync(
   process.execPath,
