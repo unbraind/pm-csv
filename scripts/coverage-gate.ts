@@ -95,9 +95,34 @@ interface TsConfig {
   readonly compilerOptions?: { readonly outDir?: string; readonly rootDir?: string };
 }
 
-const tsConfig = JSON.parse(readFileSync(join(repoRoot, "tsconfig.json"), "utf8")) as TsConfig;
-const tsOutDir = tsConfig.compilerOptions?.outDir ?? "dist";
-const tsRootDir = tsConfig.compilerOptions?.rootDir ?? ".";
+/**
+ * Resolves the compiler's effective output paths.
+ *
+ * Asks `tsc --showConfig` rather than parsing `tsconfig.json` directly: the file
+ * may be JSONC and may inherit `outDir`/`rootDir` through an `extends` chain, so
+ * a raw `JSON.parse` can either throw on a valid config or silently read the
+ * wrong paths and then look for emitted output where none exists. Falls back to
+ * the conventional defaults if the compiler cannot be reached, which keeps the
+ * gate usable rather than failing on an unrelated tooling problem.
+ */
+function resolveEmitPaths(): { outDir: string; rootDir: string } {
+  const shown = spawnSync("npx", ["tsc", "--showConfig", "-p", "tsconfig.json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  if (shown.status === 0 && shown.stdout) {
+    const parsed = JSON.parse(shown.stdout) as TsConfig;
+    return {
+      outDir: parsed.compilerOptions?.outDir ?? "dist",
+      rootDir: parsed.compilerOptions?.rootDir ?? ".",
+    };
+  }
+  console.warn(
+    "coverage-gate: could not resolve the effective tsconfig via `tsc --showConfig`; assuming outDir dist and rootDir .",
+  );
+  return { outDir: "dist", rootDir: "." };
+}
 
 /**
  * Directories never treated as source, so that `sources: ["."]` works for a
@@ -176,15 +201,18 @@ const required = expected.filter((file) => !exempt.has(file));
  * and nothing else for a module that erases completely, so the compiled output
  * settles the question rather than the author's say-so.
  */
+const emitPaths = (config.ignore ?? []).length > 0 ? resolveEmitPaths() : { outDir: "dist", rootDir: "." };
+
 for (const file of config.ignore ?? []) {
   if (!expected.includes(file)) {
     console.error(`coverage-gate: \`coverageGate.ignore\` names ${file}, which is not under \`sources\`.`);
     process.exit(1);
   }
-  const emitted = join(repoRoot, tsOutDir, relative(join(repoRoot, tsRootDir), join(repoRoot, file))).replace(
-    /\.ts$/,
-    ".js",
-  );
+  const emitted = join(
+    repoRoot,
+    emitPaths.outDir,
+    relative(join(repoRoot, emitPaths.rootDir), join(repoRoot, file)),
+  ).replace(/\.ts$/, ".js");
   if (!existsSync(emitted)) {
     console.error(
       `coverage-gate: cannot verify that ignored file ${file} is type-only — no compiled output at ${relative(repoRoot, emitted)}. Build before running the gate, or correct \`outDir\`/\`rootDir\`.`,
