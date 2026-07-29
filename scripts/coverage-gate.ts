@@ -101,9 +101,13 @@ interface TsConfig {
  * Asks `tsc --showConfig` rather than parsing `tsconfig.json` directly: the file
  * may be JSONC and may inherit `outDir`/`rootDir` through an `extends` chain, so
  * a raw `JSON.parse` can either throw on a valid config or silently read the
- * wrong paths and then look for emitted output where none exists. Falls back to
- * the conventional defaults if the compiler cannot be reached, which keeps the
- * gate usable rather than failing on an unrelated tooling problem.
+ * wrong paths.
+ *
+ * Fails closed if the compiler cannot be reached. This feeds the check that
+ * decides whether an exempted module is genuinely type-only, and guessing the
+ * emit layout there could clear an executable module by looking at the wrong
+ * file — the one outcome this gate must never produce. A package that cannot
+ * run its own compiler has a problem worth stopping for.
  */
 function resolveEmitPaths(): { outDir: string; rootDir: string } {
   const shown = spawnSync("npx", ["tsc", "--showConfig", "-p", "tsconfig.json"], {
@@ -111,17 +115,22 @@ function resolveEmitPaths(): { outDir: string; rootDir: string } {
     encoding: "utf8",
     shell: process.platform === "win32",
   });
-  if (shown.status === 0 && shown.stdout) {
-    const parsed = JSON.parse(shown.stdout) as TsConfig;
-    return {
-      outDir: parsed.compilerOptions?.outDir ?? "dist",
-      rootDir: parsed.compilerOptions?.rootDir ?? ".",
-    };
+  if (shown.status !== 0 || !shown.stdout) {
+    console.error(
+      [
+        "coverage-gate: could not resolve the effective tsconfig via `tsc --showConfig`,",
+        "so the emit layout is unknown and `coverageGate.ignore` entries cannot be verified",
+        "as type-only. Refusing to guess.",
+        shown.stderr?.trim() ? `\n${shown.stderr.trim()}` : "",
+      ].join("\n"),
+    );
+    process.exit(1);
   }
-  console.warn(
-    "coverage-gate: could not resolve the effective tsconfig via `tsc --showConfig`; assuming outDir dist and rootDir .",
-  );
-  return { outDir: "dist", rootDir: "." };
+  const parsed = JSON.parse(shown.stdout) as TsConfig;
+  return {
+    outDir: parsed.compilerOptions?.outDir ?? "dist",
+    rootDir: parsed.compilerOptions?.rootDir ?? ".",
+  };
 }
 
 /**
