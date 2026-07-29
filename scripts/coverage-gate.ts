@@ -251,6 +251,15 @@ if (result.error) {
   process.exit(1);
 }
 
+// Surface a runner failure before touching the report at all. A failing suite,
+// an unmet threshold, or a test file that will not load can each leave the lcov
+// output absent or incomplete, and every diagnostic below would then describe a
+// coverage-configuration problem the author does not have — burying the test
+// failure they need to act on.
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
+}
+
 /**
  * Source files the run actually reported on, read back from the lcov output.
  *
@@ -273,14 +282,6 @@ try {
 } catch {
   console.error(`coverage-gate: no coverage report was written to ${relative(repoRoot, lcovPath)}.`);
   process.exit(1);
-}
-
-// Surface a runner failure before the presence check. A failing suite or an
-// unmet threshold can legitimately leave sources out of the lcov output, and
-// reporting "never loaded" in that case blames a missing import for what is
-// actually a test failure the author needs to see first.
-if (result.status !== 0) {
-  process.exit(result.status ?? 1);
 }
 
 const missing = required.filter((file) => !reported.has(file));
