@@ -1246,7 +1246,8 @@ export function atomicTransactionId(
  *
  * Presence of the row marker — NOT item status — is the applied signal. A row
  * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
- * closed item (upsertCreate/upsertUpdate pass the row's status), so it must
+ * closed item (upsertCreate/upsertUpdate apply the row's status, routing
+ * terminal transitions through `pm close --reason`), so it must
  * still be recognized on resume and never re-imported. Conversely a rolled-back
  * create must NOT be recognized: `compensateCreate()` therefore STRIPS the
  * `csv-tx`/`csv-txrow` markers before closing the item, so a compensated
@@ -1702,7 +1703,30 @@ function appendRelationalArgs(args: string[], p: ParsedRow): void {
   if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
 }
 
-/** Create a new item, optionally carrying a csv-key provenance tag. Returns the new id. */
+/**
+ * Build the `pm close --reason` text for an imported row whose CSV status is
+ * terminal (`closed`/`canceled`). Since pm-cli 2026.8.3 the CLI enforces
+ * governance.require_close_reason on every `closed` transition, and the CSV
+ * source carries no close-reason/resolution field (see {@link IMPORT_COLUMNS}),
+ * so the reason states the import provenance factually instead of inventing an
+ * outcome (e.g. "completed") that the source never recorded.
+ */
+function importCloseReason(status: "closed" | "canceled", source?: string): string {
+  const origin = source ? ` from ${source}` : "";
+  return `Imported${origin} (source status: ${status})`;
+}
+
+/**
+ * Create a new item, optionally carrying a csv-key provenance tag. Returns the
+ * new id (empty string when `pm create` did not report one).
+ *
+ * A terminal `closed` status cannot be set at create time: `pm create --status
+ * closed` is rejected with close_reason_required (governance.require_close_reason
+ * is enforced since pm-cli 2026.8.3 and create has no --reason flag). Such rows
+ * are created as `open` and immediately transitioned through `pm close --reason`
+ * with the factual import provenance ({@link importCloseReason}). `canceled` is
+ * not gated by that policy and is still set directly at create time.
+ */
 function upsertCreate(
   pmRoot: string,
   p: ParsedRow,
@@ -1721,7 +1745,10 @@ function upsertCreate(
   // item created inside a transaction so inspect()/compensate() can find it.
   if (extraTags && extraTags.length > 0) tags.push(...extraTags);
 
-  const args = ["--path", pmRoot, "create", "--title", p.title, "--status", p.status, "--json"];
+  // See the function docstring: terminal `closed` is applied via pm close
+  // after the create, never via `pm create --status closed`.
+  const createStatus = p.status === "closed" ? "open" : p.status;
+  const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
   if (p.body) args.push("--body", p.body);
   if (p.priority !== undefined) args.push("--priority", String(p.priority));
   if (p.type) args.push("--type", p.type);
@@ -1731,15 +1758,27 @@ function upsertCreate(
 
   const r = spawnSync("pm", args, { encoding: "utf-8" });
   if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  let id = "";
   try {
     const parsed = JSON.parse(r.stdout);
-    return parsed.id ?? parsed.item?.id ?? "";
+    id = parsed.id ?? parsed.item?.id ?? "";
   } catch {
-    return "";
+    id = "";
   }
+  if (id && p.status === "closed") {
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)], { encoding: "utf-8" });
+    if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
+  }
+  return id;
 }
 
-/** Update an existing item in place (status via update; close handled separately). */
+/**
+ * Update an existing item in place. Non-terminal statuses go through
+ * `pm update --status`; a terminal closed/canceled status is applied afterwards
+ * through `pm close --reason` with the factual import provenance
+ * ({@link importCloseReason}) — never an invented outcome — because
+ * governance.require_close_reason forbids reason-free terminal transitions.
+ */
 function upsertUpdate(
   pmRoot: string,
   id: string,
@@ -1766,8 +1805,7 @@ function upsertUpdate(
 
   // Apply terminal statuses through the dedicated close command.
   if (p.status === "closed" || p.status === "canceled") {
-    const reason = p.status === "canceled" ? "canceled" : "completed";
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", reason], { encoding: "utf-8" });
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8" });
     if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
   }
 }
