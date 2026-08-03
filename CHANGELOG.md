@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Route closed-status CSV imports through pm close with provenance reason ([pm-csv-mmi3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mmi3.toon))
+
+### Other
+
+- Resolve pm-changelog to the release that derives release dates in UTC ([pm-csv-dzlr](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-dzlr.toon))
+
 ## 2026.7.29 - 2026-07-29
 
 ### Added
