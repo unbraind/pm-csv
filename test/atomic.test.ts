@@ -151,6 +151,12 @@ function installFakePm(): () => void {
     "  process.stderr.write('simulated pm close failure (test)\\n');",
     "  process.exit(1);",
     "}",
+    // Makes the status LOOKUP itself fail, so itemStatus() returns undefined.
+    // An unknown status must never be read as proof that compensation worked.
+    "if (root && existsSync(root + '/fake-get-fail') && has('get')) {",
+    "  process.stderr.write('simulated pm get failure (test)\\n');",
+    "  process.exit(1);",
+    "}",
     "const realPm = process.env.PM_CSV_REAL_PM;",
     "const r = spawnSync(realPm, args, { stdio: 'inherit' });",
     "process.exit(r.status == null ? 1 : r.status);",
@@ -677,8 +683,8 @@ test("non-atomic closed row whose pm close fails: the persisted open orphan is c
     // The fix compensates (closes) the orphan rather than leaving it open.
     assert.match(
       result.errors[0],
-      /compensated \(closed\)/,
-      "error must state the orphan was compensated, not merely that close failed",
+      /compensated \(verified closed\)/,
+      "error must state the orphan was compensated AND that the closed status was verified — an unchecked claim of compensation is what let an unverifiable status pass as success",
     );
 
     // The compensation actually happened on disk: the closed row's item exists
@@ -723,6 +729,51 @@ test("non-atomic closed row whose create id cannot be recovered: hard failure, n
     // row is reported as failed, never as a silent open success).
     const items = listItems(root);
     assert.equal(items.length, 0, "no silent open orphan was recorded as imported");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Review follow-up (Greptile P1): an UNKNOWN status must not be read as proof
+// that compensation succeeded.
+//
+// `itemStatus()` returns undefined whenever the lookup itself fails — non-zero
+// exit, malformed JSON, or an absent status field. The verification originally
+// asked "is it still open?", so undefined fell through to the success path and
+// the row was reported as compensated (closed) even though the orphan might
+// still be open. A retry without --key-field would then duplicate it, which is
+// precisely the leak this branch exists to prevent. The check now demands a
+// status of exactly `closed` as positive evidence.
+test("non-atomic closed row: an unverifiable status is not treated as successful compensation", async () => {
+  const root = freshTracker();
+  // Both closes fail AND the status lookup fails, so compensation cannot be
+  // verified either way — the orphan really is left open underneath.
+  writeFileSync(join(root, "fake-close-fail"), "");
+  writeFileSync(join(root, "fake-get-fail"), "");
+  const file = join(root, "unverifiable.csv");
+  writeFileSync(file, "title,status\nUnverifiable Closed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported");
+
+    const msg = result.errors[0];
+    assert.match(
+      msg,
+      /could not be verified/i,
+      "an unreadable status must be reported as unverified, never as a successful compensation",
+    );
+    assert.doesNotMatch(
+      msg,
+      /verified closed/i,
+      "the success wording must not appear when compensation could not be verified",
+    );
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
   } finally {
     restorePm();
     rmSync(root, { recursive: true, force: true });

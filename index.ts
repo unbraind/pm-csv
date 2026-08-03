@@ -1835,15 +1835,24 @@ function upsertCreate(
         "csv import row failed; closing orphan created item",
       );
       const closeErr = cr.stderr?.trim() || cr.stdout?.trim() || "pm close failed";
-      if (itemStatus(pmRoot, id) === "open") {
-        // Compensation also failed: surface the id so the partial state is
-        // actionable and a retry can reconcile it.
+      // Only a status of exactly `closed` is evidence that compensation worked.
+      // `itemStatus` returns undefined when the lookup itself fails — non-zero
+      // exit, malformed JSON, or an absent status field — and an unknown status
+      // is NOT evidence of success. Treating it as such would report a possibly
+      // still-open orphan as compensated, and a retry without --key-field would
+      // then duplicate it: exactly the leak this branch exists to prevent.
+      const compensatedStatus = itemStatus(pmRoot, id);
+      if (compensatedStatus !== "closed") {
+        const state =
+          compensatedStatus === undefined
+            ? "could not be verified (the status lookup failed): the item may have been left OPEN"
+            : `also failed: the item was created and left OPEN (status '${compensatedStatus}')`;
         throw new Error(
-          `pm close failed for closed row (title '${p.title}', id ${id}) and compensation also failed: item was created and left OPEN — retry or reconcile by id. ${closeErr}`,
+          `pm close failed for closed row (title '${p.title}', id ${id}) and compensation ${state} — retry or reconcile by id. ${closeErr}`,
         );
       }
       throw new Error(
-        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (closed) so the failed row is all-or-nothing. ${closeErr}`,
+        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed) so the failed row is all-or-nothing. ${closeErr}`,
       );
     }
   }
