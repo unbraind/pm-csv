@@ -1795,8 +1795,15 @@ function upsertCreate(
   if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
   let id = "";
   try {
+    // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
+    // — with no `item` wrapper (mutations return a flat receipt; only queries
+    // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
+    // fallback is kept: it would be dead code no real CLI can exercise, and the
+    // sibling pm-github package shipped a silent production bug from trusting
+    // exactly that wrapper — every closed import landed open because the id
+    // never parsed.
     const parsed = JSON.parse(r.stdout);
-    id = parsed.id ?? parsed.item?.id ?? "";
+    id = typeof parsed?.id === "string" ? parsed.id : "";
   } catch {
     id = "";
   }
