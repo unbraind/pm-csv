@@ -1,0 +1,12 @@
+id: pm-csv-dzlr
+title: Resolve pm-changelog to the release that derives release dates in UTC
+description: "The lockfile pinned a pm-changelog older than 2026.8.2, which derived the release-heading date in local time. A host at a positive UTC offset generating a changelog late in the evening produced tomorrow's heading while a UTC runner regenerating the same tracker produced today's, so the committed file and changelog:check disagreed for reasons unrelated to the tracker. The declared dependency range already admitted the fixed release, so no dependency update was ever proposed and only the lockfile still held the old version. The exposure was latent rather than active because the daily release job generates and checks inside a single UTC instant on GitHub and therefore agrees with itself; it bites an agent or a developer regenerating locally, which has happened twice in this fleet."
+type: Chore
+status: open
+priority: 2
+tags[3]: "area:release",dependencies,pm-changelog
+created_at: "2026-08-03T07:13:28.909Z"
+updated_at: "2026-08-03T07:13:28.909Z"
+author: "harness:claude-code"
+acceptance_criteria: "The lockfile resolves pm-changelog to 2026.8.2 or newer; generating this package's changelog under TZ=UTC and under a timezone a day behind at one instant produces byte-identical output; changelog:check passes against the committed CHANGELOG.md"
+body: ""
