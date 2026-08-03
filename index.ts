@@ -1314,7 +1314,12 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
  * a still-open item. Every step tolerates a missing item / absent tag, so a
  * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
  */
-function compensateCreate(pmRoot: string, id: string, markers: readonly string[] = []): void {
+function compensateCreate(
+  pmRoot: string,
+  id: string,
+  markers: readonly string[] = [],
+  reason: string = "atomic csv import rolled back",
+): void {
   const status = itemStatus(pmRoot, id);
   if (status === undefined) return; // item no longer exists
   if (markers.length > 0) {
@@ -1326,9 +1331,16 @@ function compensateCreate(pmRoot: string, id: string, markers: readonly string[]
     );
   }
   if (status === "closed") return; // terminal already; markers stripped above
+  // Compensation is an internal rollback, not a user closure: it must reliably
+  // undo the create regardless of closure-validation governance, so it bypasses
+  // `--validate-close` (off). `require_close_reason` still applies and is
+  // satisfied by `reason`. Without this a strict tracker would block the
+  // rollback and leave the orphan open — the very leak compensation exists to
+  // prevent. Used by both the atomic transaction path (rollback) and the
+  // non-atomic `upsertCreate` close-failure path.
   const r = spawnSync(
     "pm",
-    ["--path", pmRoot, "close", id, "--reason", "atomic csv import rolled back"],
+    ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
     { encoding: "utf-8" },
   );
   if (r.status !== 0 && r.status !== 4) {
@@ -1718,7 +1730,8 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
 
 /**
  * Create a new item, optionally carrying a csv-key provenance tag. Returns the
- * new id (empty string when `pm create` did not report one).
+ * new id (empty string when `pm create` did not report one AND the row is not
+ * terminal-closed — see below).
  *
  * A terminal `closed` status cannot be set at create time: `pm create --status
  * closed` is rejected with close_reason_required (governance.require_close_reason
@@ -1726,6 +1739,28 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
  * are created as `open` and immediately transitioned through `pm close --reason`
  * with the factual import provenance ({@link importCloseReason}). `canceled` is
  * not gated by that policy and is still set directly at create time.
+ *
+ * GUARANTEE (and its limits): the create-then-close sequence for a `closed` row
+ * is NOT atomic — the item is already persisted as `open` when the close runs.
+ * Two failure modes are handled so a failed row is never left as a silent,
+ * undiscoverable orphan that a retry without `--key-field` would duplicate:
+ *
+ *   1. `pm create` succeeded but no id could be recovered (unparseable / id-less
+ *      JSON). The close cannot be applied and the orphan cannot be compensated
+ *      without its id, so this is a HARD FAILURE: an error is thrown (the row is
+ *      reported as failed, never as a silent success), naming the title so the
+ *      operator can find and reconcile the open orphan manually. The created
+ *      open item is left behind in this one unrecoverable case.
+ *   2. `pm close` failed after the item was persisted as open. The orphan is
+ *      compensated (closed) via {@link compensateCreate} with `--validate-close
+ *      off`, so a failed row is all-or-nothing and a retry re-imports it. If
+ *      compensation also fails, the thrown error carries the created id and
+ *      states the item was left open, so the partial state is actionable and a
+ *      retry can reconcile it.
+ *
+ * For a `closed` row, an empty id is therefore a hard error, not a silent
+ * return; the empty-string return only happens for non-closed rows whose
+ * `pm create` reported no id.
  */
 function upsertCreate(
   pmRoot: string,
@@ -1765,9 +1800,45 @@ function upsertCreate(
   } catch {
     id = "";
   }
-  if (id && p.status === "closed") {
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)], { encoding: "utf-8" });
-    if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
+  if (p.status === "closed") {
+    // (1) No id recovered: the close cannot be applied and the orphan cannot be
+    // compensated without its id. Hard failure — never a silent success — so
+    // the row is reported as failed, not imported. The created open orphan is
+    // unrecoverable from here; the error names the title for manual reconcile.
+    if (!id) {
+      throw new Error(
+        `pm create succeeded for closed row (title '${p.title}') but returned no id, so the terminal 'closed' status cannot be applied and the created open item cannot be compensated; it is left as an unrecoverable open orphan — reconcile manually`,
+      );
+    }
+    const cr = spawnSync(
+      "pm",
+      ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
+      { encoding: "utf-8" },
+    );
+    if (cr.status !== 0) {
+      // (2) The close failed but the item is already persisted as open.
+      // Compensate (close) the orphan so a failed row is all-or-nothing and a
+      // retry without --key-field cannot duplicate an undiscoverable open item.
+      // Compensation bypasses closure-validation governance (it is a rollback,
+      // not a user closure) so a strict tracker cannot block the cleanup.
+      compensateCreate(
+        pmRoot,
+        id,
+        [],
+        "csv import row failed; closing orphan created item",
+      );
+      const closeErr = cr.stderr?.trim() || cr.stdout?.trim() || "pm close failed";
+      if (itemStatus(pmRoot, id) === "open") {
+        // Compensation also failed: surface the id so the partial state is
+        // actionable and a retry can reconcile it.
+        throw new Error(
+          `pm close failed for closed row (title '${p.title}', id ${id}) and compensation also failed: item was created and left OPEN — retry or reconcile by id. ${closeErr}`,
+        );
+      }
+      throw new Error(
+        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (closed) so the failed row is all-or-nothing. ${closeErr}`,
+      );
+    }
   }
   return id;
 }
