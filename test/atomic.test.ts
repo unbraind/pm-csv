@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import extension, { atomicTransactionId } from "../index.ts";
@@ -102,6 +102,89 @@ async function runImport(
   } catch (err) {
     return { error: err as Error };
   }
+}
+
+/** Resolve the absolute path of the real `pm` executable (before any PATH mutation). */
+function realPmPath(): string {
+  const r = spawnSync("sh", ["-c", "command -v pm"], { encoding: "utf-8" });
+  const p = r.stdout.trim();
+  if (!p) throw new Error("could not resolve real pm on PATH for fake-pm wrapper");
+  return p;
+}
+
+/**
+ * Install a transparent `pm` wrapper as the FIRST entry on PATH. It delegates
+ * every invocation to the real `pm` EXCEPT for two opt-in, tracker-scoped
+ * intercepts used only by the close-failure regression tests below. The wrapper
+ * reads the target tracker root from --path/--pm-path and only acts when a
+ * marker file is present in THAT root, so concurrent test files (whose trackers
+ * never carry a marker) are unaffected even while PATH is temporarily mutated.
+ *
+ *   - `<root>/fake-create-no-id`: `pm create --json` exits 0 with `{}` (valid
+ *     JSON, no id) to simulate "create succeeded but the id could not be
+ *     recovered". No real item is created.
+ *   - `<root>/fake-close-fail`: every `pm close ...` exits 1 with a simulated
+ *     error, to exercise the close-failure / compensation paths.
+ *
+ * Returns a cleanup function that restores PATH/PM_CSV_REAL_PM and removes the
+ * wrapper bin.
+ */
+function installFakePm(): () => void {
+  const bin = mkdtempSync(join(tmpdir(), "pm-csv-fakepm-"));
+  // No template literals / ${} in the wrapper source on purpose, so it embeds
+  // cleanly in this template literal without escaping.
+  const wrapper = [
+    "#!/usr/bin/env node",
+    "const { spawnSync } = require('child_process');",
+    "const { existsSync } = require('fs');",
+    "const args = process.argv.slice(2);",
+    "let root = '';",
+    "for (let i = 0; i < args.length; i++) {",
+    "  if (args[i] === '--path' || args[i] === '--pm-path') root = args[i + 1] || '';",
+    "}",
+    "function has(s) { return args.indexOf(s) !== -1; }",
+    "if (root && existsSync(root + '/fake-create-no-id') && has('create') && has('--json')) {",
+    "  process.stdout.write('{}\\n');",
+    "  process.exit(0);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-fail') && has('close')) {",
+    "  process.stderr.write('simulated pm close failure (test)\\n');",
+    "  process.exit(1);",
+    "}",
+    // Makes the status LOOKUP itself fail, so itemStatus() returns undefined.
+    // An unknown status must never be read as proof that compensation worked.
+    "if (root && existsSync(root + '/fake-get-fail') && has('get')) {",
+    "  process.stderr.write('simulated pm get failure (test)\\n');",
+    "  process.exit(1);",
+    "}",
+    "const realPm = process.env.PM_CSV_REAL_PM;",
+    "const r = spawnSync(realPm, args, { stdio: 'inherit' });",
+    "process.exit(r.status == null ? 1 : r.status);",
+    "",
+  ].join("\n");
+  const wrapperPath = join(bin, "pm");
+  writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
+  chmodSync(wrapperPath, 0o755);
+  const origPath = process.env.PATH;
+  const origRealPm = process.env.PM_CSV_REAL_PM;
+  process.env.PM_CSV_REAL_PM = realPmPath();
+  process.env.PATH = `${bin}${delimiter}${origPath ?? ""}`;
+  return () => {
+    process.env.PATH = origPath;
+    if (origRealPm === undefined) delete process.env.PM_CSV_REAL_PM;
+    else process.env.PM_CSV_REAL_PM = origRealPm;
+    rmSync(bin, { recursive: true, force: true });
+  };
+}
+
+/** Toggle strict closure-validation on a tracker so `pm close --reason` fails. */
+function enableStrictCloseValidation(pmRoot: string): void {
+  const r = spawnSync(
+    "pm",
+    ["--path", pmRoot, "config", "project", "set", "governance-close-validation-default", "strict"],
+    { encoding: "utf-8" },
+  );
+  if (r.status !== 0) throw new Error(`pm config set strict failed: ${r.stderr || r.stdout}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +645,170 @@ test("--atomic editing the file in place re-imports new content (transaction id 
     const titles = listItems(root).map((i) => i.title).sort();
     assert.deepEqual(titles, ["New C", "New D", "Old A", "Old B"], "the new rows are present, not silently dropped");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Regression: non-atomic `closed`-row partial-import leak (Greptile P1).
+//
+// `upsertCreate` creates a `closed` row as `open` then transitions it via
+// `pm close --reason`. That sequence is not atomic. Two defects were found:
+//   (1) when the create id could not be recovered, the close was silently
+//       skipped and the row was reported as imported while actually open;
+//   (2) when `pm close` failed, the already-persisted open orphan was left
+//       behind, undiscoverable by a retry without --key-field.
+// The fix makes (1) a hard failure and compensates (closes) the orphan for (2),
+// falling back to an id-carrying error when compensation also fails.
+// ---------------------------------------------------------------------------
+
+test("non-atomic closed row whose pm close fails: the persisted open orphan is compensated (closed), not left behind", async () => {
+  const root = freshTracker();
+  // Strict closure-validation makes `pm close --reason` fail (missing
+  // resolution/expected/actual) while `pm create` still succeeds under the
+  // minimal preset — exactly the gap: the item is persisted open, then the
+  // terminal close fails.
+  enableStrictCloseValidation(root);
+  const file = join(root, "closed.csv");
+  writeFileSync(file, "title,status\nGood Open,open\nBad Closed,closed\n");
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    // The open row imports normally; the closed row's terminal close failed.
+    assert.equal(result.imported, 1, "the open row is imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the closed-row failure is reported");
+
+    // The fix compensates (closes) the orphan rather than leaving it open.
+    assert.match(
+      result.errors[0],
+      /compensated \(verified closed\)/,
+      "error must state the orphan was compensated AND that the closed status was verified — an unchecked claim of compensation is what let an unverifiable status pass as success",
+    );
+
+    // The compensation actually happened on disk: the closed row's item exists
+    // and is CLOSED (rolled back), not left as an open orphan.
+    const items = listItems(root);
+    const orphan = items.find((i) => i.title === "Bad Closed");
+    assert.ok(orphan, "the closed row's created item exists");
+    assert.equal(orphan!.status, "closed", "the orphan was compensated (closed), not left open");
+    const good = items.find((i) => i.title === "Good Open");
+    assert.ok(good, "the open row was imported");
+    assert.equal(good!.status, "open", "the open row remains open");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-atomic closed row whose create id cannot be recovered: hard failure, not a silent open import", async () => {
+  const root = freshTracker();
+  // Marker makes the fake `pm create --json` exit 0 with `{}` (no id) for this
+  // tracker only, simulating "create succeeded but the id could not be parsed".
+  writeFileSync(join(root, "fake-create-no-id"), "");
+  const file = join(root, "noid.csv");
+  writeFileSync(file, "title,status\nUnrecoverable Closed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    // The defect: with the old code the empty id silently skipped the close and
+    // returned "" — the row was counted as IMPORTED while actually open. The
+    // fix makes it a hard failure: imported is NOT incremented for this row.
+    assert.equal(result.imported, 0, "a closed row with no recoverable id is NOT silently imported");
+    assert.equal(result.skipped, 1, "the row is counted as skipped (hard failure)");
+    assert.equal(result.errors.length, 1, "the unrecoverable id is reported as an error");
+    assert.match(
+      result.errors[0],
+      /returned no id.*cannot be applied/i,
+      "error must name the unrecoverable id rather than returning silently",
+    );
+
+    // No item was created for this row (the fake create emitted no id and the
+    // row is reported as failed, never as a silent open success).
+    const items = listItems(root);
+    assert.equal(items.length, 0, "no silent open orphan was recorded as imported");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Review follow-up (Greptile P1): an UNKNOWN status must not be read as proof
+// that compensation succeeded.
+//
+// `itemStatus()` returns undefined whenever the lookup itself fails — non-zero
+// exit, malformed JSON, or an absent status field. The verification originally
+// asked "is it still open?", so undefined fell through to the success path and
+// the row was reported as compensated (closed) even though the orphan might
+// still be open. A retry without --key-field would then duplicate it, which is
+// precisely the leak this branch exists to prevent. The check now demands a
+// status of exactly `closed` as positive evidence.
+test("non-atomic closed row: an unverifiable status is not treated as successful compensation", async () => {
+  const root = freshTracker();
+  // Both closes fail AND the status lookup fails, so compensation cannot be
+  // verified either way — the orphan really is left open underneath.
+  writeFileSync(join(root, "fake-close-fail"), "");
+  writeFileSync(join(root, "fake-get-fail"), "");
+  const file = join(root, "unverifiable.csv");
+  writeFileSync(file, "title,status\nUnverifiable Closed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported");
+
+    const msg = result.errors[0];
+    assert.match(
+      msg,
+      /could not be verified/i,
+      "an unreadable status must be reported as unverified, never as a successful compensation",
+    );
+    assert.doesNotMatch(
+      msg,
+      /verified closed/i,
+      "the success wording must not appear when compensation could not be verified",
+    );
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("non-atomic closed row: when compensation also fails, the error carries the created id so the partial state is actionable", async () => {
+  const root = freshTracker();
+  // Marker makes every `pm close` fail for this tracker only — both the row's
+  // terminal close AND the compensation close. `pm create`/`pm get` delegate to
+  // the real pm, so a real open orphan is persisted, then both closes fail.
+  writeFileSync(join(root, "fake-close-fail"), "");
+  const file = join(root, "closefail.csv");
+  writeFileSync(file, "title,status\nGood Open,open\nOrphan Closed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 1, "the open row is imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the closed-row failure is reported");
+
+    // Compensation also failed: the error MUST carry the created id and state
+    // the item was left OPEN, so a retry/operator can reconcile it by id.
+    const msg = result.errors[0];
+    assert.match(msg, /left OPEN/i, "error must state the orphan was left open when compensation failed");
+    assert.match(msg, /id pm-[a-z0-9]+/i, "error must carry the created item id so the partial state is actionable");
+
+    // The orphan really is left open (compensation could not close it).
+    const orphan = listItems(root).find((i) => i.title === "Orphan Closed");
+    assert.ok(orphan, "the closed row's created item exists");
+    assert.equal(orphan!.status, "open", "the orphan is left open when compensation fails");
+  } finally {
+    restorePm();
     rmSync(root, { recursive: true, force: true });
   }
 });

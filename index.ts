@@ -1246,7 +1246,8 @@ export function atomicTransactionId(
  *
  * Presence of the row marker — NOT item status — is the applied signal. A row
  * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
- * closed item (upsertCreate/upsertUpdate pass the row's status), so it must
+ * closed item (upsertCreate/upsertUpdate apply the row's status, routing
+ * terminal transitions through `pm close --reason`), so it must
  * still be recognized on resume and never re-imported. Conversely a rolled-back
  * create must NOT be recognized: `compensateCreate()` therefore STRIPS the
  * `csv-tx`/`csv-txrow` markers before closing the item, so a compensated
@@ -1313,7 +1314,12 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
  * a still-open item. Every step tolerates a missing item / absent tag, so a
  * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
  */
-function compensateCreate(pmRoot: string, id: string, markers: readonly string[] = []): void {
+function compensateCreate(
+  pmRoot: string,
+  id: string,
+  markers: readonly string[] = [],
+  reason: string = "atomic csv import rolled back",
+): void {
   const status = itemStatus(pmRoot, id);
   if (status === undefined) return; // item no longer exists
   if (markers.length > 0) {
@@ -1325,9 +1331,16 @@ function compensateCreate(pmRoot: string, id: string, markers: readonly string[]
     );
   }
   if (status === "closed") return; // terminal already; markers stripped above
+  // Compensation is an internal rollback, not a user closure: it must reliably
+  // undo the create regardless of closure-validation governance, so it bypasses
+  // `--validate-close` (off). `require_close_reason` still applies and is
+  // satisfied by `reason`. Without this a strict tracker would block the
+  // rollback and leave the orphan open — the very leak compensation exists to
+  // prevent. Used by both the atomic transaction path (rollback) and the
+  // non-atomic `upsertCreate` close-failure path.
   const r = spawnSync(
     "pm",
-    ["--path", pmRoot, "close", id, "--reason", "atomic csv import rolled back"],
+    ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
     { encoding: "utf-8" },
   );
   if (r.status !== 0 && r.status !== 4) {
@@ -1702,7 +1715,53 @@ function appendRelationalArgs(args: string[], p: ParsedRow): void {
   if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
 }
 
-/** Create a new item, optionally carrying a csv-key provenance tag. Returns the new id. */
+/**
+ * Build the `pm close --reason` text for an imported row whose CSV status is
+ * terminal (`closed`/`canceled`). Since pm-cli 2026.8.3 the CLI enforces
+ * governance.require_close_reason on every `closed` transition, and the CSV
+ * source carries no close-reason/resolution field (see {@link IMPORT_COLUMNS}),
+ * so the reason states the import provenance factually instead of inventing an
+ * outcome (e.g. "completed") that the source never recorded.
+ */
+function importCloseReason(status: "closed" | "canceled", source?: string): string {
+  const origin = source ? ` from ${source}` : "";
+  return `Imported${origin} (source status: ${status})`;
+}
+
+/**
+ * Create a new item, optionally carrying a csv-key provenance tag. Returns the
+ * new id (empty string when `pm create` did not report one AND the row is not
+ * terminal-closed — see below).
+ *
+ * A terminal `closed` status cannot be set at create time: `pm create --status
+ * closed` is rejected with close_reason_required (governance.require_close_reason
+ * is enforced since pm-cli 2026.8.3 and create has no --reason flag). Such rows
+ * are created as `open` and immediately transitioned through `pm close --reason`
+ * with the factual import provenance ({@link importCloseReason}). `canceled` is
+ * not gated by that policy and is still set directly at create time.
+ *
+ * GUARANTEE (and its limits): the create-then-close sequence for a `closed` row
+ * is NOT atomic — the item is already persisted as `open` when the close runs.
+ * Two failure modes are handled so a failed row is never left as a silent,
+ * undiscoverable orphan that a retry without `--key-field` would duplicate:
+ *
+ *   1. `pm create` succeeded but no id could be recovered (unparseable / id-less
+ *      JSON). The close cannot be applied and the orphan cannot be compensated
+ *      without its id, so this is a HARD FAILURE: an error is thrown (the row is
+ *      reported as failed, never as a silent success), naming the title so the
+ *      operator can find and reconcile the open orphan manually. The created
+ *      open item is left behind in this one unrecoverable case.
+ *   2. `pm close` failed after the item was persisted as open. The orphan is
+ *      compensated (closed) via {@link compensateCreate} with `--validate-close
+ *      off`, so a failed row is all-or-nothing and a retry re-imports it. If
+ *      compensation also fails, the thrown error carries the created id and
+ *      states the item was left open, so the partial state is actionable and a
+ *      retry can reconcile it.
+ *
+ * For a `closed` row, an empty id is therefore a hard error, not a silent
+ * return; the empty-string return only happens for non-closed rows whose
+ * `pm create` reported no id.
+ */
 function upsertCreate(
   pmRoot: string,
   p: ParsedRow,
@@ -1721,7 +1780,10 @@ function upsertCreate(
   // item created inside a transaction so inspect()/compensate() can find it.
   if (extraTags && extraTags.length > 0) tags.push(...extraTags);
 
-  const args = ["--path", pmRoot, "create", "--title", p.title, "--status", p.status, "--json"];
+  // See the function docstring: terminal `closed` is applied via pm close
+  // after the create, never via `pm create --status closed`.
+  const createStatus = p.status === "closed" ? "open" : p.status;
+  const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
   if (p.body) args.push("--body", p.body);
   if (p.priority !== undefined) args.push("--priority", String(p.priority));
   if (p.type) args.push("--type", p.type);
@@ -1731,15 +1793,79 @@ function upsertCreate(
 
   const r = spawnSync("pm", args, { encoding: "utf-8" });
   if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  let id = "";
   try {
+    // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
+    // — with no `item` wrapper (mutations return a flat receipt; only queries
+    // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
+    // fallback is kept: it would be dead code no real CLI can exercise, and the
+    // sibling pm-github package shipped a silent production bug from trusting
+    // exactly that wrapper — every closed import landed open because the id
+    // never parsed.
     const parsed = JSON.parse(r.stdout);
-    return parsed.id ?? parsed.item?.id ?? "";
+    id = typeof parsed?.id === "string" ? parsed.id : "";
   } catch {
-    return "";
+    id = "";
   }
+  if (p.status === "closed") {
+    // (1) No id recovered: the close cannot be applied and the orphan cannot be
+    // compensated without its id. Hard failure — never a silent success — so
+    // the row is reported as failed, not imported. The created open orphan is
+    // unrecoverable from here; the error names the title for manual reconcile.
+    if (!id) {
+      throw new Error(
+        `pm create succeeded for closed row (title '${p.title}') but returned no id, so the terminal 'closed' status cannot be applied and the created open item cannot be compensated; it is left as an unrecoverable open orphan — reconcile manually`,
+      );
+    }
+    const cr = spawnSync(
+      "pm",
+      ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
+      { encoding: "utf-8" },
+    );
+    if (cr.status !== 0) {
+      // (2) The close failed but the item is already persisted as open.
+      // Compensate (close) the orphan so a failed row is all-or-nothing and a
+      // retry without --key-field cannot duplicate an undiscoverable open item.
+      // Compensation bypasses closure-validation governance (it is a rollback,
+      // not a user closure) so a strict tracker cannot block the cleanup.
+      compensateCreate(
+        pmRoot,
+        id,
+        [],
+        "csv import row failed; closing orphan created item",
+      );
+      const closeErr = cr.stderr?.trim() || cr.stdout?.trim() || "pm close failed";
+      // Only a status of exactly `closed` is evidence that compensation worked.
+      // `itemStatus` returns undefined when the lookup itself fails — non-zero
+      // exit, malformed JSON, or an absent status field — and an unknown status
+      // is NOT evidence of success. Treating it as such would report a possibly
+      // still-open orphan as compensated, and a retry without --key-field would
+      // then duplicate it: exactly the leak this branch exists to prevent.
+      const compensatedStatus = itemStatus(pmRoot, id);
+      if (compensatedStatus !== "closed") {
+        const state =
+          compensatedStatus === undefined
+            ? "could not be verified (the status lookup failed): the item may have been left OPEN"
+            : `also failed: the item was created and left OPEN (status '${compensatedStatus}')`;
+        throw new Error(
+          `pm close failed for closed row (title '${p.title}', id ${id}) and compensation ${state} — retry or reconcile by id. ${closeErr}`,
+        );
+      }
+      throw new Error(
+        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed) so the failed row is all-or-nothing. ${closeErr}`,
+      );
+    }
+  }
+  return id;
 }
 
-/** Update an existing item in place (status via update; close handled separately). */
+/**
+ * Update an existing item in place. Non-terminal statuses go through
+ * `pm update --status`; a terminal closed/canceled status is applied afterwards
+ * through `pm close --reason` with the factual import provenance
+ * ({@link importCloseReason}) — never an invented outcome — because
+ * governance.require_close_reason forbids reason-free terminal transitions.
+ */
 function upsertUpdate(
   pmRoot: string,
   id: string,
@@ -1766,8 +1892,7 @@ function upsertUpdate(
 
   // Apply terminal statuses through the dedicated close command.
   if (p.status === "closed" || p.status === "canceled") {
-    const reason = p.status === "canceled" ? "canceled" : "completed";
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", reason], { encoding: "utf-8" });
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8" });
     if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
   }
 }
