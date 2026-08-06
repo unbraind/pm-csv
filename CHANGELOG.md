@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Gate CI on strict tracked pm project health ([pm-csv-c8j4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-c8j4.toon))
+
 ## 2026.8.4 - 2026-08-04
 
 ### Fixed
