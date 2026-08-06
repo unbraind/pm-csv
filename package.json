@@ -58,8 +58,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "@unbrained/pm-cli": "^2026.8.3",
-    "pm-changelog": "^2026.7.25",
+    "@unbrained/pm-cli": "^2026.8.6",
+    "pm-changelog": "^2026.8.6",
     "typescript": "^7.0.2"
   },
   "keywords": [
