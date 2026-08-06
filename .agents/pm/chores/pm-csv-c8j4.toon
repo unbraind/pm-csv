@@ -1,15 +1,17 @@
 id: pm-csv-c8j4
-title: Gate CI on pm health so a silently discarded peer edit cannot merge
+title: "Gate CI on pm health for tracker integrity (does not cover discarded peer edits, see pm-cli 922)"
 description: ""
 type: Chore
 status: closed
 priority: 2
 tags: []
 created_at: "2026-08-06T20:44:50.237Z"
-updated_at: "2026-08-06T20:44:50.666Z"
+updated_at: "2026-08-06T21:27:16.488Z"
 closed_at: "2026-08-06T20:44:50.651Z"
 completed_at: "2026-08-06T20:44:50.651Z"
 author: pi-agent
 acceptance_criteria: "CI workflow runs ./node_modules/.bin/pm health --strict-exit in a step immediately after Install dependencies; the step fails non-zero when integrity.counts.pending_merge_decisions is non-zero; pm validate is NOT used because it returns ok:true on a marker-free field-aware merge that silently dropped a peer edit"
+notes[1]{created_at,author,text}:
+  "2026-08-06T21:27:15.950Z","harness:claude-code","CORRECTION 2026-08-06, verified directly rather than reasoned about. This item's original close reason overstated what the gate does, and the CI comment has been rewritten to match reality.\n\nWHAT WAS WRONG. The gate was described as blocking a silently discarded peer edit. It does not, and cannot as currently built. Merge-decision receipts are written to .agents/pm/runtime/, which pm init itself gitignores, so they are never pushed. Measured on the same commit: the clone that performed the merge reports 1 receipt and the strict health check exits 1, while a fresh clone of that exact commit reports 0 receipts and the strict health check exits 0. CI checks out the fresh state, so the discarded edit passes.\n\nTHE PUSHED HISTORY DOES NOT DISAMBIGUATE IT EITHER. The merged history stream contains both writes in timestamp order and the item matches the latest one, so history verification reports current_matches_latest true with matching hashes. From pushed state alone, two concurrent branch edits where one was discarded look exactly like two sequential edits where the second superseded the first.\n\nRECONCILE PUBLISHES THE EVIDENCE BUT DOES NOT MAKE IT GATEABLE. Running merge reconcile appends a merge_reconcile event into tracked history carrying conflict_fields, retained_hash and discarded_hash, so durable evidence can exist. But the strict health check then exits 0 in both clones, and reconcile is optional anyway. There is no configuration in which CI observes the loss.\n\nCREDIT. Greptile flagged this as P1 on every gate PR in the rollout before it merged. Verified independently and filed upstream as pm-cli 922.\n\nWHAT THE GATE ACTUALLY DOES, all observable in a fresh checkout and all worth gating on: conflict markers left in item or history files, item parse failures, invalid history JSON, history hash drift, unknown-author history events, stale in-progress work, and tracked runtime cache files. The strict-exit flag remains load-bearing because a bare health check exits 0 even when not ok.\n\nThe step is kept for that real value. Only the claim was wrong, and a gate whose documentation overstates its guarantee is worse than no gate because it stops people looking for the real hazard."
 close_reason: "Inserted the Verify pm project integrity and merge safety step into .github/workflows/ci.yml right after Install dependencies, running ./node_modules/.bin/pm health --strict-exit. pm health --strict-exit exits 0 on this repo and was proven to exit 1 on a same-field merge hazard in a throwaway copy where pm validate stayed ok:true."
 body: ""
