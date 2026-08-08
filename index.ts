@@ -487,29 +487,66 @@ function pmListMaxBuffer(): number {
 }
 
 /**
- * Turn a pm subprocess stdout overrun into a hard, named error instead of the
- * wrong answer `spawnSync` otherwise leaves behind.
+ * Describe why a `spawnSync` result has `status: null`, wording the message for
+ * the REAL cause so the operator is sent down the right path.
  *
- * When captured stdout exceeds `maxBuffer`, Node kills the child mid-capture and
- * reports `status: null`, an *empty* `stderr`, and truncated `stdout` (the
- * `error` carries `ENOBUFS`). A guard that only branches on `status !== 0` then
- * reads `null !== 0` as truthy and routes the overrun onto its failure branch —
- * "the item does not exist", "nothing was applied yet", or a generic "pm failed"
- * — so a too-large project is silently mis-imported instead of reported. This
- * collapses that case into one explicit error that names the buffer and the
- * override, at every call site that captures pm output and must not degrade.
+ * Node reports `status: null` whenever the child was terminated before it could
+ * produce a usable exit code, and three distinct causes produce it (verified
+ * against `SpawnSyncReturns` in `@types/node` and confirmed empirically):
+ *
+ *  - A captured-output overrun. Node sets `result.error` with `code ===
+ *    "ENOBUFS"` and terminates the child with the kill signal. The captured
+ *    output is truncated and unusable, and the fix IS to narrow the query or
+ *    raise `PM_LIST_MAX_BUFFER`.
+ *  - A spawn or system error (the binary could not be launched, a timeout,
+ *    …). `result.error` is set with a code OTHER than `ENOBUFS`. This is NOT a
+ *    buffer problem, and telling the operator to raise `PM_LIST_MAX_BUFFER`
+ *    sends them down the wrong path.
+ *  - An external signal termination (an OOM reaper, a manual kill, …).
+ *    `result.error` is unset and `result.signal` carries the signal. Also NOT a
+ *    buffer problem — note the kill signal from a buffer overrun (`SIGTERM`) is
+ *    the SAME signal an external `SIGTERM` produces, so the signal alone cannot
+ *    tell the two apart; only `error.code === "ENOBUFS"` can.
+ *
+ * Exposed so the write paths ({@link upsertCreate}) can reuse the same wording
+ * when they recover an id from an overrun receipt before throwing, and so the
+ * three causes can be regression-tested directly with synthetic results.
+ */
+export function describePmNullStatus(result: SpawnSyncReturns<string>, label: string): string {
+  const err = result.error as NodeJS.ErrnoException | undefined;
+  const code = err?.code;
+  if (err !== undefined && code === "ENOBUFS") {
+    return `pm ${label} overran its ${pmListMaxBuffer()}-byte stdout buffer (Node reported error code ENOBUFS${result.signal ? ` and terminated the child with ${result.signal}` : ""}); the captured output is truncated and unusable — narrow the query (--status/--type) or raise the PM_LIST_MAX_BUFFER env var`;
+  }
+  if (err !== undefined) {
+    return `pm ${label} could not run to completion: ${err.message}${code !== undefined ? ` (code ${code})` : ""}; this is a spawn or system error, NOT a stdout buffer overrun, so raising the PM_LIST_MAX_BUFFER env var will not help`;
+  }
+  return `pm ${label} was terminated by signal ${result.signal ?? "<unknown>"} before producing a usable exit code; this is NOT a stdout buffer overrun (no ENOBUFS error was reported), so raising the PM_LIST_MAX_BUFFER env var will not help — investigate what sent the signal`;
+}
+
+/**
+ * Turn a `status: null` pm subprocess result into a hard, named error instead of
+ * the wrong answer `spawnSync` otherwise leaves behind.
+ *
+ * When a child is terminated before exiting, `spawnSync` reports `status: null`
+ * and a guard that only branches on `status !== 0` then reads `null !== 0` as
+ * truthy and routes the result onto its failure branch — "the item does not
+ * exist", "nothing was applied yet", or a generic "pm failed" — so a too-large
+ * project (or a killed child) is silently mis-imported instead of reported.
+ * This collapses that case into one explicit error, worded for the real cause by
+ * {@link describePmNullStatus}, at every call site that captures pm output and
+ * must not degrade.
  *
  * The best-effort rollback sites in {@link compensateCreate} intentionally do
- * NOT call this: compensation is contractually a no-op on partial failure, and a
- * named throw there would abort a sweep that exists precisely to tolerate a
- * failed subprocess while still leaving the tracker consistent.
+ * NOT call this on their own subprocesses: compensation is contractually
+ * tolerant of a failed subprocess, and a named throw there would abort a sweep
+ * that exists to leave the tracker consistent despite partial failure.
  */
 function assertPmOutputFit(result: SpawnSyncReturns<string>, label: string): void {
-  if (result.status === null) {
-    throw new CommandError(
-      `pm ${label} exited with status null — its stdout overran the ${pmListMaxBuffer()}-byte read buffer (or the child was killed) with an empty stderr, so the result is unusable. Narrow the query (--status/--type) or raise the PM_LIST_MAX_BUFFER env var; an overrun must never be treated as an empty or absent result.`,
-    );
-  }
+  if (result.status !== null) return;
+  throw new CommandError(
+    `${describePmNullStatus(result, label)}. The result is unusable, so it must never be treated as an empty or absent value.`,
+  );
 }
 
 /**
@@ -1362,6 +1399,14 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
  * create being rolled back must also lose its marker); the close only runs for
  * a still-open item. Every step tolerates a missing item / absent tag, so a
  * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
+ *
+ * The status lookup itself is also tolerated: if `itemStatus` throws (a stdout
+ * overrun or a signal kill on the `pm get`), the throw is caught and this row's
+ * compensation becomes a no-op rather than aborting the sweep. The hard error is
+ * kept on the import READ path ({@link loadAppliedByTransaction}, and the
+ * verification `itemStatus` in {@link upsertCreate}), where a wrong answer is
+ * the real danger; here the danger is aborting a best-effort rollback mid-sweep
+ * and leaving every later applied create un-compensated.
  */
 function compensateCreate(
   pmRoot: string,
@@ -1369,7 +1414,18 @@ function compensateCreate(
   markers: readonly string[] = [],
   reason: string = "atomic csv import rolled back",
 ): void {
-  const status = itemStatus(pmRoot, id);
+  // itemStatus throws on a stdout overrun / signal kill; compensation is a
+  // best-effort sweep, so an overrun in the status lookup itself is a no-op for
+  // THIS row (the operator can reconcile by id) and must never abort the sweep
+  // over the remaining applied creates. (itemStatus's only throw is the
+  // CommandError from assertPmOutputFit; a bare catch is therefore equivalent to
+  // catching CommandError and avoids an unreachable rethrow branch.)
+  let status: ItemStatus | undefined;
+  try {
+    status = itemStatus(pmRoot, id);
+  } catch {
+    return; // status lookup overran/killed: no-op for this row, sweep continues
+  }
   if (status === undefined) return; // item no longer exists
   if (markers.length > 0) {
     // Best-effort: remove the tx markers so this row is no longer "applied".
@@ -1841,22 +1897,50 @@ function upsertCreate(
   if (tags.length > 0) args.push("--tags", tags.join(","));
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
-  assertPmOutputFit(r, "create");
-  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  // Parse the id BEFORE any status check. `pm create` is a WRITE: by the time
+  // spawnSync returns it may have ALREADY persisted the item, even if its
+  // receipt then overran the buffer (status null). Asserting before the parse
+  // would throw with the id still unread, stranding an orphan compensation
+  // cannot identify. Node retains the FULL captured stdout for outputs under
+  // one read chunk, and `pm create --json`'s flat receipt is always far under
+  // that, so the id is recoverable here even when the buffer overran.
+  // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
+  // — with no `item` wrapper (mutations return a flat receipt; only queries
+  // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
+  // fallback is kept: it would be dead code no real CLI can exercise, and the
+  // sibling pm-github package shipped a silent production bug from trusting
+  // exactly that wrapper — every closed import landed open because the id
+  // never parsed.
   let id = "";
   try {
-    // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
-    // — with no `item` wrapper (mutations return a flat receipt; only queries
-    // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
-    // fallback is kept: it would be dead code no real CLI can exercise, and the
-    // sibling pm-github package shipped a silent production bug from trusting
-    // exactly that wrapper — every closed import landed open because the id
-    // never parsed.
     const parsed = JSON.parse(r.stdout);
     id = typeof parsed?.id === "string" ? parsed.id : "";
   } catch {
     id = "";
   }
+  if (r.status === null) {
+    // The receipt overran the buffer (or the child was killed). The create may
+    // have persisted an item, so a write that may have taken effect is never
+    // abandoned un-identified: if the id was recovered, best-effort close the
+    // orphan DIRECTLY (compensation's own status lookup would overrun under the
+    // same cap and no-op, so the close is issued here and its result tolerated),
+    // then throw a named, id-carrying error so the partial state is actionable.
+    // Without the id, throw naming the title for manual reconcile.
+    if (id) {
+      spawnSync(
+        "pm",
+        ["--path", pmRoot, "close", id, "--validate-close", "off", "--reason", "csv import create overran its receipt buffer; closing the orphaned created item"],
+        { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
+      );
+      throw new CommandError(
+        `${describePmNullStatus(r, "create")}. The create for row (title '${p.title}', id ${id}) may have persisted; the orphaned item was best-effort closed so it is not left un-identified — retry the import.`,
+      );
+    }
+    throw new CommandError(
+      `${describePmNullStatus(r, "create")}. The create for row (title '${p.title}') produced no recoverable id, so any persisted item cannot be identified or rolled back — reconcile manually and retry.`,
+    );
+  }
+  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
   if (p.status === "closed") {
     // (1) No id recovered: the close cannot be applied and the orphan cannot be
     // compensated without its id. Hard failure — never a silent success — so
@@ -1872,7 +1956,11 @@ function upsertCreate(
       ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
-    assertPmOutputFit(cr, "close");
+    // Deliberately NO assertPmOutputFit(cr, "close") here: a null close status
+    // (receipt overrun or a signal kill) must route INTO the compensation branch
+    // below rather than bypass it. The close may have persisted before its
+    // receipt overran; the branch compensates and verifies the outcome either
+    // way, and the id is already known so nothing is stranded.
     if (cr.status !== 0) {
       // (2) The close failed but the item is already persisted as open.
       // Compensate (close) the orphan so a failed row is all-or-nothing and a
@@ -2840,11 +2928,15 @@ export {
   checkMapSourcesPresent,
 };
 // ---------------------------------------------------------------------------
-// Internal store-read helpers exposed for regression testing against oversized
-// pm roots. Unlike the pure helpers above, these READ the given pm root (they
-// are not side-effect free) and are exported ONLY so the buffer-overrun
-// regressions can drive them directly under a capped PM_LIST_MAX_BUFFER,
-// independent of the write-bearing `csv import` command path.
+// Internal store helpers exposed for regression testing against oversized pm
+// roots. Unlike the pure helpers above, these READ or WRITE the given pm root
+// (they are not side-effect free) and are exported ONLY so the buffer-overrun
+// and compensation regressions can drive them directly under a capped
+// PM_LIST_MAX_BUFFER, independent of the write-bearing `csv import` command
+// path. `describePmNullStatus` is a pure classifier exposed so the three
+// null-status causes (buffer / spawn-error / signal) can be asserted directly
+// with synthetic results.
 // ---------------------------------------------------------------------------
-export { loadAppliedByTransaction, itemStatus };
+export { loadAppliedByTransaction, itemStatus, compensateCreate };
+// `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { loadAppliedByTransaction, itemStatus } from "../index.ts";
+import { loadAppliedByTransaction, itemStatus, compensateCreate, describePmNullStatus } from "../index.ts";
+import type { SpawnSyncReturns } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Regression tests for the silent pm-shellout buffer-overrun defect.
@@ -132,8 +133,12 @@ test("itemStatus surfaces a buffer overrun as a named error, never a silent 'ite
     withCappedReadBuffer("128", () => {
       assert.throws(
         () => itemStatus(root, id),
-        /status null|overran the 128-byte read buffer/i,
-        "a stdout overrun must surface as a named error, not as undefined (silent 'item missing')",
+        // Worded for the REAL cause: a stdout overrun is reported by Node as
+        // error code ENOBUFS, and the message must name the buffer and the fix
+        // (narrow / raise PM_LIST_MAX_BUFFER) — never read as a silent 'item
+        // missing'.
+        /overran its 128-byte stdout buffer.*ENOBUFS.*PM_LIST_MAX_BUFFER/is,
+        "a stdout overrun must surface as a named error naming ENOBUFS, not as undefined (silent 'item missing')",
       );
     });
   } finally {
@@ -173,8 +178,8 @@ test("loadAppliedByTransaction surfaces a buffer overrun as a named error, never
     withCappedReadBuffer("128", () => {
       assert.throws(
         () => loadAppliedByTransaction(root, TX_ID),
-        /status null|overran the 128-byte read buffer/i,
-        "a stdout overrun must surface as a named error, not as a silent empty 'applied' map",
+        /overran its 128-byte stdout buffer.*ENOBUFS.*PM_LIST_MAX_BUFFER/is,
+        "a stdout overrun must surface as a named error naming ENOBUFS, not as a silent empty 'applied' map",
       );
     });
   } finally {
@@ -197,4 +202,109 @@ test("loadAppliedByTransaction returns the real applied rows under the default (
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Follow-up regressions for the three review findings raised on PR #59.
+//
+// The original fix traded a silent wrong answer for an aborted rollback: the
+// shared guard now throws in places that must not throw. These lock in:
+//   (F1) compensation is tolerant of an overrun in its OWN status lookup;
+//   (F3) a `status: null` result is worded for its REAL cause — a stdout
+//        overrun (ENOBUFS), a spawn/system error (other code), or an external
+//        signal kill (no error) — never a blanket "buffer overrun" message.
+// The import-path write regressions (F2: an oversized create receipt never
+// strands an un-identified orphan; a null close never bypasses compensation)
+// live in atomic.test.ts alongside the other close-failure / compensation tests.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a synthetic `status: null` `spawnSync` result, for asserting the
+ * null-status classifier directly without orchestrating a real killed child.
+ *
+ * Only the fields {@link describePmNullStatus} reads are meaningful; the rest
+ * are dummies that satisfy the `SpawnSyncReturns` shape. Node populates exactly
+ * these fields for each cause (verified against `@types/node` and empirically):
+ * a buffer overrun sets `error.code === "ENOBUFS"` (and the kill signal); a
+ * spawn/system error sets `error` with another code; an external signal kill
+ * leaves `error` unset and carries `signal`.
+ */
+function nullStatusResult(
+  over: { error?: Error; signal?: NodeJS.Signals | null },
+): SpawnSyncReturns<string> {
+  return {
+    pid: 0,
+    output: [null, "", ""],
+    stdout: "",
+    stderr: "",
+    status: null,
+    signal: over.signal ?? null,
+    error: over.error,
+  };
+}
+
+/** Attach a Node `errno`-style `code` to a plain Error (as Node itself does). */
+function withCode(err: Error, code: string | number): Error {
+  return Object.assign(err, { code });
+}
+
+test("F1: compensation tolerates an overrun in its own status lookup (no-op, sweep not aborted)", () => {
+  // compensateCreate calls itemStatus() to decide whether to close. itemStatus
+  // now THROWS on a buffer overrun; before the F1 fix that throw propagated out
+  // of compensateCreate and aborted the compensation sweep before the best-effort
+  // strip/close subprocesses on the rows still pending. The fix catches the
+  // overrun and treats THAT row's compensation as a no-op, while the import read
+  // path (loadAppliedByTransaction, the verification itemStatus) keeps the hard
+  // error.
+  const root = freshTracker();
+  const id = createItem(root, "Item whose get overruns during compensation", [batchTag, rowTag(0)]);
+  try {
+    withCappedReadBuffer("1", () => {
+      assert.doesNotThrow(
+        () => compensateCreate(root, id, [batchTag, rowTag(0)], "test rollback"),
+        "an overrun in the compensation status lookup must be a no-op, not an abort that strands the remaining sweep",
+      );
+    });
+    // No-op means no side effect: the item is still open and still carries its
+    // markers, because compensation could not determine its state.
+    const g = spawnSync("pm", ["--path", root, "get", id, "--json"], { encoding: "utf-8" });
+    assert.equal(JSON.parse(g.stdout).item.status, "open", "the item is left untouched (no-op)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F3: a stdout overrun (ENOBUFS) is worded as a buffer overrun naming the fix", () => {
+  const msg = describePmNullStatus(
+    nullStatusResult({ error: withCode(new Error("spawnSync pm ENOBUFS"), "ENOBUFS"), signal: "SIGTERM" }),
+    "get",
+  );
+  assert.match(msg, /overran its .* stdout buffer/i, "names the overrun and the buffer");
+  assert.match(msg, /ENOBUFS/, "names the discriminating Node error code");
+  assert.match(msg, /PM_LIST_MAX_BUFFER/, "points the operator at the buffer override");
+});
+
+test("F3: an external signal kill (no error) is worded as a signal termination, NOT a buffer overrun", () => {
+  // A child terminated by a signal also reports `status: null`. Telling the
+  // operator to raise PM_LIST_MAX_BUFFER sends them down the wrong path when the
+  // real cause was a kill. The signal alone cannot distinguish this from a
+  // buffer-driven SIGTERM, so the discriminator is the ABSENCE of an ENOBUFS
+  // error.
+  const msg = describePmNullStatus(nullStatusResult({ signal: "SIGKILL" }), "get");
+  assert.match(msg, /terminated by signal SIGKILL/i, "names the signal");
+  assert.match(msg, /NOT a stdout buffer overrun/i, "explicitly steers the operator away from the buffer");
+  assert.doesNotMatch(msg, /error code ENOBUFS/, "no ENOBUFS error code is reported for a pure signal kill (only the buffer case carries it)");
+});
+
+test("F3: a spawn/system error (non-ENOBUFS code) is worded as a spawn failure, NOT a buffer overrun", () => {
+  // A spawn failure such as the binary not being found (ENOENT) also yields
+  // `status: null` with an error, but a code other than ENOBUFS. This is not a
+  // buffer problem and must not advertise PM_LIST_MAX_BUFFER.
+  const msg = describePmNullStatus(
+    nullStatusResult({ error: withCode(new Error("spawn pm ENOENT"), "ENOENT") }),
+    "get",
+  );
+  assert.match(msg, /could not run to completion/i, "names it a spawn/run failure");
+  assert.match(msg, /ENOENT/, "surfaces the real error code");
+  assert.match(msg, /NOT a stdout buffer overrun/i, "explicitly steers the operator away from the buffer");
 });

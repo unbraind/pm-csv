@@ -125,6 +125,15 @@ function realPmPath(): string {
  *     recovered". No real item is created.
  *   - `<root>/fake-close-fail`: every `pm close ...` exits 1 with a simulated
  *     error, to exercise the close-failure / compensation paths.
+ *   - `<root>/fake-create-kill`: `pm create --json` is terminated by SIGKILL
+ *     before it writes anything (no output, no persisted item), so spawnSync
+ *     reports `status: null`, `signal: "SIGKILL"`, no `error`, empty `stdout` —
+ *     a create whose receipt cannot be recovered at all (the signal-kill arm of
+ *     the write-overrun fix).
+ *   - `<root>/fake-close-kill`: every `pm close ...` is terminated by SIGKILL
+ *     before it writes anything, so its `status: null` routes into the
+ *     close-failure compensation branch instead of bypassing it (a null close
+ *     status is not a buffer abort).
  *
  * Returns a cleanup function that restores PATH/PM_CSV_REAL_PM and removes the
  * wrapper bin.
@@ -156,6 +165,18 @@ function installFakePm(): () => void {
     "if (root && existsSync(root + '/fake-get-fail') && has('get')) {",
     "  process.stderr.write('simulated pm get failure (test)\\n');",
     "  process.exit(1);",
+    "}",
+    // Kills `pm create --json` with SIGKILL before any output/persist, so the
+    // create returns status null + signal SIGKILL + empty stdout: the receipt
+    // cannot be recovered at all (the write-overrun signal-kill arm).
+    "if (root && existsSync(root + '/fake-create-kill') && has('create') && has('--json')) {",
+    "  process.kill(process.pid, 'SIGKILL');",
+    "}",
+    // Kills `pm close` with SIGKILL before any output/persist, so the close
+    // returns status null and routes into the compensation branch (a null close
+    // is not a buffer abort that bypasses compensation).
+    "if (root && existsSync(root + '/fake-close-kill') && has('close')) {",
+    "  process.kill(process.pid, 'SIGKILL');",
     "}",
     "const realPm = process.env.PM_CSV_REAL_PM;",
     "const r = spawnSync(realPm, args, { stdio: 'inherit' });",
@@ -807,6 +828,139 @@ test("non-atomic closed row: when compensation also fails, the error carries the
     const orphan = listItems(root).find((i) => i.title === "Orphan Closed");
     assert.ok(orphan, "the closed row's created item exists");
     assert.equal(orphan!.status, "open", "the orphan is left open when compensation fails");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-up (PR #59): the write-overrun guard must never abandon a write
+// that may already have taken effect. `pm create` is a WRITE — by the time its
+// receipt overruns the buffer (or the child is killed) the item may already be
+// persisted. Asserting before the id is parsed would strand an UN-IDENTIFIABLE
+// orphan compensation cannot roll back, and asserting on the close receipt
+// bypassed the close-failure compensation branch. The fix parses the id first,
+// closes a recovered orphan directly, and lets a null close status route into
+// compensation. Each test below is mutation-tested (revert its fix -> it fails).
+// ---------------------------------------------------------------------------
+
+/**
+ * Run an async `body` with `PM_LIST_MAX_BUFFER` temporarily set to `cap`,
+ * restoring the prior value (including "unset") on exit.
+ *
+ * The cap is read by `pmListMaxBuffer()` at each `spawnSync`, so it must stay
+ * set for the duration of the awaited body (whose synchronous `spawnSync` calls
+ * run during the await), not just around the call that starts it.
+ */
+async function withCappedReadBufferAsync<T>(cap: string, body: () => Promise<T>): Promise<T> {
+  const prev = process.env.PM_LIST_MAX_BUFFER;
+  process.env.PM_LIST_MAX_BUFFER = cap;
+  try {
+    return await body();
+  } finally {
+    if (prev === undefined) delete process.env.PM_LIST_MAX_BUFFER;
+    else process.env.PM_LIST_MAX_BUFFER = prev;
+  }
+}
+
+test("F2: a write overrun never strands an un-identifiable orphan — the created id is recovered and the orphan closed", async () => {
+  // PM_LIST_MAX_BUFFER smaller than a create receipt: `pm create` persists the
+  // item, THEN its receipt overruns the buffer. Before the fix, the overrun
+  // guard threw BEFORE the id was parsed, so the orphan could not be identified
+  // or rolled back. The fix parses the id first (Node retains the full captured
+  // stdout for small receipts), closes the orphan directly, and records a named,
+  // id-carrying error — never abandoning a write that may have taken effect.
+  const root = freshTracker();
+  const file = join(root, "one.csv");
+  writeFileSync(file, "title,status\nOverrun Orphan,open\n");
+  try {
+    const { result, error } = await withCappedReadBufferAsync("16", () => runImport(root, file, {}));
+    assert.ifError(error);
+
+    // The overrun row was NOT counted as imported; it was skipped with a named
+    // error that carries the recovered id.
+    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
+    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the overrun is reported once");
+    assert.match(result.errors[0], /overran/i, "the error names the overrun");
+    assert.match(result.errors[0], /id pm-[a-z0-9]+/i, "the recovered id is carried so the state is identifiable");
+
+    // No OPEN orphan is left behind: the recovered orphan was best-effort closed
+    // (it persists before its own receipt overruns), so the tracker holds no
+    // untracked open item from this row.
+    const items = listItems(root);
+    const orphan = items.find((i) => i.title === "Overrun Orphan");
+    assert.ok(orphan, "the created item exists (it was identified, not stranded)");
+    assert.equal(orphan!.status, "closed", "the orphan was closed, not left as an open un-identified orphan");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: a create killed before it writes cannot strand an orphan — the title is named for manual reconcile", async () => {
+  // A create terminated by a signal before writing anything reports status null
+  // with EMPTY stdout, so NO id can be recovered. Before the fix the overrun
+  // guard threw a raw buffer/signal abort; the fix instead throws a named error
+  // carrying the title (the only identifying clue), so the operator can
+  // reconcile. Nothing was persisted, so no orphan exists.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-create-kill"), "");
+  const file = join(root, "killed.csv");
+  writeFileSync(file, "title,status\nKilled Create,open\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the killed create is not counted as imported");
+    assert.equal(result.skipped, 1, "the killed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported once");
+    // Worded for the REAL cause (a signal, not a buffer) and naming the title:
+    assert.match(result.errors[0], /signal/i, "the error names the signal cause, not a buffer overrun");
+    assert.match(result.errors[0], /Killed Create/, "the error names the title so the row is identifiable");
+    assert.match(result.errors[0], /reconcile manually/i, "the error tells the operator how to recover the unrecoverable id");
+
+    // The create was killed before it persisted, so nothing was left behind.
+    assert.equal(listItems(root).length, 0, "no item was created — nothing to strand");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: a null close status routes into compensation, never bypasses it", async () => {
+  // A closed row whose `pm close` is terminated by a signal reports status null.
+  // Before the fix the close-result guard threw a raw signal abort and BYPASSED
+  // the close-failure compensation branch, leaving the orphan un-compensated and
+  // the failure mis-reported as a buffer/signal error. The fix drops that guard
+  // so a null close routes into compensation: the orphan is compensated (closing
+  // is also killed, so it cannot take effect) and the failure is reported as a
+  // compensation outcome (left OPEN), not as a raw signal abort.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-close-kill"), "");
+  const file = join(root, "closekill.csv");
+  writeFileSync(file, "title,status\nClose Killed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported once");
+
+    // The compensation branch ran (the error is a compensation outcome), NOT a
+    // raw signal/buffer abort from a bypassed guard.
+    const msg = result.errors[0];
+    assert.match(msg, /left OPEN/i, "compensation ran and reported the orphan left open");
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
+    assert.doesNotMatch(msg, /terminated by signal.*will not help/i, "the error is not a raw signal abort that bypassed compensation");
+
+    // The close never took effect (killed before persist): the orphan is open.
+    const orphan = listItems(root).find((i) => i.title === "Close Killed");
+    assert.ok(orphan, "the closed row's created item exists");
+    assert.equal(orphan!.status, "open", "the orphan is left open because the close was killed");
   } finally {
     restorePm();
     rmSync(root, { recursive: true, force: true });
