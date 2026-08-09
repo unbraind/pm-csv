@@ -4,8 +4,13 @@
 
 ### Fixed
 
+- Release workflow publishes npm before advancing git main, so a protected-branch push rejection permanently desyncs npm from git ([pm-csv-exz4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-exz4.toon))
 - The overrun guard asserted a recovery outcome it never checked and reported update failures with no item id ([pm-csv-158c](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-158c.toon))
 - pm shell-outs silently degrade to wrong answers when stdout exceeds the spawnSync buffer ([pm-csv-02hc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-02hc.toon))
+
+### Other
+
+- Reconcile main to 2026.8.9 so git matches the npm version already published ([pm-csv-usmi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-usmi.toon))
 
 ## 2026.8.7 - 2026-08-07
 
