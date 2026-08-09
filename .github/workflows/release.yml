@@ -251,6 +251,14 @@ jobs:
           # this step exists to prevent. The deadline bounds that wait, so an
           # unknown state costs a failed release, never a bad publish.
           deadline=$(( SECONDS + 1800 ))
+          # A pull request created seconds ago is BLOCKED with an EMPTY rollup:
+          # the required checks have not registered yet, so "nothing is
+          # unsettled" is not evidence that everything settled - it is evidence
+          # that nothing has started. Failing fast on that would abort every
+          # release at the moment its own PR is created, which is exactly when
+          # this step runs. The fail-fast path is therefore held back until the
+          # checks have had time to appear; before that, BLOCKED simply waits.
+          blocked_grace=$(( SECONDS + 300 ))
           pr_view_err="$(mktemp)"
           while :; do
             # `set -e` is active, so an unguarded `gh pr view` would abort the
@@ -263,6 +271,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --json mergeStateStatus,statusCheckRollup \
               --jq '{merge_state: (.mergeStateStatus // "UNKNOWN"),
+                     checks_seen: ([.statusCheckRollup[]?] | length),
                      unsettled: [.statusCheckRollup[]?
                                  | {name: (.name // .context),
                                     state: (.conclusion // .state // .status // "PENDING")}
@@ -283,10 +292,12 @@ jobs:
               merge_state="UNKNOWN"
               unsettled="github api unavailable"
               failing=""
+              checks_seen=0
             else
               merge_state="$(jq -r '.merge_state' <<< "$pr_state")"
               unsettled="$(jq -r '.unsettled | join(", ")' <<< "$pr_state")"
               failing="$(jq -r '.failing | join(", ")' <<< "$pr_state")"
+              checks_seen="$(jq -r '.checks_seen' <<< "$pr_state")"
             fi
 
             case "$merge_state" in
@@ -302,7 +313,7 @@ jobs:
                 exit 1
                 ;;
               BLOCKED)
-                if [[ -z "$unsettled" ]]; then
+                if [[ -z "$unsettled" && "$checks_seen" -gt 0 ]] && (( SECONDS >= blocked_grace )); then
                   echo "::error::Release PR #${pr_number} is blocked with every check settled (failing: ${failing:-none}). A required check failed or a required review is missing; not merging or publishing."
                   exit 1
                 fi
@@ -317,6 +328,7 @@ jobs:
             sleep 20
           done
           rm -f "$pr_view_err"
+
 
 
 
