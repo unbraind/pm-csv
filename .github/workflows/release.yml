@@ -210,6 +210,49 @@ jobs:
             pr_number="${pr_url##*/}"
           fi
 
+          # Only the checks branch protection actually requires may gate the
+          # release. Advisory reviewers (Greptile, Sourcery, cubic) routinely
+          # report FAILURE as a confidence signal, and blocking publication on
+          # those would make releases depend on third-party opinion.
+          required_json="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks" \
+            --jq '[.contexts[]?]' 2>/dev/null || echo '[]')"
+
+          if [[ "$(jq -r 'length' <<< "$required_json")" != "0" ]]; then
+            deadline=$(( SECONDS + 1800 ))
+            while :; do
+              rollup="$(gh pr view "$pr_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json statusCheckRollup \
+                --jq '[.statusCheckRollup[]?
+                       | {name: (.name // .context),
+                          state: (.conclusion // .state // .status // "PENDING")}]')"
+              report="$(jq -n --argjson req "$required_json" --argjson all "$rollup" \
+                '[$req[] as $name
+                  | ($all | map(select(.name == $name)) | last)
+                  | {name: ($name), state: (.state // "EXPECTED")}]')"
+              pending="$(jq -r '[.[] | select(.state == "PENDING" or .state == "QUEUED"
+                                              or .state == "IN_PROGRESS" or .state == "EXPECTED")
+                                 | .name] | join(", ")' <<< "$report")"
+              failed="$(jq -r '[.[] | select(.state == "FAILURE" or .state == "ERROR"
+                                             or .state == "TIMED_OUT" or .state == "CANCELLED")
+                                 | .name] | join(", ")' <<< "$report")"
+              if [[ -n "$failed" ]]; then
+                echo "::error::Required checks failed on release PR #${pr_number}: ${failed}. Not merging or publishing."
+                exit 1
+              fi
+              if [[ -z "$pending" ]]; then
+                break
+              fi
+              if (( SECONDS >= deadline )); then
+                echo "::error::Required checks on release PR #${pr_number} did not settle within 30 minutes; still waiting on: ${pending}."
+                exit 1
+              fi
+              echo "Waiting for required checks on PR #${pr_number}: ${pending}"
+              sleep 20
+            done
+          fi
+
           merged_sha="$(gh api \
             --method PUT \
             "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/merge" \
