@@ -1921,19 +1921,45 @@ function upsertCreate(
   if (r.status === null) {
     // The receipt overran the buffer (or the child was killed). The create may
     // have persisted an item, so a write that may have taken effect is never
-    // abandoned un-identified: if the id was recovered, best-effort close the
+    // abandoned un-identified: if the id was recovered, attempt to close the
     // orphan DIRECTLY (compensation's own status lookup would overrun under the
-    // same cap and no-op, so the close is issued here and its result tolerated),
-    // then throw a named, id-carrying error so the partial state is actionable.
-    // Without the id, throw naming the title for manual reconcile.
+    // same cap and no-op, so the close is issued here) and INSPECT its result so
+    // the thrown error reports the recovery close's ACTUAL outcome, never an
+    // assumed one. The close is attempted exactly once — under a capped buffer
+    // it fails identically every time, so retrying in a loop would only turn a
+    // fast, actionable error into a slow one. Without the id, throw naming the
+    // title for manual reconcile.
+    //
+    // GUARANTEE: the extension cannot make `pm create` atomic — it is a single
+    // subprocess with no transaction the caller can join, so a window always
+    // exists where the item is persisted and the caller does not yet know it.
+    // What is guaranteed is that the window is always REPORTED WITH THE ID: the
+    // recovery close's outcome is inspected and the thrown error names the id
+    // and the real resulting state (closed, or still-open with the close's
+    // failure cause), so the operator never stops looking for an open orphan.
     if (id) {
-      spawnSync(
+      const rc = spawnSync(
         "pm",
         ["--path", pmRoot, "close", id, "--validate-close", "off", "--reason", "csv import create overran its receipt buffer; closing the orphaned created item"],
         { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
       );
+      const createCause = describePmNullStatus(r, "create");
+      if (rc.status === 0) {
+        throw new CommandError(
+          `${createCause}. The create for row (title '${p.title}', id ${id}) may have persisted; the orphaned item ${id} was closed — retry the import.`,
+        );
+      }
+      // The recovery close failed or returned no usable status: do NOT claim it
+      // succeeded. Report the orphan as still open and carry the close's own
+      // failure cause (an overrun/kill via describePmNullStatus for a null
+      // status; the close's stderr for a non-zero exit) so the operator can
+      // close the item manually by id.
+      const closeCause =
+        rc.status === null
+          ? describePmNullStatus(rc, "close")
+          : (rc.stderr?.trim() || "pm close failed");
       throw new CommandError(
-        `${describePmNullStatus(r, "create")}. The create for row (title '${p.title}', id ${id}) may have persisted; the orphaned item was best-effort closed so it is not left un-identified — retry the import.`,
+        `${createCause}. The create for row (title '${p.title}', id ${id}) may have persisted; the recovery close failed (${closeCause}), so the orphaned item ${id} is still open and must be closed manually — retry the import.`,
       );
     }
     throw new CommandError(
@@ -2004,6 +2030,18 @@ function upsertCreate(
  * through `pm close --reason` with the factual import provenance
  * ({@link importCloseReason}) — never an invented outcome — because
  * governance.require_close_reason forbids reason-free terminal transitions.
+ *
+ * GUARANTEE (and its limits): `pm update` and the terminal `pm close` are each
+ * a single non-atomic subprocess, so either may have already taken effect when
+ * its receipt then overruns the buffer or the child is killed (status null),
+ * and a non-zero exit is likewise not proof nothing was written. The guarantee
+ * here is that NO MUTATION IS LEFT UN-IDENTIFIED: every update/close failure
+ * carries the item id and states explicitly that the mutation may already have
+ * been applied, so the operator can verify and reconcile by id. The guarantee
+ * is NOT that no mutation is left behind — an update has no inverse without the
+ * prior field values, which this extension does not capture, so a failed update
+ * is reported loudly by id rather than compensated with a second unreviewed
+ * write on top of a failed one (see the deferred capture-prior-values feature).
  */
 function upsertUpdate(
   pmRoot: string,
@@ -2027,14 +2065,43 @@ function upsertUpdate(
   if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
-  assertPmOutputFit(r, "update");
-  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm update failed");
+  // `pm update` is a WRITE: a null status (receipt overrun or a signal kill)
+  // means the mutation may already have been applied to the item, so the
+  // failure must carry the item id and state that explicitly — matching the
+  // create path. The guarantee is that no mutation is left un-IDENTIFIED, NOT
+  // that no mutation is left behind: an update has no inverse without the prior
+  // field values, which this extension does not capture, so a failed update is
+  // reported loudly by id rather than papered over with a second unreviewed
+  // write on top of a failed one.
+  if (r.status === null) {
+    throw new CommandError(
+      `${describePmNullStatus(r, "update")}. The update for item ${id} may already have been applied — verify the item by id before retrying.`,
+    );
+  }
+  if (r.status !== 0) {
+    const updateErr = r.stderr?.trim() || "pm update failed";
+    throw new Error(
+      `pm update failed for item ${id} (${updateErr}); the mutation may already have been applied — verify the item by id before retrying.`,
+    );
+  }
 
-  // Apply terminal statuses through the dedicated close command.
+  // Apply terminal statuses through the dedicated close command. The preceding
+  // update has already been applied, so a failure here is reported with the id
+  // and the explicit caveat that the terminal transition may already have taken
+  // effect too — the close, like the update, is a single non-atomic subprocess.
   if (p.status === "closed" || p.status === "canceled") {
     const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
-    assertPmOutputFit(cr, "close");
-    if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
+    if (cr.status === null) {
+      throw new CommandError(
+        `${describePmNullStatus(cr, "close")}. The update for item ${id} was applied, but the terminal ${p.status} close may already have been applied too — verify the item by id before retrying.`,
+      );
+    }
+    if (cr.status !== 0) {
+      const closeErr = cr.stderr?.trim() || "pm close failed";
+      throw new Error(
+        `pm close failed for item ${id} (${closeErr}); the update was applied and the terminal ${p.status} close may already have been applied — verify the item by id before retrying.`,
+      );
+    }
   }
 }
 
