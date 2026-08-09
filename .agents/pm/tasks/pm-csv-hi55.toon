@@ -1,0 +1,29 @@
+id: pm-csv-hi55
+title: "Adopt the canonical docstring gate, blocked on a pm-ops release carrying the .agents skip"
+description: "The canonical gate is wired in and the six undocumented functions are documented, but the launcher test passes only in a clean checkout because the pinned pm-ops 2026.8.8 still scans installed extension artifacts under .agents."
+type: Task
+status: blocked
+priority: 2
+tags[3]: blocked,docstrings,gate
+created_at: "2026-08-09T22:12:53.152Z"
+updated_at: "2026-08-09T22:12:53.152Z"
+deadline: "2026-08-11T00:00:00.000Z"
+assignee: claude
+author: claude
+estimated_minutes: 30
+acceptance_criteria: npm run docstring and the launcher test pass both locally and in CI against a pinned pm-ops release that skips .agents
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-mal7,related,"2026-08-09T22:12:53.152Z",claude,"cli:create:dep",asserted
+comments[1]{created_at,author,text}:
+  "2026-08-09T22:12:53.152Z",claude,"Proved the gate passes on a clean checkout by moving the gitignored .agents/pm/extensions aside and rerunning,which reported 3 files and 52 declarations documented"
+notes[1]{created_at,author,text}:
+  "2026-08-09T22:12:53.152Z",claude,"Held as a draft rather than merged,because a launcher test that passes in CI and fails locally is the kind of inconsistency this fleet treats as a defect"
+learnings[1]{created_at,author,text}:
+  "2026-08-09T22:12:53.152Z",claude,A fix present in a package source tree and its committed dist is not necessarily in the published package. When a pinned dependency misbehaves check the installed copy under node_modules rather than the dependency repository
+files[1]{path,scope,note}:
+  index.ts,project,six functions documented
+tests[1]{command,scope,timeout_seconds}:
+  npm run docstring,project,120
+docs[1]{path,scope,note}:
+  scripts/docstring-gate.ts,project,thin launcher over the canonical analyzer
+body: "pm-ops fixed this on main at 15:37 on 2026-08-09 in commit 3c625b5, whose own docstring names the failure exactly: scanning .agents makes the gate depend on whether a developer happens to have extensions installed, so the same commit fails release:check locally and passes in a clean CI checkout. The fix is committed to pm-ops source and its committed dist, but v2026.08.08 was tagged before it, so the published package does not carry it. Verified by grepping the installed node_modules copy."
