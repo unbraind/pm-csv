@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.8.9 - 2026-08-09
+
+### Fixed
+
+- The overrun guard asserted a recovery outcome it never checked and reported update failures with no item id ([pm-csv-158c](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-158c.toon))
+- pm shell-outs silently degrade to wrong answers when stdout exceeds the spawnSync buffer ([pm-csv-02hc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-02hc.toon))
+
 ## 2026.8.7 - 2026-08-07
 
 ### Other

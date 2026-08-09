@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  pull-requests: write
 
 concurrency:
   group: daily-release
@@ -87,6 +88,7 @@ jobs:
           echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Update release version
         if: steps.decide.outputs.should_release == 'true'
@@ -146,6 +148,119 @@ jobs:
             exit 1
           fi
 
+      # Persist validated release metadata through the repository's protected
+      # branch policy before publishing an immutable npm artifact. A stable
+      # branch name lets a failed run update/reuse its open release PR, while
+      # the exact remote SHA lease prevents overwriting another actor's work.
+      - name: Merge release metadata through protected PR
+        if: steps.decide.outputs.should_release == 'true'
+        id: release_pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BASE_SHA: ${{ steps.decide.outputs.base_sha }}
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          current_main_sha="$(git rev-parse origin/main)"
+          if [[ "$current_main_sha" != "$RELEASE_BASE_SHA" ]]; then
+            echo "::error::main advanced from ${RELEASE_BASE_SHA} to ${current_main_sha} while preparing the release. Retry from the new main head."
+            exit 1
+          fi
+
+          release_branch="release/${RELEASE_TAG#v}"
+          release_commit="$(git rev-parse HEAD)"
+          if [[ "$release_commit" == "$current_main_sha" ]]; then
+            echo "Release metadata is already present on main; resuming the publish/tag transaction."
+            if git ls-remote --exit-code --heads origin "refs/heads/${release_branch}" > /dev/null 2>&1; then
+              git push origin --delete "$release_branch"
+            fi
+            {
+              echo "merged_sha=$current_main_sha"
+              echo "pr_number="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          remote_branch_sha="$(git ls-remote --heads origin "refs/heads/${release_branch}" | cut -f1)"
+          if [[ -n "$remote_branch_sha" ]]; then
+            git push \
+              --force-with-lease="refs/heads/${release_branch}:${remote_branch_sha}" \
+              origin "HEAD:refs/heads/${release_branch}"
+          else
+            git push origin "HEAD:refs/heads/${release_branch}"
+          fi
+
+          pr_number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$release_branch" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [[ -z "$pr_number" ]]; then
+            pr_url="$(gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$release_branch" \
+              --title "Release pm-csv ${RELEASE_TAG}" \
+              --body "Automated daily release metadata for \`${RELEASE_TAG}\`. The release gate passed before this PR was created; npm publication and tagging remain blocked until this protected PR is merged. Tracking: [pm-csv-exz4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-exz4.toon).")"
+            pr_number="${pr_url##*/}"
+          fi
+
+          merged_sha="$(gh api \
+            --method PUT \
+            "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/merge" \
+            -f merge_method=rebase \
+            -f sha="$release_commit" \
+            --jq '.sha')"
+          if [[ -z "$merged_sha" || "$merged_sha" == "null" ]]; then
+            echo "::error::GitHub did not return the merged main SHA for release PR #${pr_number}."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --heads origin "refs/heads/${release_branch}" > /dev/null 2>&1; then
+            git push origin --delete "$release_branch"
+          fi
+          {
+            echo "merged_sha=$merged_sha"
+            echo "pr_number=$pr_number"
+          } >> "$GITHUB_OUTPUT"
+          echo "Merged release metadata PR #${pr_number} at ${merged_sha}." >> "$GITHUB_STEP_SUMMARY"
+
+      # The release PR can only contain the prepared release commit because the
+      # base SHA is checked immediately before creation. Re-check the exact
+      # merged main commit anyway so npm always receives byte-for-byte validated
+      # repository state, and fail safely before publication if main moved.
+      - name: Verify merged release
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          MERGED_SHA: ${{ steps.release_pr.outputs.merged_sha }}
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          git checkout --detach origin/main
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$MERGED_SHA" ]]; then
+            echo "::error::main advanced from merged release ${MERGED_SHA} to ${actual_sha} before publication. Retry to rebuild release metadata on the new head."
+            exit 1
+          fi
+
+          actual_version="$(npm pkg get version | tr -d '"')"
+          if [[ "$actual_version" != "$NPM_VERSION" ]]; then
+            echo "::error::Merged package version ${actual_version} does not match intended release ${NPM_VERSION}."
+            exit 1
+          fi
+
+          npm ci
+          npm run release:check
+          git diff --exit-code -- \
+            package.json package-lock.json manifest.json index.ts CHANGELOG.md
+
       - name: Publish npm package
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
@@ -193,18 +308,30 @@ jobs:
           echo "::error::Publish failed after retries and provenance fallback."
           exit 1
 
-      # Push tag + main AFTER a successful publish so a failed publish does not
-      # leave the repo tagged/skipped. The release ref (fast-forward of
-      # origin/main) was already verified in the "Check release ref" step before
-      # publishing, so here we only create the tag and advance main.
-      - name: Push release tag and main
+      # Tag the exact merged/verified main commit AFTER a successful publish.
+      # main was already advanced by the protected release PR above, so this step
+      # only creates/pushes the tag. If publication fails, main retains the
+      # prepared metadata and the next run resumes the same version instead of
+      # inventing another release.
+      - name: Push release tag
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
         run: |
           set -euo pipefail
-          git tag "${{ steps.decide.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.decide.outputs.tag }}"
+          release_tag="$RELEASE_TAG"
+          if git rev-parse --verify --quiet "refs/tags/${release_tag}" > /dev/null; then
+            existing_sha="$(git rev-list -n 1 "$release_tag")"
+            current_sha="$(git rev-parse HEAD)"
+            if [[ "$existing_sha" != "$current_sha" ]]; then
+              echo "::error::${release_tag} already points to ${existing_sha}, not verified main ${current_sha}."
+              exit 1
+            fi
+          else
+            git tag "$release_tag"
+          fi
+          git push origin "refs/tags/${release_tag}"
 
       - name: Verify bun install of published package
         if: steps.decide.outputs.should_release == 'true'
