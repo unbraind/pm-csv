@@ -237,11 +237,8 @@ jobs:
           #                     blocking publication on third-party opinion is
           #                     not intended, so merge.
           #   BLOCKED         - a required check is pending or failing, or a
-          #                     review is required. Keep waiting only while some
-          #                     check is genuinely unsettled; once everything
-          #                     has settled, a BLOCKED PR will never become
-          #                     mergeable on its own, so fail immediately with
-          #                     the rollup rather than burning the deadline.
+          #                     review is required. Wait; see below for why this
+          #                     cannot be short-circuited.
           #   DIRTY/BEHIND    - conflict or stale base; retrying from a fresh
           #                     main is the only correct answer.
           #   UNKNOWN/absent  - GitHub is still computing mergeability; retry.
@@ -250,15 +247,34 @@ jobs:
           # fire the merge into a check that never ran, which is the failure
           # this step exists to prevent. The deadline bounds that wait, so an
           # unknown state costs a failed release, never a bad publish.
+          # BLOCKED is never short-circuited, and the reason is worth stating
+          # because two earlier attempts to short-circuit it were both wrong.
+          #
+          # The appeal is obvious: if a blocked pull request has nothing left to
+          # wait for, it will never merge, so failing at once beats waiting out
+          # the deadline. The problem is that "nothing left to wait for" is not
+          # observable here. Deciding it requires knowing WHICH checks are
+          # required, and that is precisely the fact this workflow cannot read -
+          # the endpoint holding it is administration-scoped (see above).
+          #
+          # Every available proxy fails on a case that occurs in practice:
+          #   - "no unsettled checks" is true of a pull request created seconds
+          #     ago, whose checks have not registered at all;
+          #   - "some checks are present" is satisfied by advisory checks
+          #     (DeepScan, Hound, Sourcery) that register and settle long before
+          #     the required test matrix appears;
+          #   - "some check is failing" is satisfied by an advisory reviewer
+          #     (Greptile routinely reports FAILURE as a confidence signal)
+          #     while the required checks are still queued.
+          # Each proxy would abort a perfectly healthy release, which is a far
+          # worse outcome than a slow failure.
+          #
+          # So the deadline IS the discriminator: a required check that never
+          # reports and a required check that failed are indistinguishable from
+          # here, and both correctly end in a failed release. The cost is that a
+          # doomed release takes the full 30 minutes to say so; the failing
+          # check names are included in that message so it stays diagnosable.
           deadline=$(( SECONDS + 1800 ))
-          # A pull request created seconds ago is BLOCKED with an EMPTY rollup:
-          # the required checks have not registered yet, so "nothing is
-          # unsettled" is not evidence that everything settled - it is evidence
-          # that nothing has started. Failing fast on that would abort every
-          # release at the moment its own PR is created, which is exactly when
-          # this step runs. The fail-fast path is therefore held back until the
-          # checks have had time to appear; before that, BLOCKED simply waits.
-          blocked_grace=$(( SECONDS + 300 ))
           pr_view_err="$(mktemp)"
           while :; do
             # `set -e` is active, so an unguarded `gh pr view` would abort the
@@ -271,7 +287,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --json mergeStateStatus,statusCheckRollup \
               --jq '{merge_state: (.mergeStateStatus // "UNKNOWN"),
-                     checks_seen: ([.statusCheckRollup[]?] | length),
                      unsettled: [.statusCheckRollup[]?
                                  | {name: (.name // .context),
                                     state: (.conclusion // .state // .status // "PENDING")}
@@ -292,12 +307,10 @@ jobs:
               merge_state="UNKNOWN"
               unsettled="github api unavailable"
               failing=""
-              checks_seen=0
             else
               merge_state="$(jq -r '.merge_state' <<< "$pr_state")"
               unsettled="$(jq -r '.unsettled | join(", ")' <<< "$pr_state")"
               failing="$(jq -r '.failing | join(", ")' <<< "$pr_state")"
-              checks_seen="$(jq -r '.checks_seen' <<< "$pr_state")"
             fi
 
             case "$merge_state" in
@@ -313,21 +326,19 @@ jobs:
                 exit 1
                 ;;
               BLOCKED)
-                if [[ -z "$unsettled" && "$checks_seen" -gt 0 ]] && (( SECONDS >= blocked_grace )); then
-                  echo "::error::Release PR #${pr_number} is blocked with every check settled (failing: ${failing:-none}). A required check failed or a required review is missing; not merging or publishing."
-                  exit 1
-                fi
+                # Deliberately no short-circuit - see the note above the loop.
                 ;;
             esac
 
             if (( SECONDS >= deadline )); then
-              echo "::error::Release PR #${pr_number} did not become mergeable within 30 minutes (state: ${merge_state}; still settling: ${unsettled:-none})."
+              echo "::error::Release PR #${pr_number} did not become mergeable within 30 minutes (state: ${merge_state}; still settling: ${unsettled:-none}; failing: ${failing:-none}). A required check failed or never reported, or a required review is missing; not merging or publishing."
               exit 1
             fi
             echo "Waiting for PR #${pr_number} to become mergeable (state: ${merge_state}; settling: ${unsettled:-none})"
             sleep 20
           done
           rm -f "$pr_view_err"
+
 
 
 
