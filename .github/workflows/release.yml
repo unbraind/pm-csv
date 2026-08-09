@@ -217,7 +217,8 @@ jobs:
           protection_out="$(mktemp)"
           if gh api \
                "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks" \
-               --jq '[.contexts[]?]' > "$protection_out" 2>"${protection_out}.err"; then
+               --jq '[(.contexts[]?), (.checks[]?.context)] | map(select(. != null)) | unique' \
+               > "$protection_out" 2>"${protection_out}.err"; then
             required_json="$(cat "$protection_out")"
           elif grep -qi 'not found\|HTTP 404' "${protection_out}.err"; then
             required_json='[]'
