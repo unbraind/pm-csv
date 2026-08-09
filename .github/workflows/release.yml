@@ -251,7 +251,14 @@ jobs:
           # this step exists to prevent. The deadline bounds that wait, so an
           # unknown state costs a failed release, never a bad publish.
           deadline=$(( SECONDS + 1800 ))
+          pr_view_err="$(mktemp)"
           while :; do
+            # `set -e` is active, so an unguarded `gh pr view` would abort the
+            # whole step on a 5xx, a rate limit or a dropped connection - one
+            # transient API answer killing a release, which is the failure mode
+            # this step exists to remove. A failed read is not information about
+            # the pull request, so it is treated as an unrecognised state and
+            # simply retried until the deadline.
             pr_state="$(gh pr view "$pr_number" \
               --repo "$GITHUB_REPOSITORY" \
               --json mergeStateStatus,statusCheckRollup \
@@ -270,10 +277,17 @@ jobs:
                                | select(.state | IN("FAILURE", "ERROR", "TIMED_OUT",
                                                     "CANCELLED", "ACTION_REQUIRED",
                                                     "STARTUP_FAILURE", "STALE"))
-                               | .name]}')"
-            merge_state="$(jq -r '.merge_state' <<< "$pr_state")"
-            unsettled="$(jq -r '.unsettled | join(", ")' <<< "$pr_state")"
-            failing="$(jq -r '.failing | join(", ")' <<< "$pr_state")"
+                               | .name]}' 2>"$pr_view_err")" || pr_state=""
+            if [[ -z "$pr_state" ]]; then
+              echo "Could not read PR #${pr_number} (retrying): $(tr '\n' ' ' < "$pr_view_err")"
+              merge_state="UNKNOWN"
+              unsettled="github api unavailable"
+              failing=""
+            else
+              merge_state="$(jq -r '.merge_state' <<< "$pr_state")"
+              unsettled="$(jq -r '.unsettled | join(", ")' <<< "$pr_state")"
+              failing="$(jq -r '.failing | join(", ")' <<< "$pr_state")"
+            fi
 
             case "$merge_state" in
               CLEAN | HAS_HOOKS)
@@ -302,6 +316,8 @@ jobs:
             echo "Waiting for PR #${pr_number} to become mergeable (state: ${merge_state}; settling: ${unsettled:-none})"
             sleep 20
           done
+          rm -f "$pr_view_err"
+
 
 
           merged_sha="$(gh api \
