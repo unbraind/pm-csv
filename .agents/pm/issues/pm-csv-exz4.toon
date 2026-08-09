@@ -1,0 +1,19 @@
+id: pm-csv-exz4
+title: "Release workflow publishes npm before advancing git main, so a protected-branch push rejection permanently desyncs npm from git"
+description: "The Daily Release workflow runs Publish npm package before Push release tag and main. On 2026-08-09 at ~04:40 the daily release published 2026.8.9 to npm, then git push origin HEAD:main was rejected by the protected-branch hook (GH006: Protected branch update failed for refs/heads/main). Because npm versions are immutable, npm now serves 2026.8.9 while git main is still 2026.8.7 with no tag for 2026.8.9. Any push failure permanently desynchronises npm from git. Fix: reorder so git main already contains the release commit before npm publish runs, by merging release metadata through a protected PR (merge_method=rebase, pinned release_commit sha) and verifying the merged main before publishing, then pushing a tag-only step."
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-09T12:46:48.972Z"
+updated_at: "2026-08-09T13:02:00.215Z"
+closed_at: "2026-08-09T13:02:00.179Z"
+completed_at: "2026-08-09T13:02:00.179Z"
+author: pi-agent
+resolution: "Reordered .github/workflows/release.yml so git main already contains the release commit before npm publish: added a Merge release metadata through protected PR step (release/<ver> branch, PR merged via API with merge_method=rebase and sha=<release_commit> pinned) and a Verify merged release step (refetch origin/main, assert merged sha + package version, re-run release:check, git-diff the release files), then replaced the tag-and-main push with a tag-only Push release tag. Added pull-requests: write permission and a base_sha decide output."
+expected_result: "npm can never be published a version that git main does not already contain; a protected-branch push rejection can no longer desync npm from git because there is no direct git push origin HEAD:main in the publish path."
+actual_result: "Implementation complete and verified on branch fix-release-ordering-npm-ahead-of-git. PR https://github.com/unbraind/pm-csv/pull/60 is open with all gates green (npm ci, build, test 127/127, release:check). YAML validated, step order and permissions checked. Pending: PR merge (orchestrator)."
+notes[1]{created_at,author,text}:
+  "2026-08-09T12:59:49.226Z",pi-agent,"Fix applied to .github/workflows/release.yml. Root cause: the workflow ran 'Publish npm package' before 'Push release tag and main' (git push origin HEAD:main). On 2026-08-09 the protected-branch hook rejected that push (GH006), so npm served 2026.8.9 while git main stayed at 2026.8.7 with no tag. Ported the pm-changelog invariant so git main already contains the release commit before npm publish runs: added 'Merge release metadata through protected PR' (pushes release/<ver>, opens a PR titled 'Release pm-csv <tag>', merges via the API with merge_method=rebase and sha=<release_commit> pinned) and 'Verify merged release' (refetches origin/main, asserts the merged sha and package version, re-runs release:check, and git-diffs the exact release files). Replaced 'Push release tag and main' with a tag-only 'Push release tag' (main is already advanced by the PR). Added pull-requests: write permission (needed for gh pr create/merge) and a base_sha output to the decide step (used by the merge step's stale-main guard)."
+close_reason: "Release ordering fixed in PR #60: main now advances through a protected PR and is verified before npm publish runs"
+body: ""

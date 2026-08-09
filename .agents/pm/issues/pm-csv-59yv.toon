@@ -1,0 +1,11 @@
+id: pm-csv-59yv
+title: A release that merges but fails to publish is abandoned by the next day's run
+description: "Decide release computes the version from today's date and the existing tags, and the tag is pushed only after npm publish succeeds. If the protected release PR merges and publication then fails, main carries release metadata for a version that was never tagged or published. The next day's run sees the old latest tag, computes a new version from the new date, and commits it over the merged metadata, so the earlier version is silently skipped on npm. Needs a guard in Decide release that detects a committed-but-untagged version and resumes it rather than computing a new one."
+type: Issue
+status: open
+priority: 2
+tags: []
+created_at: "2026-08-09T13:46:48.065Z"
+updated_at: "2026-08-09T13:46:48.065Z"
+author: claude
+body: ""
