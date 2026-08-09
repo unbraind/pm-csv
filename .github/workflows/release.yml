@@ -210,13 +210,23 @@ jobs:
             pr_number="${pr_url##*/}"
           fi
 
-          # Only the checks branch protection actually requires may gate the
-          # release. Advisory reviewers (Greptile, Sourcery, cubic) routinely
-          # report FAILURE as a confidence signal, and blocking publication on
-          # those would make releases depend on third-party opinion.
-          required_json="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks" \
-            --jq '[.contexts[]?]' 2>/dev/null || echo '[]')"
+          # A 404 means no required checks are configured, which is a real answer.
+          # Any other failure - outage, rate limit, missing token scope - must not
+          # be read as "nothing is required", because that silently restores the
+          # race this step exists to remove.
+          protection_out="$(mktemp)"
+          if gh api \
+               "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks" \
+               --jq '[.contexts[]?]' > "$protection_out" 2>"${protection_out}.err"; then
+            required_json="$(cat "$protection_out")"
+          elif grep -qi 'not found\|HTTP 404' "${protection_out}.err"; then
+            required_json='[]'
+            echo "No required status checks configured on main; merging without waiting."
+          else
+            echo "::error::Could not read branch protection for ${GITHUB_REPOSITORY}: $(tr '\n' ' ' < "${protection_out}.err")"
+            exit 1
+          fi
+          rm -f "$protection_out" "${protection_out}.err"
 
           if [[ "$(jq -r 'length' <<< "$required_json")" != "0" ]]; then
             deadline=$(( SECONDS + 1800 ))
@@ -231,11 +241,20 @@ jobs:
                 '[$req[] as $name
                   | ($all | map(select(.name == $name)) | last)
                   | {name: ($name), state: (.state // "EXPECTED")}]')"
-              pending="$(jq -r '[.[] | select(.state == "PENDING" or .state == "QUEUED"
-                                              or .state == "IN_PROGRESS" or .state == "EXPECTED")
+              # Allowlist the states that mean "settled and acceptable"; classify
+              # every explicit non-passing conclusion as a failure; treat anything
+              # else - REQUESTED, WAITING, a state GitHub adds later - as still
+              # pending. A denylist would let an unrecognised state read as
+              # settled and fire the merge into a check that never ran, which is
+              # the failure this step exists to prevent.
+              pending="$(jq -r '[.[] | select((.state | IN("SUCCESS", "NEUTRAL", "SKIPPED",
+                                                           "FAILURE", "ERROR", "TIMED_OUT",
+                                                           "CANCELLED", "ACTION_REQUIRED",
+                                                           "STARTUP_FAILURE", "STALE")) | not)
                                  | .name] | join(", ")' <<< "$report")"
-              failed="$(jq -r '[.[] | select(.state == "FAILURE" or .state == "ERROR"
-                                             or .state == "TIMED_OUT" or .state == "CANCELLED")
+              failed="$(jq -r '[.[] | select(.state | IN("FAILURE", "ERROR", "TIMED_OUT",
+                                                         "CANCELLED", "ACTION_REQUIRED",
+                                                         "STARTUP_FAILURE", "STALE"))
                                  | .name] | join(", ")' <<< "$report")"
               if [[ -n "$failed" ]]; then
                 echo "::error::Required checks failed on release PR #${pr_number}: ${failed}. Not merging or publishing."
