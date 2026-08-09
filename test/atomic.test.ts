@@ -151,7 +151,7 @@ function installFakePm(): () => void {
   const wrapper = [
     "#!/usr/bin/env node",
     "const { spawnSync } = require('child_process');",
-    "const { existsSync } = require('fs');",
+    "const { existsSync, writeSync } = require('fs');",
     "const args = process.argv.slice(2);",
     "let root = '';",
     "for (let i = 0; i < args.length; i++) {",
@@ -188,7 +188,12 @@ function installFakePm(): () => void {
     // and prevent testing its success/non-zero-failure outcomes).
     "if (root && existsSync(root + '/fake-create-overrun') && has('create') && has('--json')) {",
     "  const r = spawnSync(realPm, args, { encoding: 'utf-8' });",
-    "  if (r.stdout) process.stdout.write(r.stdout);",
+    // writeSync, NOT process.stdout.write: on a pipe the latter is asynchronous
+    // and the SIGKILL on the next statement cannot be handled, so a queued chunk
+    // is discarded and the id is silently unrecoverable — the test would then
+    // assert the wrong branch, intermittently. writeSync returns only once the
+    // bytes are handed to the fd, so the receipt is always in the pipe first.
+    "  if (r.stdout) writeSync(1, r.stdout);",
     "  process.kill(process.pid, 'SIGKILL');",
     "}",
     // Kills `pm close` with SIGKILL before any output/persist, so the close
