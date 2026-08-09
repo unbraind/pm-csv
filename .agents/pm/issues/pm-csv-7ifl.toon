@@ -2,13 +2,14 @@ id: pm-csv-7ifl
 title: The release merge-wait read branch protection which the workflow token can never read
 description: The release workflow derived its list of required checks from the repository branch protection endpoint. That endpoint is administration-scoped and the built-in workflow token has no administration permission - there is no such key in the workflow permissions block so it cannot be granted - therefore it answers HTTP 403 Resource not accessible by integration on every run and the fail-closed error branch aborts the release before it can merge or publish. The lookup is replaced by a wait on the merge state GitHub itself computes which needs only pull request read access and already accounts for which checks are required.
 type: Issue
-status: open
+status: closed
 priority: 1
 tags[3]: branch-protection,ci,release
 created_at: "2026-08-09T14:52:18.853Z"
-updated_at: "2026-08-09T15:15:54.248Z"
+updated_at: "2026-08-09T15:30:26.886Z"
 deadline: "2026-08-16T00:00:00.000Z"
-assignee: claude
+closed_at: "2026-08-09T15:30:26.881Z"
+completed_at: "2026-08-09T15:30:26.881Z"
 author: claude
 estimated_minutes: 90
 acceptance_criteria: The release workflow makes no request to any administration-scoped endpoint; A release pull request whose required checks are still running is waited on rather than merged; A release pull request that can never merge fails the run with the failing check names instead of waiting out the deadline
@@ -26,4 +27,5 @@ tests[1]{command,scope,timeout_seconds}:
   bash -n .github/workflows/release.yml,project,60
 docs[1]{path,scope,note}:
   .github/workflows/release.yml,project,release workflow carrying the merge-wait
+close_reason: "Shipped in the release merge-wait fix. The administration-scoped protection lookup is gone; the merge-wait now uses mergeStateStatus, guards the PR read against transient API failures, and makes no attempt to short-circuit BLOCKED because required-check membership is not observable from this workflow."
 body: GitHub computes mergeStateStatus with full knowledge of the protection rules. CLEAN and HAS_HOOKS mean every required check passed. UNSTABLE means the pull request is mergeable while a non-required check is failing which is the advisory reviewer case for Greptile Sourcery and cubic. BLOCKED means a required check is pending or failing or a review is missing; the loop keeps waiting only while some check is genuinely unsettled and fails immediately once everything has settled rather than burning the whole deadline. DIRTY and BEHIND fail so the release retries from a fresh main. Unrecognised states are treated as still settling rather than ready so a state GitHub adds later can never fire the merge into a check that never ran.
