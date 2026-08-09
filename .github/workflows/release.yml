@@ -210,68 +210,138 @@ jobs:
             pr_number="${pr_url##*/}"
           fi
 
-          # A 404 means no required checks are configured, which is a real answer.
-          # Any other failure - outage, rate limit, missing token scope - must not
-          # be read as "nothing is required", because that silently restores the
-          # race this step exists to remove.
-          protection_out="$(mktemp)"
-          if gh api \
-               "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks" \
-               --jq '[(.contexts[]?), (.checks[]?.context)] | map(select(. != null)) | unique' \
-               > "$protection_out" 2>"${protection_out}.err"; then
-            required_json="$(cat "$protection_out")"
-          elif grep -qi 'not found\|HTTP 404' "${protection_out}.err"; then
-            required_json='[]'
-            echo "No required status checks configured on main; merging without waiting."
-          else
-            echo "::error::Could not read branch protection for ${GITHUB_REPOSITORY}: $(tr '\n' ' ' < "${protection_out}.err")"
-            exit 1
-          fi
-          rm -f "$protection_out" "${protection_out}.err"
+          # Branch protection requires status checks, and the push above only
+          # just created the commit they run against, so merging immediately
+          # races them: GitHub answers "N of N required status checks are
+          # expected" (HTTP 405) and the release fails without publishing.
+          #
+          # Wait for GitHub's own merge decision rather than deriving one. The
+          # obvious approach - read the required contexts from
+          # /branches/main/protection/required_status_checks and wait for
+          # exactly those - cannot work from this workflow: that endpoint is
+          # administration-scoped, and the built-in GITHUB_TOKEN has no
+          # administration permission (there is no such key in the
+          # `permissions:` block, so it cannot be granted). It answers
+          # "Resource not accessible by integration" (HTTP 403) on every run,
+          # which the error branch below would turn into a failed release every
+          # day. Verified by probing the endpoint from this workflow's own
+          # token, not inferred from documentation.
+          #
+          # mergeStateStatus is computed by GitHub with full knowledge of the
+          # protection rules and is readable with `pull-requests: read`:
+          #   CLEAN/HAS_HOOKS - every required check passed; merge.
+          #   UNSTABLE        - mergeable, but a NON-required check is failing
+          #                     or still running. That is the advisory reviewer
+          #                     case (Greptile, Sourcery and cubic routinely
+          #                     report FAILURE as a confidence signal), and
+          #                     blocking publication on third-party opinion is
+          #                     not intended, so merge.
+          #   BLOCKED         - a required check is pending or failing, or a
+          #                     review is required. Wait; see below for why this
+          #                     cannot be short-circuited.
+          #   DIRTY/BEHIND    - conflict or stale base; retrying from a fresh
+          #                     main is the only correct answer.
+          #   UNKNOWN/absent  - GitHub is still computing mergeability; retry.
+          # Unrecognised states are treated as "still settling" rather than
+          # "ready to merge": a denylist would let a state GitHub adds later
+          # fire the merge into a check that never ran, which is the failure
+          # this step exists to prevent. The deadline bounds that wait, so an
+          # unknown state costs a failed release, never a bad publish.
+          # BLOCKED is never short-circuited, and the reason is worth stating
+          # because two earlier attempts to short-circuit it were both wrong.
+          #
+          # The appeal is obvious: if a blocked pull request has nothing left to
+          # wait for, it will never merge, so failing at once beats waiting out
+          # the deadline. The problem is that "nothing left to wait for" is not
+          # observable here. Deciding it requires knowing WHICH checks are
+          # required, and that is precisely the fact this workflow cannot read -
+          # the endpoint holding it is administration-scoped (see above).
+          #
+          # Every available proxy fails on a case that occurs in practice:
+          #   - "no unsettled checks" is true of a pull request created seconds
+          #     ago, whose checks have not registered at all;
+          #   - "some checks are present" is satisfied by advisory checks
+          #     (DeepScan, Hound, Sourcery) that register and settle long before
+          #     the required test matrix appears;
+          #   - "some check is failing" is satisfied by an advisory reviewer
+          #     (Greptile routinely reports FAILURE as a confidence signal)
+          #     while the required checks are still queued.
+          # Each proxy would abort a perfectly healthy release, which is a far
+          # worse outcome than a slow failure.
+          #
+          # So the deadline IS the discriminator: a required check that never
+          # reports and a required check that failed are indistinguishable from
+          # here, and both correctly end in a failed release. The cost is that a
+          # doomed release takes the full 30 minutes to say so; the failing
+          # check names are included in that message so it stays diagnosable.
+          deadline=$(( SECONDS + 1800 ))
+          pr_view_err="$(mktemp)"
+          while :; do
+            # `set -e` is active, so an unguarded `gh pr view` would abort the
+            # whole step on a 5xx, a rate limit or a dropped connection - one
+            # transient API answer killing a release, which is the failure mode
+            # this step exists to remove. A failed read is not information about
+            # the pull request, so it is treated as an unrecognised state and
+            # simply retried until the deadline.
+            pr_state="$(gh pr view "$pr_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json mergeStateStatus,statusCheckRollup \
+              --jq '{merge_state: (.mergeStateStatus // "UNKNOWN"),
+                     unsettled: [.statusCheckRollup[]?
+                                 | {name: (.name // .context),
+                                    state: (.conclusion // .state // .status // "PENDING")}
+                                 | select((.state | IN("SUCCESS", "NEUTRAL", "SKIPPED",
+                                                       "FAILURE", "ERROR", "TIMED_OUT",
+                                                       "CANCELLED", "ACTION_REQUIRED",
+                                                       "STARTUP_FAILURE", "STALE")) | not)
+                                 | .name],
+                     failing: [.statusCheckRollup[]?
+                               | {name: (.name // .context),
+                                  state: (.conclusion // .state // .status // "PENDING")}
+                               | select(.state | IN("FAILURE", "ERROR", "TIMED_OUT",
+                                                    "CANCELLED", "ACTION_REQUIRED",
+                                                    "STARTUP_FAILURE", "STALE"))
+                               | .name]}' 2>"$pr_view_err")" || pr_state=""
+            if [[ -z "$pr_state" ]]; then
+              echo "Could not read PR #${pr_number} (retrying): $(tr '\n' ' ' < "$pr_view_err")"
+              merge_state="UNKNOWN"
+              unsettled="github api unavailable"
+              failing=""
+            else
+              merge_state="$(jq -r '.merge_state' <<< "$pr_state")"
+              unsettled="$(jq -r '.unsettled | join(", ")' <<< "$pr_state")"
+              failing="$(jq -r '.failing | join(", ")' <<< "$pr_state")"
+            fi
 
-          if [[ "$(jq -r 'length' <<< "$required_json")" != "0" ]]; then
-            deadline=$(( SECONDS + 1800 ))
-            while :; do
-              rollup="$(gh pr view "$pr_number" \
-                --repo "$GITHUB_REPOSITORY" \
-                --json statusCheckRollup \
-                --jq '[.statusCheckRollup[]?
-                       | {name: (.name // .context),
-                          state: (.conclusion // .state // .status // "PENDING")}]')"
-              report="$(jq -n --argjson req "$required_json" --argjson all "$rollup" \
-                '[$req[] as $name
-                  | ($all | map(select(.name == $name)) | last)
-                  | {name: ($name), state: (.state // "EXPECTED")}]')"
-              # Allowlist the states that mean "settled and acceptable"; classify
-              # every explicit non-passing conclusion as a failure; treat anything
-              # else - REQUESTED, WAITING, a state GitHub adds later - as still
-              # pending. A denylist would let an unrecognised state read as
-              # settled and fire the merge into a check that never ran, which is
-              # the failure this step exists to prevent.
-              pending="$(jq -r '[.[] | select((.state | IN("SUCCESS", "NEUTRAL", "SKIPPED",
-                                                           "FAILURE", "ERROR", "TIMED_OUT",
-                                                           "CANCELLED", "ACTION_REQUIRED",
-                                                           "STARTUP_FAILURE", "STALE")) | not)
-                                 | .name] | join(", ")' <<< "$report")"
-              failed="$(jq -r '[.[] | select(.state | IN("FAILURE", "ERROR", "TIMED_OUT",
-                                                         "CANCELLED", "ACTION_REQUIRED",
-                                                         "STARTUP_FAILURE", "STALE"))
-                                 | .name] | join(", ")' <<< "$report")"
-              if [[ -n "$failed" ]]; then
-                echo "::error::Required checks failed on release PR #${pr_number}: ${failed}. Not merging or publishing."
-                exit 1
-              fi
-              if [[ -z "$pending" ]]; then
+            case "$merge_state" in
+              CLEAN | HAS_HOOKS)
                 break
-              fi
-              if (( SECONDS >= deadline )); then
-                echo "::error::Required checks on release PR #${pr_number} did not settle within 30 minutes; still waiting on: ${pending}."
+                ;;
+              UNSTABLE)
+                echo "Merging PR #${pr_number}: every required check passed. Non-required checks reporting failure: ${failing:-none}."
+                break
+                ;;
+              DIRTY | BEHIND)
+                echo "::error::Release PR #${pr_number} is ${merge_state}; it conflicts with main or its base moved. Retry the release from the new main head."
                 exit 1
-              fi
-              echo "Waiting for required checks on PR #${pr_number}: ${pending}"
-              sleep 20
-            done
-          fi
+                ;;
+              BLOCKED)
+                # Deliberately no short-circuit - see the note above the loop.
+                ;;
+            esac
+
+            if (( SECONDS >= deadline )); then
+              echo "::error::Release PR #${pr_number} did not become mergeable within 30 minutes (state: ${merge_state}; still settling: ${unsettled:-none}; failing: ${failing:-none}). A required check failed or never reported, or a required review is missing; not merging or publishing."
+              exit 1
+            fi
+            echo "Waiting for PR #${pr_number} to become mergeable (state: ${merge_state}; settling: ${unsettled:-none})"
+            sleep 20
+          done
+          rm -f "$pr_view_err"
+
+
+
+
 
           merged_sha="$(gh api \
             --method PUT \
