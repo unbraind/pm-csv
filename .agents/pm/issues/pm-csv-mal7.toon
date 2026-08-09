@@ -1,0 +1,19 @@
+id: pm-csv-mal7
+title: Converge changelog generation and verification on replace mode
+description: ""
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-09T20:05:59.697Z"
+updated_at: "2026-08-09T20:07:32.707Z"
+closed_at: "2026-08-09T20:07:32.695Z"
+completed_at: "2026-08-09T20:07:32.695Z"
+author: pi-agent
+resolution: "Switched changelog:check to npm run changelog:full -- --check (removing the || regenerate && git diff fallback) and changed release.yml CHANGELOG.md generate+check lines to --mode replace --all-release-tags."
+expected_result: "npm run changelog:check passes against a replace-mode CHANGELOG.md without mutating the working tree; generation and verification use the same mode."
+actual_result: "build, check, 127 tests pass; changelog:full regenerates idempotently; changelog:check passes."
+notes[1]{created_at,author,text}:
+  "2026-08-09T20:06:10.727Z",pi-agent,"Converging changelog generation/verification on replace mode. Deleted the changelog:check fallback (`|| (regenerate && git diff --exit-code)`) which regenerated in PREPEND mode (would corrupt a replace-mode CHANGELOG) and mutated the working tree on a check. changelog:check now runs `npm run changelog:full -- --check`. release.yml CHANGELOG.md generate+check lines switched to --mode replace --all-release-tags; release notes --stdout line left windowed. changelog:full already used replace mode."
+close_reason: "Converged changelog generation and verification on replace mode; deleted the prepend-mode regen-and-diff fallback from changelog:check."
+body: ""
