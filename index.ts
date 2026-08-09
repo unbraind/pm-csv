@@ -1,7 +1,7 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import type {
@@ -484,6 +484,69 @@ function pmListMaxBuffer(): number {
   // the documented invalid-value fallback. Number() rejects the whole string.
   const raw = Number(process.env.PM_LIST_MAX_BUFFER);
   return Number.isSafeInteger(raw) && raw > 0 ? raw : 16 * 1024 * 1024;
+}
+
+/**
+ * Describe why a `spawnSync` result has `status: null`, wording the message for
+ * the REAL cause so the operator is sent down the right path.
+ *
+ * Node reports `status: null` whenever the child was terminated before it could
+ * produce a usable exit code, and three distinct causes produce it (verified
+ * against `SpawnSyncReturns` in `@types/node` and confirmed empirically):
+ *
+ *  - A captured-output overrun. Node sets `result.error` with `code ===
+ *    "ENOBUFS"` and terminates the child with the kill signal. The captured
+ *    output is truncated and unusable, and the fix IS to narrow the query or
+ *    raise `PM_LIST_MAX_BUFFER`.
+ *  - A spawn or system error (the binary could not be launched, a timeout,
+ *    …). `result.error` is set with a code OTHER than `ENOBUFS`. This is NOT a
+ *    buffer problem, and telling the operator to raise `PM_LIST_MAX_BUFFER`
+ *    sends them down the wrong path.
+ *  - An external signal termination (an OOM reaper, a manual kill, …).
+ *    `result.error` is unset and `result.signal` carries the signal. Also NOT a
+ *    buffer problem — note the kill signal from a buffer overrun (`SIGTERM`) is
+ *    the SAME signal an external `SIGTERM` produces, so the signal alone cannot
+ *    tell the two apart; only `error.code === "ENOBUFS"` can.
+ *
+ * Exposed so the write paths ({@link upsertCreate}) can reuse the same wording
+ * when they recover an id from an overrun receipt before throwing, and so the
+ * three causes can be regression-tested directly with synthetic results.
+ */
+export function describePmNullStatus(result: SpawnSyncReturns<string>, label: string): string {
+  const err = result.error as NodeJS.ErrnoException | undefined;
+  const code = err?.code;
+  if (err !== undefined && code === "ENOBUFS") {
+    return `pm ${label} overran its ${pmListMaxBuffer()}-byte stdout buffer (Node reported error code ENOBUFS${result.signal ? ` and terminated the child with ${result.signal}` : ""}); the captured output is truncated and unusable — narrow the query (--status/--type) or raise the PM_LIST_MAX_BUFFER env var`;
+  }
+  if (err !== undefined) {
+    return `pm ${label} could not run to completion: ${err.message}${code !== undefined ? ` (code ${code})` : ""}; this is a spawn or system error, NOT a stdout buffer overrun, so raising the PM_LIST_MAX_BUFFER env var will not help`;
+  }
+  return `pm ${label} was terminated by signal ${result.signal ?? "<unknown>"} before producing a usable exit code; this is NOT a stdout buffer overrun (no ENOBUFS error was reported), so raising the PM_LIST_MAX_BUFFER env var will not help — investigate what sent the signal`;
+}
+
+/**
+ * Turn a `status: null` pm subprocess result into a hard, named error instead of
+ * the wrong answer `spawnSync` otherwise leaves behind.
+ *
+ * When a child is terminated before exiting, `spawnSync` reports `status: null`
+ * and a guard that only branches on `status !== 0` then reads `null !== 0` as
+ * truthy and routes the result onto its failure branch — "the item does not
+ * exist", "nothing was applied yet", or a generic "pm failed" — so a too-large
+ * project (or a killed child) is silently mis-imported instead of reported.
+ * This collapses that case into one explicit error, worded for the real cause by
+ * {@link describePmNullStatus}, at every call site that captures pm output and
+ * must not degrade.
+ *
+ * The best-effort rollback sites in {@link compensateCreate} intentionally do
+ * NOT call this on their own subprocesses: compensation is contractually
+ * tolerant of a failed subprocess, and a named throw there would abort a sweep
+ * that exists to leave the tracker consistent despite partial failure.
+ */
+function assertPmOutputFit(result: SpawnSyncReturns<string>, label: string): void {
+  if (result.status !== null) return;
+  throw new CommandError(
+    `${describePmNullStatus(result, label)}. The result is unusable, so it must never be treated as an empty or absent value.`,
+  );
 }
 
 /**
@@ -1265,7 +1328,15 @@ function loadAppliedByTransaction(
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
-  if (r.error || r.status !== 0) return { byRowIndex };
+  // A stdout overrun kills the child with `status: null` and an empty stderr;
+  // the previous guard (`r.error || r.status !== 0`) then returned an EMPTY map,
+  // so inspect() concluded "nothing was applied" and a resumed atomic import
+  // silently re-imported every already-applied row — wrong data, not a crash.
+  // Route that overrun through {@link assertPmOutputFit} as a hard, named error
+  // instead. A genuine non-zero exit (not a buffer condition) still falls through
+  // to the best-effort empty map, preserving the resume scan's tolerance.
+  assertPmOutputFit(r, "list-all");
+  if (r.status !== 0) return { byRowIndex };
   let items: PmItem[] = [];
   try {
     items = JSON.parse(r.stdout).items ?? [];
@@ -1288,9 +1359,24 @@ function loadAppliedByTransaction(
  * longer exists. Used by the compensation guard so `pm close` is only invoked
  * on items that still exist and are not already closed (closing a closed item
  * is a pm error).
+ *
+ * Tier-2 read: this single-item lookup stays a `pm get` subprocess (the SDK's
+ * status lives on item metadata, not the located document, and converting it
+ * would push `async` through the whole sync import graph). It now caps stdout
+ * at {@link pmListMaxBuffer} and routes a buffer overrun through
+ * {@link assertPmOutputFit} as a hard, named error. Previously an overrun left
+ * `status: null`, which `status !== 0` mapped onto `undefined` — i.e. a
+ * too-large item was silently reported as "does not exist", and the
+ * compensation guard then skipped a close it should have run. A genuine
+ * non-zero exit (item truly absent, or a failed lookup such as the
+ * `fake-get-fail` regression) still returns `undefined` unchanged.
  */
 function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
-  const r = spawnSync("pm", ["--path", pmRoot, "get", id, "--json"], { encoding: "utf-8" });
+  const r = spawnSync("pm", ["--path", pmRoot, "get", id, "--json"], {
+    encoding: "utf-8",
+    maxBuffer: pmListMaxBuffer(),
+  });
+  assertPmOutputFit(r, "get");
   if (r.status !== 0) return undefined;
   try {
     const parsed = JSON.parse(r.stdout);
@@ -1313,6 +1399,14 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
  * create being rolled back must also lose its marker); the close only runs for
  * a still-open item. Every step tolerates a missing item / absent tag, so a
  * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
+ *
+ * The status lookup itself is also tolerated: if `itemStatus` throws (a stdout
+ * overrun or a signal kill on the `pm get`), the throw is caught and this row's
+ * compensation becomes a no-op rather than aborting the sweep. The hard error is
+ * kept on the import READ path ({@link loadAppliedByTransaction}, and the
+ * verification `itemStatus` in {@link upsertCreate}), where a wrong answer is
+ * the real danger; here the danger is aborting a best-effort rollback mid-sweep
+ * and leaving every later applied create un-compensated.
  */
 function compensateCreate(
   pmRoot: string,
@@ -1320,14 +1414,25 @@ function compensateCreate(
   markers: readonly string[] = [],
   reason: string = "atomic csv import rolled back",
 ): void {
-  const status = itemStatus(pmRoot, id);
+  // itemStatus throws on a stdout overrun / signal kill; compensation is a
+  // best-effort sweep, so an overrun in the status lookup itself is a no-op for
+  // THIS row (the operator can reconcile by id) and must never abort the sweep
+  // over the remaining applied creates. (itemStatus's only throw is the
+  // CommandError from assertPmOutputFit; a bare catch is therefore equivalent to
+  // catching CommandError and avoids an unreachable rethrow branch.)
+  let status: ItemStatus | undefined;
+  try {
+    status = itemStatus(pmRoot, id);
+  } catch {
+    return; // status lookup overran/killed: no-op for this row, sweep continues
+  }
   if (status === undefined) return; // item no longer exists
   if (markers.length > 0) {
     // Best-effort: remove the tx markers so this row is no longer "applied".
     spawnSync(
       "pm",
       ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
-      { encoding: "utf-8" },
+      { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
   }
   if (status === "closed") return; // terminal already; markers stripped above
@@ -1341,7 +1446,7 @@ function compensateCreate(
   const r = spawnSync(
     "pm",
     ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
-    { encoding: "utf-8" },
+    { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   if (r.status !== 0 && r.status !== 4) {
     // Exit 4 is "already closed" / invalid state — treat as already compensated.
@@ -1791,22 +1896,77 @@ function upsertCreate(
   appendRelationalArgs(args, p);
   if (tags.length > 0) args.push("--tags", tags.join(","));
 
-  const r = spawnSync("pm", args, { encoding: "utf-8" });
-  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
+  // Parse the id BEFORE any status check. `pm create` is a WRITE: by the time
+  // spawnSync returns it may have ALREADY persisted the item, even if its
+  // receipt then overran the buffer (status null). Asserting before the parse
+  // would throw with the id still unread, stranding an orphan compensation
+  // cannot identify. Node retains the FULL captured stdout for outputs under
+  // one read chunk, and `pm create --json`'s flat receipt is always far under
+  // that, so the id is recoverable here even when the buffer overran.
+  // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
+  // — with no `item` wrapper (mutations return a flat receipt; only queries
+  // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
+  // fallback is kept: it would be dead code no real CLI can exercise, and the
+  // sibling pm-github package shipped a silent production bug from trusting
+  // exactly that wrapper — every closed import landed open because the id
+  // never parsed.
   let id = "";
   try {
-    // `pm create --json` emits a FLAT receipt — {id, status, changed_field_count}
-    // — with no `item` wrapper (mutations return a flat receipt; only queries
-    // such as `pm read`/`pm list` wrap, see upstream pm-cli#888). No `item`
-    // fallback is kept: it would be dead code no real CLI can exercise, and the
-    // sibling pm-github package shipped a silent production bug from trusting
-    // exactly that wrapper — every closed import landed open because the id
-    // never parsed.
     const parsed = JSON.parse(r.stdout);
     id = typeof parsed?.id === "string" ? parsed.id : "";
   } catch {
     id = "";
   }
+  if (r.status === null) {
+    // The receipt overran the buffer (or the child was killed). The create may
+    // have persisted an item, so a write that may have taken effect is never
+    // abandoned un-identified: if the id was recovered, attempt to close the
+    // orphan DIRECTLY (compensation's own status lookup would overrun under the
+    // same cap and no-op, so the close is issued here) and INSPECT its result so
+    // the thrown error reports the recovery close's ACTUAL outcome, never an
+    // assumed one. The close is attempted exactly once — under a capped buffer
+    // it fails identically every time, so retrying in a loop would only turn a
+    // fast, actionable error into a slow one. Without the id, throw naming the
+    // title for manual reconcile.
+    //
+    // GUARANTEE: the extension cannot make `pm create` atomic — it is a single
+    // subprocess with no transaction the caller can join, so a window always
+    // exists where the item is persisted and the caller does not yet know it.
+    // What is guaranteed is that the window is always REPORTED WITH THE ID: the
+    // recovery close's outcome is inspected and the thrown error names the id
+    // and the real resulting state (closed, or still-open with the close's
+    // failure cause), so the operator never stops looking for an open orphan.
+    if (id) {
+      const rc = spawnSync(
+        "pm",
+        ["--path", pmRoot, "close", id, "--validate-close", "off", "--reason", "csv import create overran its receipt buffer; closing the orphaned created item"],
+        { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
+      );
+      const createCause = describePmNullStatus(r, "create");
+      if (rc.status === 0) {
+        throw new CommandError(
+          `${createCause}. The create for row (title '${p.title}', id ${id}) may have persisted; the orphaned item ${id} was closed — retry the import.`,
+        );
+      }
+      // The recovery close failed or returned no usable status: do NOT claim it
+      // succeeded. Report the orphan as still open and carry the close's own
+      // failure cause (an overrun/kill via describePmNullStatus for a null
+      // status; the close's stderr for a non-zero exit) so the operator can
+      // close the item manually by id.
+      const closeCause =
+        rc.status === null
+          ? describePmNullStatus(rc, "close")
+          : (rc.stderr?.trim() || "pm close failed");
+      throw new CommandError(
+        `${createCause}. The create for row (title '${p.title}', id ${id}) may have persisted; the recovery close failed (${closeCause}), so the orphaned item ${id} is still open and must be closed manually — retry the import.`,
+      );
+    }
+    throw new CommandError(
+      `${describePmNullStatus(r, "create")}. The create for row (title '${p.title}') produced no recoverable id, so any persisted item cannot be identified or rolled back — reconcile manually and retry.`,
+    );
+  }
+  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
   if (p.status === "closed") {
     // (1) No id recovered: the close cannot be applied and the orphan cannot be
     // compensated without its id. Hard failure — never a silent success — so
@@ -1820,8 +1980,13 @@ function upsertCreate(
     const cr = spawnSync(
       "pm",
       ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
-      { encoding: "utf-8" },
+      { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
+    // Deliberately NO assertPmOutputFit(cr, "close") here: a null close status
+    // (receipt overrun or a signal kill) must route INTO the compensation branch
+    // below rather than bypass it. The close may have persisted before its
+    // receipt overran; the branch compensates and verifies the outcome either
+    // way, and the id is already known so nothing is stranded.
     if (cr.status !== 0) {
       // (2) The close failed but the item is already persisted as open.
       // Compensate (close) the orphan so a failed row is all-or-nothing and a
@@ -1865,6 +2030,18 @@ function upsertCreate(
  * through `pm close --reason` with the factual import provenance
  * ({@link importCloseReason}) — never an invented outcome — because
  * governance.require_close_reason forbids reason-free terminal transitions.
+ *
+ * GUARANTEE (and its limits): `pm update` and the terminal `pm close` are each
+ * a single non-atomic subprocess, so either may have already taken effect when
+ * its receipt then overruns the buffer or the child is killed (status null),
+ * and a non-zero exit is likewise not proof nothing was written. The guarantee
+ * here is that NO MUTATION IS LEFT UN-IDENTIFIED: every update/close failure
+ * carries the item id and states explicitly that the mutation may already have
+ * been applied, so the operator can verify and reconcile by id. The guarantee
+ * is NOT that no mutation is left behind — an update has no inverse without the
+ * prior field values, which this extension does not capture, so a failed update
+ * is reported loudly by id rather than compensated with a second unreviewed
+ * write on top of a failed one (see the deferred capture-prior-values feature).
  */
 function upsertUpdate(
   pmRoot: string,
@@ -1887,13 +2064,44 @@ function upsertUpdate(
   // `update` cannot set a closed status; only set non-closed statuses here.
   if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
 
-  const r = spawnSync("pm", args, { encoding: "utf-8" });
-  if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm update failed");
+  const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
+  // `pm update` is a WRITE: a null status (receipt overrun or a signal kill)
+  // means the mutation may already have been applied to the item, so the
+  // failure must carry the item id and state that explicitly — matching the
+  // create path. The guarantee is that no mutation is left un-IDENTIFIED, NOT
+  // that no mutation is left behind: an update has no inverse without the prior
+  // field values, which this extension does not capture, so a failed update is
+  // reported loudly by id rather than papered over with a second unreviewed
+  // write on top of a failed one.
+  if (r.status === null) {
+    throw new CommandError(
+      `${describePmNullStatus(r, "update")}. The update for item ${id} may already have been applied — verify the item by id before retrying.`,
+    );
+  }
+  if (r.status !== 0) {
+    const updateErr = r.stderr?.trim() || "pm update failed";
+    throw new Error(
+      `pm update failed for item ${id} (${updateErr}); the mutation may already have been applied — verify the item by id before retrying.`,
+    );
+  }
 
-  // Apply terminal statuses through the dedicated close command.
+  // Apply terminal statuses through the dedicated close command. The preceding
+  // update has already been applied, so a failure here is reported with the id
+  // and the explicit caveat that the terminal transition may already have taken
+  // effect too — the close, like the update, is a single non-atomic subprocess.
   if (p.status === "closed" || p.status === "canceled") {
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8" });
-    if (cr.status !== 0) throw new Error(cr.stderr?.trim() || "pm close failed");
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
+    if (cr.status === null) {
+      throw new CommandError(
+        `${describePmNullStatus(cr, "close")}. The update for item ${id} was applied, but the terminal ${p.status} close may already have been applied too — verify the item by id before retrying.`,
+      );
+    }
+    if (cr.status !== 0) {
+      const closeErr = cr.stderr?.trim() || "pm close failed";
+      throw new Error(
+        `pm close failed for item ${id} (${closeErr}); the update was applied and the terminal ${p.status} close may already have been applied — verify the item by id before retrying.`,
+      );
+    }
   }
 }
 
@@ -2786,4 +2994,16 @@ export {
   validateFieldMapTargets,
   checkMapSourcesPresent,
 };
+// ---------------------------------------------------------------------------
+// Internal store helpers exposed for regression testing against oversized pm
+// roots. Unlike the pure helpers above, these READ or WRITE the given pm root
+// (they are not side-effect free) and are exported ONLY so the buffer-overrun
+// and compensation regressions can drive them directly under a capped
+// PM_LIST_MAX_BUFFER, independent of the write-bearing `csv import` command
+// path. `describePmNullStatus` is a pure classifier exposed so the three
+// null-status causes (buffer / spawn-error / signal) can be asserted directly
+// with synthetic results.
+// ---------------------------------------------------------------------------
+export { loadAppliedByTransaction, itemStatus, compensateCreate };
+// `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };

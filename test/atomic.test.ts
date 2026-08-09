@@ -125,6 +125,21 @@ function realPmPath(): string {
  *     recovered". No real item is created.
  *   - `<root>/fake-close-fail`: every `pm close ...` exits 1 with a simulated
  *     error, to exercise the close-failure / compensation paths.
+ *   - `<root>/fake-create-kill`: `pm create --json` is terminated by SIGKILL
+ *     before it writes anything (no output, no persisted item), so spawnSync
+ *     reports `status: null`, `signal: "SIGKILL"`, no `error`, empty `stdout` —
+ *     a create whose receipt cannot be recovered at all (the signal-kill arm of
+ *     the write-overrun fix).
+ *   - `<root>/fake-close-kill`: every `pm close ...` is terminated by SIGKILL
+ *     before it writes anything, so its `status: null` routes into the
+ *     close-failure compensation branch instead of bypassing it (a null close
+ *     status is not a buffer abort).
+ *   - `<root>/fake-update-fail`: every `pm update ...` exits 1 with a simulated
+ *     error, to exercise the non-zero arm of the update path — a failed update
+ *     is not proof nothing was written, so the error must still name the item.
+ *   - `<root>/fake-update-kill`: every `pm update ...` is terminated by SIGKILL,
+ *     so it returns `status: null` — the arm where the mutation may already have
+ *     been applied and only the id makes it reconcilable.
  *
  * Returns a cleanup function that restores PATH/PM_CSV_REAL_PM and removes the
  * wrapper bin.
@@ -136,13 +151,14 @@ function installFakePm(): () => void {
   const wrapper = [
     "#!/usr/bin/env node",
     "const { spawnSync } = require('child_process');",
-    "const { existsSync } = require('fs');",
+    "const { existsSync, writeSync } = require('fs');",
     "const args = process.argv.slice(2);",
     "let root = '';",
     "for (let i = 0; i < args.length; i++) {",
     "  if (args[i] === '--path' || args[i] === '--pm-path') root = args[i + 1] || '';",
     "}",
     "function has(s) { return args.indexOf(s) !== -1; }",
+    "const realPm = process.env.PM_CSV_REAL_PM;",
     "if (root && existsSync(root + '/fake-create-no-id') && has('create') && has('--json')) {",
     "  process.stdout.write('{}\\n');",
     "  process.exit(0);",
@@ -157,7 +173,48 @@ function installFakePm(): () => void {
     "  process.stderr.write('simulated pm get failure (test)\\n');",
     "  process.exit(1);",
     "}",
-    "const realPm = process.env.PM_CSV_REAL_PM;",
+    // Kills `pm create --json` with SIGKILL before any output/persist, so the
+    // create returns status null + signal SIGKILL + empty stdout: the receipt
+    // cannot be recovered at all (the write-overrun signal-kill arm).
+    "if (root && existsSync(root + '/fake-create-kill') && has('create') && has('--json')) {",
+    "  process.kill(process.pid, 'SIGKILL');",
+    "}",
+    // Simulates a create whose receipt "overran" with a RECOVERABLE id: delegates
+    // to the real pm so the item is really created (and a real id assigned),
+    // writes the full --json receipt to stdout, then SIGKILLs so spawnSync
+    // reports status:null + signal SIGKILL with the full receipt captured. This
+    // deterministically exercises the recovered-id recovery-close path WITHOUT
+    // depending on a real buffer cap (which would also cap the recovery close
+    // and prevent testing its success/non-zero-failure outcomes).
+    "if (root && existsSync(root + '/fake-create-overrun') && has('create') && has('--json')) {",
+    "  const r = spawnSync(realPm, args, { encoding: 'utf-8' });",
+    // writeSync, NOT process.stdout.write: on a pipe the latter is asynchronous
+    // and the SIGKILL on the next statement cannot be handled, so a queued chunk
+    // is discarded and the id is silently unrecoverable — the test would then
+    // assert the wrong branch, intermittently. writeSync returns only once the
+    // bytes are handed to the fd, so the receipt is always in the pipe first.
+    "  if (r.stdout) writeSync(1, r.stdout);",
+    "  process.kill(process.pid, 'SIGKILL');",
+    "}",
+    // Kills `pm close` with SIGKILL before any output/persist, so the close
+    // returns status null and routes into the compensation branch (a null close
+    // is not a buffer abort that bypasses compensation).
+    "if (root && existsSync(root + '/fake-close-kill') && has('close')) {",
+    "  process.kill(process.pid, 'SIGKILL');",
+    "}",
+    // Makes `pm update` exit 1 with a simulated stderr, to exercise the
+    // update-failure arm of upsertUpdate (the mutation may already have been
+    // applied, so the failure must carry the item id).
+    "if (root && existsSync(root + '/fake-update-fail') && has('update')) {",
+    "  process.stderr.write('simulated pm update failure (test)\\n');",
+    "  process.exit(1);",
+    "}",
+    // Kills `pm update` with SIGKILL before it exits, so it returns status null
+    // (the receipt-overrun / signal-kill arm of the update path: the mutation
+    // may already have been applied and must be reported with the id).
+    "if (root && existsSync(root + '/fake-update-kill') && has('update')) {",
+    "  process.kill(process.pid, 'SIGKILL');",
+    "}",
     "const r = spawnSync(realPm, args, { stdio: 'inherit' });",
     "process.exit(r.status == null ? 1 : r.status);",
     "",
@@ -807,6 +864,345 @@ test("non-atomic closed row: when compensation also fails, the error carries the
     const orphan = listItems(root).find((i) => i.title === "Orphan Closed");
     assert.ok(orphan, "the closed row's created item exists");
     assert.equal(orphan!.status, "open", "the orphan is left open when compensation fails");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Review follow-up (PR #59): the write-overrun guard must never abandon a write
+// that may already have taken effect. `pm create` is a WRITE — by the time its
+// receipt overruns the buffer (or the child is killed) the item may already be
+// persisted. Asserting before the id is parsed would strand an UN-IDENTIFIABLE
+// orphan compensation cannot roll back, and asserting on the close receipt
+// bypassed the close-failure compensation branch. The fix parses the id first,
+// closes a recovered orphan directly, and lets a null close status route into
+// compensation. Each test below is mutation-tested (revert its fix -> it fails).
+// ---------------------------------------------------------------------------
+
+/**
+ * Run an async `body` with `PM_LIST_MAX_BUFFER` temporarily set to `cap`,
+ * restoring the prior value (including "unset") on exit.
+ *
+ * The cap is read by `pmListMaxBuffer()` at each `spawnSync`, so it must stay
+ * set for the duration of the awaited body (whose synchronous `spawnSync` calls
+ * run during the await), not just around the call that starts it.
+ */
+async function withCappedReadBufferAsync<T>(cap: string, body: () => Promise<T>): Promise<T> {
+  const prev = process.env.PM_LIST_MAX_BUFFER;
+  process.env.PM_LIST_MAX_BUFFER = cap;
+  try {
+    return await body();
+  } finally {
+    if (prev === undefined) delete process.env.PM_LIST_MAX_BUFFER;
+    else process.env.PM_LIST_MAX_BUFFER = prev;
+  }
+}
+
+test("F2: create overrun never strands an un-identifiable orphan — the id is recovered and the recovery close inspected", async () => {
+  // PM_LIST_MAX_BUFFER smaller than BOTH the create receipt and the recovery
+  // `pm close` output: `pm create` persists the item then its receipt overruns
+  // (status null, id recoverable); the direct recovery `pm close` is issued under
+  // the SAME cap, so it overruns identically (status null) every time. Before
+  // the fix the recovery close's result was DISCARDED and the error asserted the
+  // orphan "was best-effort closed" — an outcome that could not be confirmed
+  // (status null) and that stopped the operator looking for an item still open.
+  // The fix INSPECTS the recovery close result and, for a null status, reports
+  // the orphan as still open and to-be-closed manually, carrying the close's own
+  // overrun cause: the window is always REPORTED WITH THE ID, never assumed away.
+  const root = freshTracker();
+  const file = join(root, "one.csv");
+  writeFileSync(file, "title,status\nOverrun Orphan,open\n");
+  try {
+    const { result, error } = await withCappedReadBufferAsync("16", () => runImport(root, file, {}));
+    assert.ifError(error);
+
+    // The overrun row was NOT counted as imported; it was skipped with a named
+    // error that carries the recovered id.
+    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
+    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the overrun is reported once");
+    const msg = result.errors[0];
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried so the state is identifiable");
+
+    // The CREATE overrun is named (its real cause) ...
+    assert.match(msg, /pm create overran/i, "the error names the create overrun");
+    // ... and so is the RECOVERY close's: it returned status null under the same
+    // cap, so the error must NOT claim the orphan was closed. It must report the
+    // orphan as still open, tell the operator to close it manually, and carry the
+    // close's own overrun cause — an accurate report, not an assumed outcome.
+    assert.match(msg, /still open/i, "a null recovery-close status is reported as still-open, never as closed");
+    assert.match(msg, /must be closed manually/i, "the operator is told to close the orphan by id");
+    assert.match(msg, /pm close overran/i, "the recovery close's own overrun cause is carried");
+    assert.doesNotMatch(msg, /was closed/i, "the error never asserts the close succeeded when its status is null");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: create overrun whose recovery close SUCCEEDS reports the orphan was closed", async () => {
+  // With the id recovered, the direct recovery close is attempted and its result
+  // inspected. When it succeeds (status 0) the error must say the orphan WAS
+  // closed and that the import can be retried — the accurate report for the
+  // confirmed outcome. The create overrun is simulated deterministically by the
+  // fake-pm wrapper (it delegates the create to real pm so a real item and id
+  // exist, emits the full receipt, then signals itself); the recovery close then
+  // runs against real pm unmodified, so it succeeds normally. This outcome is
+  // unreachable under a real buffer cap (which would also cap the recovery
+  // close), so it is exercised only through the deterministic wrapper.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-create-overrun"), "");
+  const file = join(root, "one.csv");
+  writeFileSync(file, "title,status\nOverrun Orphan,open\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
+    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the overrun is reported once");
+    const msg = result.errors[0];
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried");
+    assert.match(msg, /was closed/i, "a successful recovery close is reported as closed");
+    assert.match(msg, /retry the import/i, "the operator is told the import can be retried");
+    assert.doesNotMatch(msg, /still open/i, "a successful close is not reported as still-open");
+
+    // The recovery close really took effect: the orphan is closed on disk.
+    const orphan = listItems(root).find((i) => i.title === "Overrun Orphan");
+    assert.ok(orphan, "the created item exists (it was identified, not stranded)");
+    assert.equal(orphan!.status, "closed", "the orphan was closed by the recovery close");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: create overrun whose recovery close FAILS reports the orphan still open, carrying the close's stderr", async () => {
+  // When the recovery close returns a non-zero status, the error must report the
+  // orphan as still open, carry the close's own failure cause (its stderr), and
+  // tell the operator to close it manually — never claim it was closed. The
+  // orphan really is left open, because the failed close had no effect.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-create-overrun"), "");
+  writeFileSync(join(root, "fake-close-fail"), "");
+  const file = join(root, "one.csv");
+  writeFileSync(file, "title,status\nOverrun Orphan,open\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
+    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the overrun is reported once");
+    const msg = result.errors[0];
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried");
+    assert.match(msg, /still open/i, "a failed recovery close is reported as still-open");
+    assert.match(msg, /must be closed manually/i, "the operator is told to close the orphan by id");
+    assert.match(msg, /simulated pm close failure \(test\)/i, "the close's own stderr is carried as the cause");
+    assert.doesNotMatch(msg, /was closed/i, "a failed close is never reported as closed");
+
+    // The failed close had no effect: the orphan is open on disk.
+    const orphan = listItems(root).find((i) => i.title === "Overrun Orphan");
+    assert.ok(orphan, "the created item exists (it was identified, not stranded)");
+    assert.equal(orphan!.status, "open", "the orphan is left open because the recovery close failed");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: a create killed before it writes cannot strand an orphan — the title is named for manual reconcile", async () => {
+  // A create terminated by a signal before writing anything reports status null
+  // with EMPTY stdout, so NO id can be recovered. Before the fix the overrun
+  // guard threw a raw buffer/signal abort; the fix instead throws a named error
+  // carrying the title (the only identifying clue), so the operator can
+  // reconcile. Nothing was persisted, so no orphan exists.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-create-kill"), "");
+  const file = join(root, "killed.csv");
+  writeFileSync(file, "title,status\nKilled Create,open\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the killed create is not counted as imported");
+    assert.equal(result.skipped, 1, "the killed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported once");
+    // Worded for the REAL cause (a signal, not a buffer) and naming the title:
+    assert.match(result.errors[0], /signal/i, "the error names the signal cause, not a buffer overrun");
+    assert.match(result.errors[0], /Killed Create/, "the error names the title so the row is identifiable");
+    assert.match(result.errors[0], /reconcile manually/i, "the error tells the operator how to recover the unrecoverable id");
+
+    // The create was killed before it persisted, so nothing was left behind.
+    assert.equal(listItems(root).length, 0, "no item was created — nothing to strand");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F2: a null close status routes into compensation, never bypasses it", async () => {
+  // A closed row whose `pm close` is terminated by a signal reports status null.
+  // Before the fix the close-result guard threw a raw signal abort and BYPASSED
+  // the close-failure compensation branch, leaving the orphan un-compensated and
+  // the failure mis-reported as a buffer/signal error. The fix drops that guard
+  // so a null close routes into compensation: the orphan is compensated (closing
+  // is also killed, so it cannot take effect) and the failure is reported as a
+  // compensation outcome (left OPEN), not as a raw signal abort.
+  const root = freshTracker();
+  writeFileSync(join(root, "fake-close-kill"), "");
+  const file = join(root, "closekill.csv");
+  writeFileSync(file, "title,status\nClose Killed,closed\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, {});
+    assert.ifError(error);
+
+    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
+    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
+    assert.equal(result.errors.length, 1, "the failure is reported once");
+
+    // The compensation branch ran (the error is a compensation outcome), NOT a
+    // raw signal/buffer abort from a bypassed guard.
+    const msg = result.errors[0];
+    assert.match(msg, /left OPEN/i, "compensation ran and reported the orphan left open");
+    assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
+    assert.doesNotMatch(msg, /terminated by signal.*will not help/i, "the error is not a raw signal abort that bypassed compensation");
+
+    // The close never took effect (killed before persist): the orphan is open.
+    const orphan = listItems(root).find((i) => i.title === "Close Killed");
+    assert.ok(orphan, "the closed row's created item exists");
+    assert.equal(orphan!.status, "open", "the orphan is left open because the close was killed");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Pre-create an item carrying a `csv-key` tag so a CSV row with the same key is
+ * matched as an UPDATE rather than a create.
+ *
+ * Runs before {@link installFakePm}, so the seeding create always reaches the
+ * real `pm` even in tests whose fake intercepts `update`/`close`.
+ *
+ * @param root - Tracker root to seed.
+ * @param key - Value written into the item's `csv-key:` tag.
+ * @returns The seeded item's id, which the update-path assertions expect the
+ *   thrown error to name.
+ */
+function seedKeyedItem(root: string, key: string): string {
+  const r = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Seeded Row", "--status", "open", "--priority", "1", "--tags", `csv-key:${key}`, "--json"],
+    { encoding: "utf-8" },
+  );
+  assert.equal(r.status, 0, "seeding the keyed item should succeed");
+  const id = JSON.parse(r.stdout).id;
+  assert.ok(id, "the seeded item has an id");
+  return id;
+}
+
+test("F-B: an update killed mid-flight names the item, because the mutation may already have been applied", async () => {
+  // `pm update` is a WRITE. A SIGKILL yields status null with no stderr, which
+  // the old code routed onto a generic "pm update failed" branch — a row-level
+  // failure the operator could not reconcile against anything. The row may
+  // nonetheless have been written. The guarantee this asserts is deliberately
+  // the narrow one: not that no mutation is left behind (an update has no
+  // inverse without prior field values, which this extension does not capture),
+  // but that no mutation is left UN-IDENTIFIED.
+  const root = freshTracker();
+  const id = seedKeyedItem(root, "upd-kill");
+  writeFileSync(join(root, "fake-update-kill"), "");
+  const file = join(root, "updkill.csv");
+  writeFileSync(file, "title,status,priority,key\nSeeded Row,open,3,upd-kill\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, { key: "key" });
+    assert.ifError(error);
+    assert.equal(result.errors.length, 1, "the killed update is reported once");
+    const msg = result.errors[0];
+    assert.ok(msg.includes(id), "the error names the item id so the state is reconcilable");
+    assert.match(msg, /may already have been applied/i, "the error states the mutation may have landed");
+    assert.match(msg, /NOT a stdout buffer overrun/i, "a signal kill is not misreported as a buffer overrun");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F-B: an update that exits non-zero still names the item — a failed write is not proof nothing landed", async () => {
+  // A non-zero exit is weaker evidence than it looks: `pm update` may have
+  // persisted part of its work before failing. The error therefore carries the
+  // id and the same "may already have been applied" caveat as the null-status
+  // arm, rather than implying the item is untouched.
+  const root = freshTracker();
+  const id = seedKeyedItem(root, "upd-fail");
+  writeFileSync(join(root, "fake-update-fail"), "");
+  const file = join(root, "updfail.csv");
+  writeFileSync(file, "title,status,priority,key\nSeeded Row,open,3,upd-fail\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, { key: "key" });
+    assert.ifError(error);
+    assert.equal(result.errors.length, 1, "the failed update is reported once");
+    const msg = result.errors[0];
+    assert.ok(msg.includes(id), "the error names the item id");
+    assert.match(msg, /simulated pm update failure/i, "the underlying stderr is preserved, not swallowed");
+    assert.match(msg, /may already have been applied/i, "the error does not imply the item is untouched");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F-B: a terminal close killed after a successful update reports BOTH mutations by id", async () => {
+  // The update landed and the terminal close was then killed. Reporting only
+  // the close would hide that the row's other fields were already mutated, so
+  // the error must state that the update WAS applied and that the close may
+  // have been too — one message covering both halves of the same row.
+  const root = freshTracker();
+  const id = seedKeyedItem(root, "cls-kill");
+  writeFileSync(join(root, "fake-close-kill"), "");
+  const file = join(root, "clskill.csv");
+  writeFileSync(file, "title,status,priority,key\nSeeded Row,closed,3,cls-kill\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, { key: "key" });
+    assert.ifError(error);
+    assert.equal(result.errors.length, 1, "the killed close is reported once");
+    const msg = result.errors[0];
+    assert.ok(msg.includes(id), "the error names the item id");
+    assert.match(msg, /update for item .* was applied/i, "the already-applied update is stated, not hidden behind the close failure");
+    assert.match(msg, /close may already have been applied/i, "the close's own uncertainty is stated");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F-B: a terminal close that exits non-zero after a successful update also reports both by id", async () => {
+  // Same row-level shape as the killed close, reached through the non-zero arm:
+  // the update is known applied, the close is uncertain, and the operator gets
+  // the id plus the close's real stderr rather than a bare row failure.
+  const root = freshTracker();
+  const id = seedKeyedItem(root, "cls-fail");
+  writeFileSync(join(root, "fake-close-fail"), "");
+  const file = join(root, "clsfail.csv");
+  writeFileSync(file, "title,status,priority,key\nSeeded Row,closed,3,cls-fail\n");
+  const restorePm = installFakePm();
+  try {
+    const { result, error } = await runImport(root, file, { key: "key" });
+    assert.ifError(error);
+    assert.equal(result.errors.length, 1, "the failed close is reported once");
+    const msg = result.errors[0];
+    assert.ok(msg.includes(id), "the error names the item id");
+    assert.match(msg, /update was applied/i, "the already-applied update is stated");
+    assert.match(msg, /close may already have been applied/i, "the close's uncertainty is stated");
   } finally {
     restorePm();
     rmSync(root, { recursive: true, force: true });
