@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Converge changelog generation and verification on replace mode ([pm-csv-mal7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mal7.toon))
+- The release merge-wait read branch protection which the workflow token can never read ([pm-csv-7ifl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7ifl.toon))
+
 ## 2026.8.9 - 2026-08-09
 
 ### Fixed
