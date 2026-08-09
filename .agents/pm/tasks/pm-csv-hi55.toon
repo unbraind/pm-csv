@@ -6,7 +6,7 @@ status: blocked
 priority: 2
 tags[3]: blocked,docstrings,gate
 created_at: "2026-08-09T22:12:53.152Z"
-updated_at: "2026-08-09T22:12:53.152Z"
+updated_at: "2026-08-09T22:30:31.099Z"
 deadline: "2026-08-11T00:00:00.000Z"
 assignee: claude
 author: claude
@@ -16,8 +16,9 @@ dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-csv-mal7,related,"2026-08-09T22:12:53.152Z",claude,"cli:create:dep",asserted
 comments[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Proved the gate passes on a clean checkout by moving the gitignored .agents/pm/extensions aside and rerunning,which reported 3 files and 52 declarations documented"
-notes[1]{created_at,author,text}:
+notes[2]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Held as a draft rather than merged,because a launcher test that passes in CI and fails locally is the kind of inconsistency this fleet treats as a defect"
+  "2026-08-09T22:30:31.082Z",claude,"author=claude,created_at=now,text=The fix is merged to pm-ops main as 25b700f, the squash of pull request 40. pm-ops releases on cron 23 3 star star star, so the next scheduled run at 03:23 UTC publishes it. Unblocking this is then a one-line devDependency bump to that published version followed by rerunning npm run docstring and the launcher test on a machine that has the pm-csv extension installed, which is the case the current pin fails"
 learnings[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,A fix present in a package source tree and its committed dist is not necessarily in the published package. When a pinned dependency misbehaves check the installed copy under node_modules rather than the dependency repository
 files[1]{path,scope,note}:
