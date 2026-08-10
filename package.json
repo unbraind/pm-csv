@@ -61,7 +61,7 @@
     "@types/node": "^26.1.1",
     "@unbrained/pm-cli": "^2026.8.6",
     "pm-changelog": "^2026.8.6",
-    "pm-ops": "2026.8.8",
+    "pm-ops": "2026.8.10",
     "typescript": "^7.0.2"
   },
   "keywords": [
