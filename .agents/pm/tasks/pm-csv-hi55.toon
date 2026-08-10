@@ -6,7 +6,7 @@ status: blocked
 priority: 2
 tags[3]: blocked,docstrings,gate
 created_at: "2026-08-09T22:12:53.152Z"
-updated_at: "2026-08-09T22:30:31.099Z"
+updated_at: "2026-08-10T06:37:23.705Z"
 deadline: "2026-08-11T00:00:00.000Z"
 assignee: claude
 author: claude
@@ -16,15 +16,17 @@ dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-csv-mal7,related,"2026-08-09T22:12:53.152Z",claude,"cli:create:dep",asserted
 comments[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Proved the gate passes on a clean checkout by moving the gitignored .agents/pm/extensions aside and rerunning,which reported 3 files and 52 declarations documented"
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Held as a draft rather than merged,because a launcher test that passes in CI and fails locally is the kind of inconsistency this fleet treats as a defect"
-  "2026-08-09T22:30:31.082Z",claude,"author=claude,created_at=now,text=The fix is merged to pm-ops main as 25b700f, the squash of pull request 40. pm-ops releases on cron 23 3 star star star, so the next scheduled run at 03:23 UTC publishes it. Unblocking this is then a one-line devDependency bump to that published version followed by rerunning npm run docstring and the launcher test on a machine that has the pm-csv extension installed, which is the case the current pin fails"
+  "2026-08-10T06:37:22.484Z",claude,"Commit provenance, stated explicitly because two hashes appear in this record. 3c625b5 is the pre-merge commit on the pm-ops feature branch. 25b700f is the squash of that branch onto pm-ops main as pull request 40. They are the same change; 25b700f is the canonical mainline commit and the one to cite."
+  "2026-08-10T06:37:23.091Z",claude,"The prediction in the removed note was wrong and the reason matters. It said the next scheduled pm-ops release at 03:23 UTC would publish the fix. That run executed on 2026-08-10 at 04:59 UTC and FAILED, on a coverage gate reporting 99.89 percent branches for index.ts with no commit since the previous success. The cause was a test fixture pinned at 2026-08-03 that aged past the seven day throughput window overnight, making one branch unreachable. So no published pm-ops carries the .agents skip yet, and this task stays blocked until pm-ops pull request 41 lands and a release runs."
 learnings[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,A fix present in a package source tree and its committed dist is not necessarily in the published package. When a pinned dependency misbehaves check the installed copy under node_modules rather than the dependency repository
 files[1]{path,scope,note}:
   index.ts,project,six functions documented
-tests[1]{command,scope,timeout_seconds}:
+tests[2]{command,scope,timeout_seconds}:
   npm run docstring,project,120
+  npm test,project,600
 docs[1]{path,scope,note}:
   scripts/docstring-gate.ts,project,thin launcher over the canonical analyzer
 body: "pm-ops fixed this on main at 15:37 on 2026-08-09 in commit 3c625b5, whose own docstring names the failure exactly: scanning .agents makes the gate depend on whether a developer happens to have extensions installed, so the same commit fails release:check locally and passes in a clean CI checkout. The fix is committed to pm-ops source and its committed dist, but v2026.08.08 was tagged before it, so the published package does not carry it. Verified by grepping the installed node_modules copy."
