@@ -6,8 +6,9 @@ status: open
 priority: 2
 tags: []
 created_at: "2026-08-10T15:17:43.766Z"
-updated_at: "2026-08-10T15:17:49.901Z"
+updated_at: "2026-08-10T15:28:46.573Z"
 author: pi-agent
-notes[1]{created_at,author,text}:
+notes[2]{created_at,author,text}:
   "2026-08-10T15:17:49.898Z",pi-agent,"Replaced the mergeStateStatus state poll in the Merge release metadata through protected PR step with a merge API attempt. The loop now fails fast only on DIRTY or BEHIND, resolves unresolved review threads via GraphQL resolveReviewThread before each attempt, and calls gh api PUT repos pull merge with rebase and sha guard. A successful PUT is proof protection was satisfied; a failed PUT is retried until the 30 minute deadline. Ported from pm-beads release.yml PR 65."
+  "2026-08-10T15:28:46.573Z",claude,"Greptile reported that creating the release pull request with GITHUB_TOKEN suppresses its pull_request event so CI never starts. Measured against pm-changelog, the event is not suppressed: a run was created at 04:54:24Z with event pull_request for branch release/2026.8.9. The real blocker is that attempt 1 concluded action_required, meaning GitHub parked the run awaiting workflow approval under the fork pull request contributor approval policy of first_time_contributors, because github-actions had no merged pull request in that repository yet. A parked run never appears in the status check rollup, so it is indistinguishable from a required check that failed. The merge wait now detects parked runs, reports the run URL, attempts approval using the actions write permission, and separates awaiting approval from a failed check in the deadline error."
 body: ""
