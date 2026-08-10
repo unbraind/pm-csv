@@ -6,7 +6,7 @@ status: blocked
 priority: 2
 tags[3]: blocked,docstrings,gate
 created_at: "2026-08-09T22:12:53.152Z"
-updated_at: "2026-08-10T06:37:23.705Z"
+updated_at: "2026-08-10T07:39:58.965Z"
 deadline: "2026-08-11T00:00:00.000Z"
 assignee: claude
 author: claude
@@ -16,10 +16,11 @@ dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-csv-mal7,related,"2026-08-09T22:12:53.152Z",claude,"cli:create:dep",asserted
 comments[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Proved the gate passes on a clean checkout by moving the gitignored .agents/pm/extensions aside and rerunning,which reported 3 files and 52 declarations documented"
-notes[3]{created_at,author,text}:
+notes[4]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,"Held as a draft rather than merged,because a launcher test that passes in CI and fails locally is the kind of inconsistency this fleet treats as a defect"
   "2026-08-10T06:37:22.484Z",claude,"Commit provenance, stated explicitly because two hashes appear in this record. 3c625b5 is the pre-merge commit on the pm-ops feature branch. 25b700f is the squash of that branch onto pm-ops main as pull request 40. They are the same change; 25b700f is the canonical mainline commit and the one to cite."
   "2026-08-10T06:37:23.091Z",claude,"The prediction in the removed note was wrong and the reason matters. It said the next scheduled pm-ops release at 03:23 UTC would publish the fix. That run executed on 2026-08-10 at 04:59 UTC and FAILED, on a coverage gate reporting 99.89 percent branches for index.ts with no commit since the previous success. The cause was a test fixture pinned at 2026-08-03 that aged past the seven day throughput window overnight, making one branch unreachable. So no published pm-ops carries the .agents skip yet, and this task stays blocked until pm-ops pull request 41 lands and a release runs."
+  "2026-08-10T07:39:58.964Z",pi-agent,"The previous symlink test (isMainInvocation resolves a symlinked entry path to the real module URL) passed argv[1] as the link and moduleUrl as the REAL path, which the old one-sided comparison pathToFileURL(realpathSync(entry)).href === moduleUrl also satisfied — it could not distinguish the fixed implementation from the broken one. Applied the missing canonicalization fix (both sides through realpathSync) and added a new test (canonicalizes a symlinked moduleUrl, as --preserve-symlinks produces) that puts the symlink in moduleUrl (pathToFileURL(link).href), which is what Node records in import.meta.url under --preserve-symlinks. Verified by measurement: reverting to the old one-sided comparison makes the new test fail (fail 1), restoring the canonicalization makes it pass (fail 0). The existing symlink test is retained because argv[1] arriving through an npm bin shim is a separate real case. Note: this repo's gate was on the old broken implementation (branch adopt-canonical-docstring-gate); the canonicalization fix was applied as part of this change."
 learnings[1]{created_at,author,text}:
   "2026-08-09T22:12:53.152Z",claude,A fix present in a package source tree and its committed dist is not necessarily in the published package. When a pinned dependency misbehaves check the installed copy under node_modules rather than the dependency repository
 files[1]{path,scope,note}:
