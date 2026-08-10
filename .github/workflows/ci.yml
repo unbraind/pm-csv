@@ -58,6 +58,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Verify complete docstring coverage
+        run: npm run docstring
+
       - name: Test with coverage gate
         run: npm run coverage
 

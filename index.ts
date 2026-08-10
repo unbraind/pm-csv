@@ -563,6 +563,18 @@ function encodeKeyTagValue(value: string): string {
   return encodeURIComponent(value);
 }
 
+/**
+ * Percent-decode a value taken from an internal tag, tolerating bad input.
+ *
+ * Tag payloads are percent-encoded when written, but a hand-edited or
+ * externally-created item can carry a malformed escape, which makes
+ * `decodeURIComponent` throw. Rather than abort an export over one damaged tag,
+ * the raw value is returned unchanged — so the caller may receive a still-encoded
+ * string, and the return is not guaranteed to be decoded.
+ *
+ * @param value - Percent-encoded tag payload.
+ * @returns The decoded value, or `value` itself when it cannot be decoded.
+ */
 function decodeKeyTagValue(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -1178,6 +1190,20 @@ function computeFieldMapWarnings(
   return warnings;
 }
 
+/**
+ * Import CSV rows into a pm tracker as items.
+ *
+ * Rejects rather than throws when `--atomic` is combined with `--stream`: the
+ * two are genuinely incompatible, because an all-or-nothing commit needs the
+ * whole row set in hand and a stream is unbounded. Returning a rejected promise
+ * keeps the failure on the same channel as the rest of the async path.
+ *
+ * @param pmRoot - Tracker root passed through to the pm CLI.
+ * @param filePath - CSV file to read.
+ * @param opts - Import behaviour, including the atomic and stream modes.
+ * @returns The import outcome; rejects with a {@link CommandError} on a usage
+ *          conflict or an unreadable file.
+ */
 function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
   if (opts.atomic && opts.stream) {
     return Promise.reject(
@@ -2250,6 +2276,18 @@ function validateParsedCSV(
   };
 }
 
+/**
+ * Flatten a validation report into the issues strict mode refuses to import on.
+ *
+ * Strict mode treats several conditions as blocking that a normal import merely
+ * counts: duplicate mapped columns, and rows missing a title or carrying an
+ * unknown status or a non-integer / out-of-range priority. Each becomes one
+ * human-readable line, with counts rather than row numbers.
+ *
+ * @param report - Report produced by validating the CSV.
+ * @returns One string per blocking condition; empty when strict mode would let
+ *          the import proceed.
+ */
 function strictValidationIssues(report: CsvValidateReport): string[] {
   const issues: string[] = [];
   if (!report.ok) issues.push(...report.issues);
@@ -2261,6 +2299,18 @@ function strictValidationIssues(report: CsvValidateReport): string[] {
   return [...new Set(issues)];
 }
 
+/**
+ * Validate a CSV and abort the import before anything is written.
+ *
+ * The ordering is the point: this runs to completion before the first item is
+ * created, so a strict import either creates every row or none. Failing halfway
+ * would leave a tracker holding part of a file the caller believed was rejected.
+ *
+ * @param filePath - CSV file to validate.
+ * @param opts - Validation options, including the column mapping.
+ * @returns The validation report, when strict mode finds nothing blocking.
+ * @throws CommandError listing every blocking issue, exiting with the usage code.
+ */
 function assertStrictImportReady(filePath: string, opts: CsvValidateOptions): CsvValidateReport {
   const report = validateCSV(filePath, opts);
   const strictIssues = strictValidationIssues(report);
@@ -2386,6 +2436,19 @@ function discoverCustomFields(pmRoot: string): DiscoveredField[] {
 // the export columns. Unknown column names throw a USAGE error; an empty/absent
 // spec falls back to the full default column set. `extraValid` lets discovered
 // custom-field keys be selected explicitly via --columns alongside --all-fields.
+/**
+ * Resolve a `--columns` spec into the ordered export column list.
+ *
+ * An absent or blank spec selects the full built-in set; otherwise the caller's
+ * order is preserved exactly, since column order is what the spec is for.
+ * Unknown names fail loudly rather than being dropped, because silently
+ * omitting a requested column produces a CSV that looks complete and is not.
+ *
+ * @param spec - Comma-separated column names; blank or absent selects the default set.
+ * @param extraValid - Additional accepted names, used for discovered custom fields.
+ * @returns The requested columns in the order given, or a copy of the default set.
+ * @throws CommandError naming every unrecognised column and listing the valid ones.
+ */
 function selectExportColumns(
   spec: string | undefined,
   extraValid: ReadonlyArray<string> = [],
@@ -2437,6 +2500,24 @@ function resolveExportColumns(
   return { columns, columnSource };
 }
 
+/**
+ * Read every item from a tracker and render the CSV export body.
+ *
+ * Shells out to `pm list-all --json --include-body` with an explicit
+ * `maxBuffer`, because a stdout overrun kills the child with a null status and
+ * an EMPTY stderr — which would otherwise surface as an unexplained
+ * "pm list-all failed" rather than as the size problem it is.
+ *
+ * Status and type filters are applied after the read, not pushed into the
+ * query. Each item's `csv_source` is then derived from its internal source tag
+ * via {@link decodeKeyTagValue}, so a re-export carries the provenance of the
+ * file the row originally came from.
+ *
+ * @param pmRoot - Tracker root to export.
+ * @param opts - Column selection, per-column property remap, and status/type filters.
+ * @returns The rendered CSV text, the exported row count, and the line ending used.
+ * @throws CommandError when the pm read fails, naming the buffer overrun explicitly.
+ */
 function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: string; count: number; eol: "\n" | "\r\n" } {
   const result = spawnSync(
     "pm",
