@@ -1,12 +1,12 @@
 id: pm-csv-hi55
-title: "Adopt the canonical docstring gate, blocked on a pm-ops release carrying the .agents skip"
-description: "The canonical gate is wired in and the six undocumented functions are documented, but the launcher test passes only in a clean checkout because the pinned pm-ops 2026.8.8 still scans installed extension artifacts under .agents."
+title: Adopt the canonical docstring gate against a pm-ops release that skips installed extension artifacts
+description: "The canonical gate is wired in and the six undocumented functions are documented. The launcher test used to pass only in a clean checkout because the pinned pm-ops 2026.8.8 scanned installed extension artifacts under .agents. Resolved by pinning pm-ops 2026.8.10 exactly, which carries that skip."
 type: Task
 status: closed
 priority: 2
-tags[3]: blocked,docstrings,gate
+tags[3]: docstrings,gate,resolved
 created_at: "2026-08-09T22:12:53.152Z"
-updated_at: "2026-08-10T07:43:28.875Z"
+updated_at: "2026-08-10T08:51:46.154Z"
 deadline: "2026-08-11T00:00:00.000Z"
 closed_at: "2026-08-10T07:43:28.857Z"
 completed_at: "2026-08-10T07:43:28.857Z"
