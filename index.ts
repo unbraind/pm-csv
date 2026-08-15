@@ -660,6 +660,20 @@ export function assertListAllComplete(envelope: unknown): void {
       + "but degraded; re-read without the field-omitting options.",
     );
   }
+  // Last, and independent of the four flags: the envelope's own arithmetic.
+  // `count` and `total` are read above only to describe the other refusals, but
+  // they are themselves a completeness claim — an envelope reporting count 10 of
+  // total 682 with every flag clear is internally inconsistent, and trusting the
+  // flags over the arithmetic would consume 10 rows as the whole workspace. This
+  // is the case where the receipt contradicts itself, and the safe reading of a
+  // self-contradictory receipt is "not complete".
+  if (typeof env.count === "number" && typeof env.total === "number" && env.count !== env.total) {
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: ${counts} disagree while every `
+      + "completeness flag is clear. The envelope contradicts itself, so it cannot "
+      + "be treated as the whole workspace.",
+    );
+  }
 }
 
 /** Minimal spawn options the seam forwards to `spawnSync`. */
@@ -1220,7 +1234,16 @@ function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, str
   try {
     parsed = JSON.parse(result.stdout);
   } catch {
-    return index;
+    // Fail closed. Returning an empty index here says "no keys exist", which is
+    // indistinguishable from an empty workspace and makes --upsert CREATE
+    // DUPLICATES for every row whose key it could not see. That is the same
+    // silent-partial failure the completeness gate below exists to stop, so the
+    // two paths must agree.
+    throw new CommandError(
+      "Could not parse `pm list-all --json` output while building the upsert key index. "
+        + "Refusing rather than treating an unreadable response as an empty workspace, "
+        + "which would make --upsert create duplicates.",
+    );
   }
   assertListAllComplete(parsed);
   items = (parsed as ListAllEnvelope).items ?? [];
@@ -1510,13 +1533,27 @@ function loadAppliedByTransaction(
   // instead. A genuine non-zero exit (not a buffer condition) still falls through
   // to the best-effort empty map, preserving the resume scan's tolerance.
   assertPmOutputFit(r, "list-all");
-  if (r.status !== 0) return { byRowIndex };
+  // Fail closed on both failure shapes, for the same reason the completeness
+  // gate below refuses: an empty resume map says "nothing was applied", so a
+  // resume RE-IMPORTS rows that already landed. An unreadable answer is not an
+  // empty answer.
+  if (r.status !== 0) {
+    throw new CommandError(
+      r.stderr?.trim()
+        || "pm list-all failed while scanning for applied rows. Refusing rather than "
+           + "treating an unreadable response as an empty transaction, which would re-import applied rows.",
+    );
+  }
   let items: PmItem[] = [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(r.stdout);
   } catch {
-    return { byRowIndex };
+    throw new CommandError(
+      "Could not parse `pm list-all --json` output while scanning for applied rows. "
+        + "Refusing rather than treating an unreadable response as an empty transaction, "
+        + "which would re-import rows that already landed.",
+    );
   }
   // An incomplete envelope must refuse here, NOT degrade to an empty map: a
   // resume scan that misses applied rows silently re-imports them (wrong

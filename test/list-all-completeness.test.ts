@@ -91,10 +91,17 @@ function mutatedStdout(mutate: (env: Record<string, unknown>) => void): string {
   return JSON.stringify(env);
 }
 
-/** Seam answering a canned stdout with a successful child exit. */
-function seamFor(stdout: string): PmSpawn {
-  return (_args, _options) =>
-    ({ status: 0, stdout, stderr: "", pid: 1, output: [] }) as unknown as SpawnSyncReturns<string>;
+/**
+ * Seam answering a canned stdout with a successful child exit.
+ *
+ * Records every argv it is handed so a test can assert what actually reaches
+ * `pm`, not merely what the reader does with the answer.
+ */
+function seamFor(stdout: string, calls: string[][] = []): PmSpawn {
+  return (args, _options) => {
+    calls.push([...args]);
+    return ({ status: 0, stdout, stderr: "", pid: 1, output: [] }) as unknown as SpawnSyncReturns<string>;
+  };
 }
 
 const EXPORT_OPTS = {
@@ -272,5 +279,37 @@ test("export classifies an unparseable stdout instead of crashing raw", { skip: 
   assert.throws(
     () => buildCsvExport(pmRoot, EXPORT_OPTS, seamFor("not json")),
     /Could not parse `pm list-all --json` output/,
+  );
+});
+
+
+test("no --limit reaches list-all, so the read is never bounded into a refusal", { skip: !hasPmCli() }, () => {
+  // The stated contract is that `list-all` is invoked WITHOUT a row ceiling:
+  // omitting --limit is what makes it return everything, and with the
+  // completeness gate in place a ceiling converts every workspace past that size
+  // from a large read into a hard refusal of export, resume and upsert. Nothing
+  // pinned that, so a well-meaning "add a sensible limit" change would have
+  // passed review and broken large workspaces silently.
+  const fx = realEnvelope();
+  const calls: string[][] = [];
+  buildCsvExport(fx.pmRoot, EXPORT_OPTS, seamFor(fx.stdout, calls));
+  assert.ok(calls.length > 0, "the seam should have been invoked");
+  for (const argv of calls) {
+    assert.ok(argv.includes("list-all"), `expected a list-all invocation, got: ${argv.join(" ")}`);
+    assert.ok(
+      !argv.includes("--limit"),
+      `list-all must not be bounded by --limit, got: ${argv.join(" ")}`,
+    );
+  }
+});
+
+test("an envelope whose count disagrees with total is refused even with every flag clear", { skip: !hasPmCli() }, () => {
+  const { pmRoot } = realEnvelope();
+  assert.throws(
+    () => buildCsvExport(pmRoot, EXPORT_OPTS, seamFor(mutatedStdout((env) => {
+      env.count = 10;
+      env.total = 682;
+    }))),
+    /disagree while every completeness flag is clear/,
   );
 });
