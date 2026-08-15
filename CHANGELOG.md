@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A truncated list-all answer is consumed as if it were complete ([pm-csv-mua3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mua3.toon))
+
 ## 2026.8.10 - 2026-08-10
 
 ### Fixed

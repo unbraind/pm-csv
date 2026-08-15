@@ -29,7 +29,14 @@ const EXIT_CODE = {
   NOT_FOUND: 3,
 } as const;
 
-class CommandError extends Error {
+/**
+ * Error carrying a semantic process exit code, thrown by every failure path
+ * the command runtime must turn into a clean nonzero exit (including the
+ * list-all completeness refusals). Exported so regression tests can assert the
+ * typed failure instead of matching on message text alone.
+ */
+export class CommandError extends Error {
+  /** Numeric exit code the runtime propagates to the shell. */
   exitCode: number;
   constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE) {
     super(message);
@@ -549,6 +556,148 @@ function assertPmOutputFit(result: SpawnSyncReturns<string>, label: string): voi
   );
 }
 
+/** Subset of the `pm list-all --json` envelope the completeness gate reads.
+ *
+ * `items` is typed loosely because the CLI owns its row shape; the fields below
+ * it are the 2026.8.15 completeness receipt whose signals this package refuses
+ * to consume silently at every list-all call site. */
+export interface ListAllEnvelope {
+  /** Rows the CLI actually returned. Length can be less than {@link ListAllEnvelope.total}. */
+  items?: PmItem[];
+  /** Number of rows in `items` as reported by the CLI. */
+  count?: number;
+  /** Number of rows that exist in the workspace. */
+  total?: number;
+  /** True when the row list was cut short (output budget, `--limit`, cursor). */
+  truncated?: boolean;
+  /** True when more rows exist past a cursor boundary. */
+  has_more?: boolean;
+  /** Readability receipt for the directories/items backing the list. */
+  completeness?: {
+    status?: string;
+    unreadable_item_count?: number;
+    unreadable_directory_count?: number;
+  };
+  /** Receipt for field groups omitted from the projection. */
+  omission_receipt?: {
+    has_omissions?: boolean;
+    omitted_field_group_count?: number;
+    omitted_field_groups?: string[];
+  };
+}
+
+/**
+ * Refuse an incomplete `pm list-all` envelope instead of consuming it.
+ *
+ * Reading `.items` without consulting the envelope's completeness receipt is
+ * how this package once shipped a 10-row CSV export from a 682-item workspace
+ * (pm 2026.8.14 defaulted list-all to a truncated answer; verified on this
+ * host), saw none of the applied rows on an atomic-import resume scan, and
+ * missed upsert keys - each reporting success. Any one of four independent
+ * signals means the rows in `items` are NOT the whole workspace, so this
+ * throws (never returns a partial list, never logs and continues) naming the
+ * signal that tripped plus the `count`/`total` figures:
+ *
+ * - `truncated === true` - the row list was cut short (output budget, limit);
+ * - `has_more === true` - rows exist past the returned cursor boundary;
+ * - `completeness.status !== "complete"` - items/directories were unreadable
+ *   ("partial") or the corpus was never scanned ("unchecked"); a missing
+ *   receipt also trips this, because an unverifiable answer is not complete;
+ * - `omission_receipt.has_omissions === true` - field groups were dropped from
+ *   the projection, so rows are present but degraded.
+ *
+ * Thrown errors are {@link CommandError} so the command runtime turns them
+ * into a clean nonzero exit. Paging is deliberately NOT attempted: every
+ * consumer here (CSV export, resume scan, key index) needs the WHOLE
+ * workspace, so refusing loudly is simpler and safer than a paging loop that
+ * could itself silently drop rows.
+ *
+ * @param envelope - Parsed `pm list-all --json` output (any shape; non-envelope
+ *                  input trips the completeness signal).
+ * @throws {@link CommandError} naming the first tripped signal and the counts.
+ */
+export function assertListAllComplete(envelope: unknown): void {
+  const env = (envelope ?? {}) as ListAllEnvelope;
+  // count/total are reported straight from the envelope when present; fall
+  // back to counting rows so a hand-shaped envelope still reports honest
+  // figures instead of `undefined`.
+  const count = typeof env.count === "number"
+    ? env.count
+    : Array.isArray(env.items) ? env.items.length : 0;
+  const total = typeof env.total === "number" ? env.total : count;
+  const counts = `count ${count} of total ${total}`;
+  if (env.truncated === true) {
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: truncated=true (${counts}). `
+      + "The item list was cut short (output budget or limit); a partial result "
+      + "would report success while missing items. Narrow the query "
+      + "(--status/--type) or raise the output budget, then retry.",
+    );
+  }
+  if (env.has_more === true) {
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: has_more=true (${counts}). `
+      + "Rows exist beyond the returned page; consuming the page as the whole "
+      + "workspace would silently drop them.",
+    );
+  }
+  if (env.completeness?.status !== "complete") {
+    const status = env.completeness?.status === undefined ? "(missing)" : JSON.stringify(env.completeness.status);
+    const unreadable = `unreadable_item_count=${env.completeness?.unreadable_item_count ?? 0}`
+      + `, unreadable_directory_count=${env.completeness?.unreadable_directory_count ?? 0}`;
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: completeness.status=${status} `
+      + `(${unreadable}; ${counts}). Some workspace items could not be read, so `
+      + "the returned list is not the whole workspace.",
+    );
+  }
+  if (env.omission_receipt?.has_omissions === true) {
+    const groups = env.omission_receipt?.omitted_field_groups ?? [];
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: omission_receipt.has_omissions=true `
+      + `(omitted_field_groups: ${groups.length ? groups.join(", ") : "(none listed)"}; ${counts}). `
+      + "Field groups were dropped from the projection, so the rows are present "
+      + "but degraded; re-read without the field-omitting options.",
+    );
+  }
+  // Last, and independent of the four flags: the envelope's own arithmetic.
+  // `count` and `total` are read above only to describe the other refusals, but
+  // they are themselves a completeness claim — an envelope reporting count 10 of
+  // total 682 with every flag clear is internally inconsistent, and trusting the
+  // flags over the arithmetic would consume 10 rows as the whole workspace. This
+  // is the case where the receipt contradicts itself, and the safe reading of a
+  // self-contradictory receipt is "not complete".
+  if (typeof env.count === "number" && typeof env.total === "number" && env.count !== env.total) {
+    throw new CommandError(
+      `Refusing incomplete pm list-all answer: ${counts} disagree while every `
+      + "completeness flag is clear. The envelope contradicts itself, so it cannot "
+      + "be treated as the whole workspace.",
+    );
+  }
+}
+
+/** Minimal spawn options the seam forwards to `spawnSync`. */
+export interface PmSpawnOptions {
+  /** Decoding requested for the child's captured output. */
+  encoding: "utf-8";
+  /** Read-buffer cap for the child's stdout. */
+  maxBuffer: number;
+}
+
+/**
+ * Injectable seam over the `pm` shell-out every list-all reader uses.
+ *
+ * A parameter defaulting to the real `spawnPm`, so production callers are
+ * unchanged while tests substitute a canned envelope - captured from the real
+ * CLI and mutated - instead of mocking `child_process`.
+ */
+export type PmSpawn = (args: string[], options: PmSpawnOptions) => SpawnSyncReturns<string>;
+
+/** Real {@link PmSpawn} over `child_process.spawnSync`. */
+function spawnPm(args: string[], options: PmSpawnOptions): SpawnSyncReturns<string> {
+  return spawnSync("pm", args, options);
+}
+
 /**
  * Normalize a dedup key value for stable matching. pm lower-cases tags on
  * storage, so a `csv-key:` tag written from "Fix Bug" comes back as
@@ -1058,25 +1207,46 @@ function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): 
 
 /**
  * List existing items once and build a lookup from csv-key provenance value to
- * item id, for idempotent upsert.
+ * item id, for idempotent upsert. The list-all answer must be COMPLETE — a
+ * truncated answer silently missing keys would turn upserts into duplicate
+ * creates — so the envelope's receipt is checked before any key is read.
  */
-function loadKeyIndex(pmRoot: string): Map<string, string> {
+function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, string> {
   const index = new Map<string, string>();
-  const result = spawnSync(
-    "pm",
+  const result = spawn(
     ["--path", pmRoot, "list-all", "--json"],
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
-  if (result.error) throw new CommandError(`pm list-all failed: ${result.error.message}`);
+  // Route a stdout overrun (status: null, empty stderr, ENOBUFS) through
+  // assertPmOutputFit as a hard, named error instead of the generic
+  // "pm list-all failed" the old `result.error` branch reported. An overrun is
+  // a size problem, not a pm failure: a too-large workspace would otherwise
+  // surface as a bare Node message and send the operator to pm's stderr instead
+  // of to PM_LIST_MAX_BUFFER, and — worse — a null status combined with this
+  // package's `status !== 0` guard would degrade into an empty key index,
+  // turning every upsert into a duplicate create.
+  assertPmOutputFit(result, "list-all");
   if (result.status !== 0) {
     throw new CommandError(result.stderr?.trim() || "pm list-all failed");
   }
   let items: PmItem[] = [];
+  let parsed: unknown;
   try {
-    items = JSON.parse(result.stdout).items ?? [];
+    parsed = JSON.parse(result.stdout);
   } catch {
-    return index;
+    // Fail closed. Returning an empty index here says "no keys exist", which is
+    // indistinguishable from an empty workspace and makes --upsert CREATE
+    // DUPLICATES for every row whose key it could not see. That is the same
+    // silent-partial failure the completeness gate below exists to stop, so the
+    // two paths must agree.
+    throw new CommandError(
+      "Could not parse `pm list-all --json` output while building the upsert key index. "
+        + "Refusing rather than treating an unreadable response as an empty workspace, "
+        + "which would make --upsert create duplicates.",
+    );
   }
+  assertListAllComplete(parsed);
+  items = (parsed as ListAllEnvelope).items ?? [];
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (tag.startsWith(KEY_TAG_PREFIX)) {
@@ -1347,10 +1517,11 @@ export function atomicTransactionId(
 function loadAppliedByTransaction(
   pmRoot: string,
   transactionId: string,
+  spawn: PmSpawn = spawnPm,
 ): { byRowIndex: Map<number, string> } {
   const byRowIndex = new Map<number, string>();
   const rowMarkerPrefix = `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`;
-  const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
+  const r = spawn(["--path", pmRoot, "list-all", "--json"], {
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
@@ -1362,13 +1533,33 @@ function loadAppliedByTransaction(
   // instead. A genuine non-zero exit (not a buffer condition) still falls through
   // to the best-effort empty map, preserving the resume scan's tolerance.
   assertPmOutputFit(r, "list-all");
-  if (r.status !== 0) return { byRowIndex };
-  let items: PmItem[] = [];
-  try {
-    items = JSON.parse(r.stdout).items ?? [];
-  } catch {
-    return { byRowIndex };
+  // Fail closed on both failure shapes, for the same reason the completeness
+  // gate below refuses: an empty resume map says "nothing was applied", so a
+  // resume RE-IMPORTS rows that already landed. An unreadable answer is not an
+  // empty answer.
+  if (r.status !== 0) {
+    throw new CommandError(
+      r.stderr?.trim()
+        || "pm list-all failed while scanning for applied rows. Refusing rather than "
+           + "treating an unreadable response as an empty transaction, which would re-import applied rows.",
+    );
   }
+  let items: PmItem[] = [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch {
+    throw new CommandError(
+      "Could not parse `pm list-all --json` output while scanning for applied rows. "
+        + "Refusing rather than treating an unreadable response as an empty transaction, "
+        + "which would re-import rows that already landed.",
+    );
+  }
+  // An incomplete envelope must refuse here, NOT degrade to an empty map: a
+  // resume scan that misses applied rows silently re-imports them (wrong
+  // data, the exact failure this package exists to prevent).
+  assertListAllComplete(parsed);
+  items = (parsed as ListAllEnvelope).items ?? [];
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (!tag.startsWith(rowMarkerPrefix)) continue;
@@ -2513,14 +2704,26 @@ function resolveExportColumns(
  * via {@link decodeKeyTagValue}, so a re-export carries the provenance of the
  * file the row originally came from.
  *
+ * The envelope's completeness receipt is verified by
+ * {@link assertListAllComplete} before any row is rendered: a truncated,
+ * paged, partially-read or field-omitted answer refuses instead of exporting a
+ * silent subset (the 2026.8.14 truncated-default regression shipped a 10-row
+ * export of a 682-item workspace as success).
+ *
  * @param pmRoot - Tracker root to export.
  * @param opts - Column selection, per-column property remap, and status/type filters.
+ * @param spawn - Injectable shell-out seam (tests substitute a canned real
+ *                envelope); defaults to the real `spawnPm`.
  * @returns The rendered CSV text, the exported row count, and the line ending used.
- * @throws CommandError when the pm read fails, naming the buffer overrun explicitly.
+ * @throws CommandError when the pm read fails or the answer is incomplete,
+ *         naming the buffer overrun or the tripped completeness signal.
  */
-function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: string; count: number; eol: "\n" | "\r\n" } {
-  const result = spawnSync(
-    "pm",
+function buildCsvExport(
+  pmRoot: string,
+  opts: CsvExportOptions,
+  spawn: PmSpawn = spawnPm,
+): { csvText: string; count: number; eol: "\n" | "\r\n" } {
+  const result = spawn(
     ["--path", pmRoot, "list-all", "--json", "--include-body"],
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
@@ -2538,7 +2741,14 @@ function buildCsvExport(pmRoot: string, opts: CsvExportOptions): { csvText: stri
     throw new CommandError(result.stderr || "pm list-all failed");
   }
 
-  let items: PmItem[] = JSON.parse(result.stdout).items ?? [];
+  let parsed: ListAllEnvelope;
+  try {
+    parsed = JSON.parse(result.stdout) as ListAllEnvelope;
+  } catch (err) {
+    throw new CommandError(`Could not parse \`pm list-all --json\` output: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  assertListAllComplete(parsed);
+  let items: PmItem[] = parsed.items ?? [];
   if (opts.statusFilter) items = items.filter((i) => i.status === opts.statusFilter);
   if (opts.typeFilter) items = items.filter((i) => i.type === opts.typeFilter);
 
@@ -3086,5 +3296,10 @@ export {
 // with synthetic results.
 // ---------------------------------------------------------------------------
 export { loadAppliedByTransaction, itemStatus, compensateCreate };
+// list-all completeness surface: the shared refusal gate plus the two internal
+// readers whose silently-partial behavior the regression tests pin. Exported
+// ONLY for those tests; production callers keep using the command paths.
+export { loadKeyIndex, buildCsvExport };
+export type { CsvExportOptions };
 // `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };
