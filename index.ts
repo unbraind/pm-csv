@@ -1722,6 +1722,14 @@ async function importCSVAtomic(
     return result;
   }
 
+  const commitTransaction = opts.commitTransaction;
+  if (!commitTransaction) {
+    throw new CommandError(
+      "--atomic requires the host-injected commitWorkspaceTransaction SDK primitive. Upgrade the pm CLI and invoke pm-csv through the pm host.",
+      EXIT_CODE.USAGE,
+    );
+  }
+
   // Fingerprint the exact parsed content (raw headers + all data rows) so that
   // editing the file in place yields a fresh transaction id instead of reusing
   // stale per-row markers from a previous import of different content.
@@ -1858,14 +1866,6 @@ async function importCSVAtomic(
     };
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
-
-  const commitTransaction = opts.commitTransaction;
-  if (!commitTransaction) {
-    throw new CommandError(
-      "--atomic requires the host-injected commitWorkspaceTransaction SDK primitive. Upgrade the pm CLI and invoke pm-csv through the pm host.",
-      EXIT_CODE.USAGE,
-    );
-  }
 
   let committed: WorkspaceTransactionCommitResult;
   try {

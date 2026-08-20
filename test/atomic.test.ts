@@ -300,10 +300,11 @@ test("--atomic refuses an incompatible host that omits the transaction SDK", asy
   try {
     const file = join(root, "one.csv");
     writeFileSync(file, "title\nOne\n", "utf8");
+    const missingTracker = join(root, "missing-tracker");
     const command = captureCommands().find((candidate) => candidate.name === "csv import");
     assert.ok(command, "csv import command should be registered");
     await assert.rejects(
-      command.run({ pm_root: root, args: [file], options: { atomic: true } } satisfies RunCtx),
+      command.run({ pm_root: missingTracker, args: [file], options: { atomic: true } } satisfies RunCtx),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes("host-injected commitWorkspaceTransaction SDK primitive"),

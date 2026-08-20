@@ -318,6 +318,14 @@ test("all whole-tracker readers classify process and parse failures without inve
       () => buildCsvExport(pmRoot, EXPORT_OPTS, errored),
       code === "ENOBUFS" ? /read buffer/u : /synthetic ENOENT/u,
     );
+    assert.throws(
+      () => loadKeyIndex(pmRoot, errored),
+      code === "ENOBUFS" ? /stdout buffer/u : /synthetic ENOENT/u,
+    );
+    assert.throws(
+      () => loadAppliedByTransaction(pmRoot, "csv-import-deadbeef", errored),
+      code === "ENOBUFS" ? /stdout buffer/u : /synthetic ENOENT/u,
+    );
   }
 });
 
