@@ -1037,12 +1037,14 @@ interface CsvImportOptions {
   /** Stream the file row-by-row instead of loading it fully into memory. */
   stream?: boolean;
   /**
-   * Import all creates atomically under one workspace writer-locked,
-   * crash-recoverable transaction (pm-cli >= 2026.7.19
-   * `commitWorkspaceTransaction`). On failure every applied create is
-   * compensated (closed) and the tracker is left with no committed items from
-   * this import; an interrupted run resumes from the durable journal.
-   * Incompatible with `--stream` (an unbounded stream cannot be one transaction).
+   * Import under one workspace writer-locked, crash-recoverable transaction
+   * (pm-cli >= 2026.7.19 `commitWorkspaceTransaction`). On failure the
+   * coordinator attempts reverse-order, best-effort create compensation;
+   * pre-existing item updates are intentionally not reverted. An interrupted
+   * run resumes from the durable journal, while a failed compensation remains
+   * transaction-marked so an operator can inspect and reconcile it before a
+   * retry. Incompatible with `--stream` (an unbounded stream cannot be one
+   * transaction).
    */
   atomic?: boolean;
   /**
@@ -1414,7 +1416,7 @@ function processImportRows(
  * Import CSV rows into a pm tracker as items.
  *
  * Rejects rather than throws when `--atomic` is combined with `--stream`: the
- * two are genuinely incompatible, because an all-or-nothing commit needs the
+ * two are genuinely incompatible, because a bounded transaction plan needs the
  * whole row set in hand and a stream is unbounded. Returning a rejected promise
  * keeps the failure on the same channel as the rest of the async path.
  *
@@ -1428,7 +1430,7 @@ function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Pr
   if (opts.atomic && opts.stream) {
     return Promise.reject(
       new CommandError(
-        "--atomic cannot be combined with --stream: an unbounded stream cannot be committed as one all-or-nothing transaction.",
+        "--atomic cannot be combined with --stream: an unbounded stream cannot be committed as one bounded transaction.",
         EXIT_CODE.USAGE,
       ),
     );
@@ -1627,18 +1629,19 @@ function itemStatus(pmRoot: string, id: string, spawn: PmSpawn = spawnPm): ItemS
 }
 
 /**
- * Idempotently undo one row's create. First STRIPS this transaction's ownership
- * markers (`markers`) from the item, then closes it via `pm close` (NOT delete,
- * to avoid the known history-resurrection issue) when it is still open.
+ * Idempotently undo one row's create. First closes a still-open item via
+ * `pm close` (NOT delete, to avoid the known history-resurrection issue), then
+ * strips this transaction's ownership markers (`markers`) only after the item
+ * is confirmed closed.
  *
- * Stripping the markers is what makes marker-presence a correct "applied"
- * signal: a rolled-back row no longer carries a marker, so a post-rollback
- * retry re-imports it, while a *successfully* imported row (even one whose CSV
- * status is `closed`/`canceled`) keeps its marker and is resumed idempotently.
- * The strip runs whether the item is open or already closed (a closed-status
- * create being rolled back must also lose its marker); the close only runs for
- * a still-open item. Every step tolerates a missing item / absent tag, so a
- * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
+ * Stripping the markers after closure makes marker-presence a correct
+ * reconciliation signal: a compensated row no longer carries a marker, so a
+ * post-rollback retry re-imports it, while a *successfully* imported row (even
+ * one whose CSV status is `closed`/`canceled`) keeps its marker and is resumed
+ * idempotently. If the close fails, the markers deliberately remain so the open
+ * orphan can be found by transaction id and reconciled before retrying. The
+ * strip also runs for an item that was already closed; every step tolerates a
+ * missing item / absent tag, so repeated compensation is a safe no-op.
  *
  * The status lookup itself is also tolerated: if `itemStatus` throws (a stdout
  * overrun or a signal kill on the `pm get`), the throw is caught and this row's
@@ -1667,30 +1670,35 @@ function compensateCreate(
     return; // status lookup overran/killed: no-op for this row, sweep continues
   }
   if (status === undefined) return; // item no longer exists
+  if (status !== "closed") {
+    // Compensation is an internal rollback, not a user closure: it must
+    // reliably undo the create regardless of closure-validation governance, so
+    // it bypasses `--validate-close` (off). `require_close_reason` still applies
+    // and is satisfied by `reason`. Used by both the atomic transaction path
+    // (rollback) and the non-atomic `upsertCreate` close-failure path.
+    const closeResult = spawnSync(
+      "pm",
+      ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
+      { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
+    );
+    if (closeResult.status !== 0) {
+      // Keep both ownership markers on a still-open orphan so transaction-id
+      // reconciliation can locate it. A non-zero receipt is not proof that the
+      // item became terminal, so cleanup must wait for a later confirmed status
+      // even when the host reports an invalid-state/already-closed conflict.
+      console.error(`atomic import: compensation close failed for ${id}: ${closeResult.stderr?.trim() || closeResult.stdout?.trim()}`);
+      return;
+    }
+  }
   if (markers.length > 0) {
-    // Best-effort: remove the tx markers so this row is no longer "applied".
-    spawnSync(
+    const markerCleanup = spawnSync(
       "pm",
       ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
-  }
-  if (status === "closed") return; // terminal already; markers stripped above
-  // Compensation is an internal rollback, not a user closure: it must reliably
-  // undo the create regardless of closure-validation governance, so it bypasses
-  // `--validate-close` (off). `require_close_reason` still applies and is
-  // satisfied by `reason`. Without this a strict tracker would block the
-  // rollback and leave the orphan open — the very leak compensation exists to
-  // prevent. Used by both the atomic transaction path (rollback) and the
-  // non-atomic `upsertCreate` close-failure path.
-  const r = spawnSync(
-    "pm",
-    ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
-    { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
-  );
-  if (r.status !== 0 && r.status !== 4) {
-    // Exit 4 is "already closed" / invalid state — treat as already compensated.
-    console.error(`atomic import: compensation close failed for ${id}: ${r.stderr?.trim() || r.stdout?.trim()}`);
+    if (markerCleanup.status !== 0) {
+      console.error(`atomic import: compensation marker cleanup failed for ${id}: ${markerCleanup.stderr?.trim() || markerCleanup.stdout?.trim()}`);
+    }
   }
 }
 
@@ -1808,8 +1816,8 @@ async function importCSVAtomic(
   //     compensate() closes the created id.
   //   - update (--key match): apply() updates the pre-existing item and stamps
   //     both markers; compensate() is a no-op (an arbitrary update cannot be
-  //     safely reverted without capturing prior state, and the spec scopes
-  //     all-or-nothing compensation to creates).
+  //     safely reverted without capturing prior state; best-effort
+  //     compensation is therefore scoped to creates).
   //
   // Resume/compensation matching is per-row-precise via the per-row marker
   // (csv-txrow:<transactionId>#<rowIndex>), so duplicate titles or duplicate
@@ -2007,7 +2015,8 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
  *      open item is left behind in this one unrecoverable case.
  *   2. `pm close` failed after the item was persisted as open. The orphan is
  *      compensated (closed) via {@link compensateCreate} with `--validate-close
- *      off`, so a failed row is all-or-nothing and a retry re-imports it. If
+ *      off`, so a verified cleanup leaves no open orphan and a retry re-imports
+ *      it. If
  *      compensation also fails, the thrown error carries the created id and
  *      states the item was left open, so the partial state is actionable and a
  *      retry can reconcile it.
@@ -2129,8 +2138,8 @@ function upsertCreate(
     // way, and the id is already known so nothing is stranded.
     if (cr.status !== 0) {
       // (2) The close failed but the item is already persisted as open.
-      // Compensate (close) the orphan so a failed row is all-or-nothing and a
-      // retry without --key-field cannot duplicate an undiscoverable open item.
+      // Compensate (close) the orphan so a verified cleanup leaves no open item
+      // that a retry without --key-field could duplicate.
       // Compensation bypasses closure-validation governance (it is a rollback,
       // not a user closure) so a strict tracker cannot block the cleanup.
       compensateCreate(
@@ -2157,7 +2166,7 @@ function upsertCreate(
         );
       }
       throw new Error(
-        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed) so the failed row is all-or-nothing. ${closeErr}`,
+        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed), so no open orphan remains. ${closeErr}`,
       );
     }
   }
@@ -2865,7 +2874,7 @@ export default {
         "pm csv import items.csv --dry-run",
         "pm csv import headerless.csv --skip-headers   # no header row, positional columns",
         "pm csv import big.csv --stream   # stream large files without loading into memory",
-        "pm csv import tasks.csv --atomic # all-or-nothing import (pm-cli >= 2026.7.19)",
+        "pm csv import tasks.csv --atomic # writer-locked, crash-recoverable import",
       ],
       flags: [
         { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
@@ -2881,7 +2890,7 @@ export default {
         { long: "--dry-run", description: "Preview without writing" },
         { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order (title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by)" },
         { long: "--stream", description: "Stream the file row-by-row instead of loading it fully into memory (recommended for large CSV files)" },
-        { long: "--atomic", description: "Import all creates atomically under one workspace writer-locked, crash-recoverable transaction (pm-cli >= 2026.7.19). On failure every applied create is compensated (closed); interrupted runs resume. Incompatible with --stream" },
+        { long: "--atomic", description: "Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing item updates are intentionally not reverted. Inspect and reconcile any marked orphan before retrying. Incompatible with --stream" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;

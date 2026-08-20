@@ -1,0 +1,42 @@
+id: pm-csv-qebc
+title: Failed atomic create compensation erases orphan reconciliation markers
+description: "Greptile's exact-head review of PR 73 found that compensateCreate removed csv-tx and csv-txrow ownership markers before attempting pm close. If close then failed, the item remained open but could no longer be located by transaction id. Close first, preserve markers on any failed close, clean markers only after confirmed terminal state, and make the public atomic contract disclose best-effort compensation and reconciliation."
+type: Issue
+status: closed
+priority: 1
+tags[4]: atomic,compensation,reconciliation,review
+created_at: "2026-08-20T20:05:53.614Z"
+updated_at: "2026-08-20T20:12:59.876Z"
+closed_at: "2026-08-20T20:08:47.032Z"
+completed_at: "2026-08-20T20:08:47.032Z"
+author: codex
+estimated_minutes: 75
+acceptance_criteria: "A red regression proves failed close preserves both transaction markers; Compensation closes before removing markers; No nonzero close receipt, including exit 4, is treated as proof of closure; A marker-cleanup failure is logged and leaves a closed marked item discoverable; Public README, option type, example, and flag describe best-effort compensation, intentionally non-reverted pre-existing updates, and inspect-and-reconcile guidance; npm run release:check passes exact 100/100/100/100 coverage and every repository-owned quality gate; strict workspace health reports the separately tracked published pm-github manifest blocker"
+risk: high
+confidence: high
+severity: critical
+repro_steps: "Create a transaction-marked item, force pm close to fail, call compensateCreate, then inspect the still-open item tags."
+resolution: "Close an open item before removing csv-tx ownership markers; return with markers intact on close failure, and report marker cleanup failure after a successful or already-terminal close. Align README and extension metadata with best-effort compensation and explicit reconciliation."
+expected_result: A failed close leaves the open item transaction-marked and discoverable; successful or already-closed compensation removes the markers; public docs require reconciliation.
+actual_result: "The implementation now closes first, preserves both markers on failed close, logs failed marker cleanup while leaving a closed marked item discoverable, and removes all atomic all-or-nothing promises from public contracts."
+affected_version: 2026.8.16
+fixed_version: unreleased
+component: atomic-import
+regression: true
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-71zg,related,"2026-08-20T20:05:53.614Z",codex,review,detected
+notes[3]{created_at,author,text}:
+  "2026-08-20T20:08:46.596Z",codex,"TDD evidence: focused regression suite first failed against the old marker order and stale docs,then passed all three close-failure,cleanup-failure,and public-contract cases."
+  "2026-08-20T20:09:25.815Z",codex,"text=Independent strict-workspace-health receipt: pm health --strict-exit remains gate-failing only because the separately published pm-github package installed in this tracker still has obsolete manifest key pm. pm-csv source compatibility, release:check, storage integrity, history drift, merge drivers, and dry-run reconciliation are green. This external publication blocker is tracked in the ecosystem companion and must not be reported as pm-csv approval."
+  "2026-08-20T20:10:30.603Z",codex,"A nonzero close receipt is now handled conservatively regardless of code: focused exit-4 simulation leaves the open item and both transaction markers intact for reconciliation."
+learnings[1]{created_at,author,text}:
+  "2026-08-20T20:08:46.596Z",codex,Compensation identity must remain durable until the compensating mutation is confirmed; erasing reconciliation markers before close converts a visible partial failure into an undiscoverable orphan.
+files[2]{path,scope,note}:
+  index.ts,project,close-before-marker-cleanup compensation
+  test/atomic.test.ts,project,failed close and marker cleanup regressions
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,note}:
+  "npm run release:check",package.json,project,300,tracker,exact full release gate
+docs[1]{path,scope,note}:
+  README.md,project,truthful atomic compensation contract
+close_reason: "Greptile and CodeRabbit P1 findings fixed with TDD. npm run release:check passes 172 tests at exact 100.00/100.00/100.00 coverage, 62 documented declarations, zero clones, zero production vulnerabilities, clean package output, and current changelog. Strict workspace health remains independently blocked by the separately published pm-github manifest tracked in the ecosystem companion."
+body: ""

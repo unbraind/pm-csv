@@ -42,7 +42,7 @@ pm csv import legacy.csv --encoding latin1  # non-UTF-8 source
 pm csv import sprint12.csv --source 'jira-export-2026-06'
 pm csv import vendor.csv --strict       # fail before writing on bad row data
 pm csv import items.csv --dry-run
-pm csv import tasks.csv --atomic   # all-or-nothing import (pm-cli >= 2026.7.19)
+pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 ```
 
 **Flags**
@@ -60,7 +60,7 @@ pm csv import tasks.csv --atomic   # all-or-nothing import (pm-cli >= 2026.7.19)
 | `--priority <n>` | integer | — | Import **only** rows whose integer priority equals this value |
 | `--strict` | boolean | false | Abort before writing if validation finds missing titles, unknown statuses, invalid/out-of-range priorities, or duplicate mapped columns |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
-| `--atomic` | boolean | false | Import all creates atomically under one workspace writer-locked, crash-recoverable transaction (pm-cli >= 2026.7.19). On failure every applied create is compensated (closed); interrupted runs resume. Incompatible with `--stream` |
+| `--atomic` | boolean | false | Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing item updates are intentionally not reverted. Inspect and reconcile any marked orphan before retrying. Incompatible with `--stream` |
 
 #### Strict import gate
 
@@ -71,22 +71,26 @@ strict mode the importer runs the same parser as `pm csv validate` before any
 write, then aborts on row-level data issues or duplicate mapped columns so a bad
 file cannot partially mutate the pm store.
 
-#### Atomic, all-or-nothing import (`--atomic`)
+#### Atomic, crash-recoverable import (`--atomic`)
 
 By default, `csv import` creates items one row at a time. If a row fails
 mid-import, the rows already written stay in the tracker — a partial,
 non-atomic state — and concurrent agents can interleave writes. `--atomic`
 (requires pm-cli **>= 2026.7.19**) wraps the whole row set in a single
-`commitWorkspaceTransaction` primitive: all creates are committed under one
-workspace writer-locked, crash-recoverable journal, or none are.
+`commitWorkspaceTransaction` primitive: mutations are serialized under one
+workspace writer lock and recorded in a crash-recoverable journal.
 
-- **All-or-nothing:** if any row's `pm create` fails, every already-applied
-  create is compensated (closed with `reason "atomic csv import rolled back"`),
-  the transaction is rolled back, and the command exits non-zero with a clear
-  message. No committed (open) items from the import remain in the tracker.
+- **Failure compensation:** if any row fails, the coordinator attempts
+  reverse-order, best-effort compensation for creates by closing them with
+  reason `atomic csv import rolled back`, rolls back the transaction journal,
+  and exits non-zero with a reconciliation warning. A failed close deliberately
+  retains both transaction markers so an operator can inspect and reconcile the
+  open orphan by transaction id before retrying. Pre-existing item updates are
+  intentionally not reverted because arbitrary prior state is not captured.
 - **Crash-recoverable / resumable:** the transaction id is stable and derivable
-  from the absolute file path (`csv-import-<sha1(absPath)>`), so re-running the
-  same `--atomic` import against the same file resumes from the durable journal.
+  from the resolved file path and parsed content fingerprint, so re-running the
+  same unchanged `--atomic` import resumes from the durable journal while edited
+  content receives a fresh transaction id.
   Resume/compensation matching is **per-row-precise**: every item this
   transaction writes is stamped with a per-row ownership marker
   `csv-txrow:<transactionId>#<rowIndex>` (plus a batch-level
@@ -105,17 +109,18 @@ workspace writer-locked, crash-recoverable journal, or none are.
 - **Parity:** `--atomic` shells out to the same `pm create` the non-atomic path
   uses; without `--atomic`, import output and exit codes are unchanged.
 - **Incompatible with `--stream`:** an unbounded stream cannot be committed as
-  one all-or-nothing transaction, so `--atomic --stream` fails fast with a usage
+  one bounded transaction, so `--atomic --stream` fails fast with a usage
   error.
 - **Compensation uses `close`, not `delete`**, to avoid the known history-
   resurrection issue, so compensated items remain in the tracker as closed
   items rather than being erased. For `--key` upsert rows that update
   pre-existing items, the update is applied within the transaction but is not
   reverted on failure (an arbitrary update cannot be safely undone without
-  capturing prior state); all-or-nothing compensation applies to creates.
+  capturing prior state). Compensation is best-effort and reports remaining
+  work for operator reconciliation.
 
 ```bash
-pm csv import tasks.csv --atomic            # all-or-nothing; resumes if interrupted
+pm csv import tasks.csv --atomic            # resumes an unchanged interrupted import
 pm csv import tasks.csv --atomic --source q2 # provenance still recorded
 ```
 

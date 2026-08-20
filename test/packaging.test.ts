@@ -32,6 +32,12 @@ const extensionManifest = JSON.parse(
   readFileSync(new URL("../manifest.json", import.meta.url), "utf8"),
 ) as ExtensionManifestDocument;
 
+/** Public documentation whose atomic guarantees must match runtime recovery behavior. */
+const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+
+/** Authoring surface containing the SDK option and registered flag descriptions. */
+const extensionSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+
 /** The host CLI package whose placement in the manifest this suite governs. */
 const HOST_CLI = "@unbrained/pm-cli";
 
@@ -214,4 +220,14 @@ test("whole-tracker changelog scripts explicitly disable every pm output bound",
       `${name} must disable pm's row limit before reading the complete tracker`,
     );
   }
+});
+
+test("public atomic contracts disclose best-effort compensation and reconciliation", () => {
+  const publicContract = `${readme}\n${extensionSource}`;
+  assert.doesNotMatch(publicContract, /all-or-nothing/u);
+  assert.doesNotMatch(publicContract, /every applied create is compensated/u);
+  assert.doesNotMatch(publicContract, /No committed \(open\) items from the import remain/u);
+  assert.match(publicContract, /best-effort/u);
+  assert.match(publicContract, /pre-existing item updates are intentionally not reverted/u);
+  assert.match(publicContract, /inspect and reconcile/u);
 });

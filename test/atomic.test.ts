@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 
-import extension, { atomicTransactionId } from "../index.ts";
+import extension, { atomicTransactionId, compensateCreate } from "../index.ts";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the `--atomic` CSV import path (pm-cli >= 2026.7.19
@@ -166,6 +166,8 @@ function realPmPath(): string {
  *     recovered". No real item is created.
  *   - `<root>/fake-close-fail`: every `pm close ...` exits 1 with a simulated
  *     error, to exercise the close-failure / compensation paths.
+ *   - `<root>/fake-close-conflict`: every `pm close ...` exits 4 while leaving
+ *     the item open, proving an invalid-state receipt is not closure evidence.
  *   - `<root>/fake-create-kill`: `pm create --json` is terminated by SIGKILL
  *     before it writes anything (no output, no persisted item), so spawnSync
  *     reports `status: null`, `signal: "SIGKILL"`, no `error`, empty `stdout` —
@@ -207,6 +209,10 @@ function installFakePm(): () => void {
     "if (root && existsSync(root + '/fake-close-fail') && has('close')) {",
     "  process.stderr.write('simulated pm close failure (test)\\n');",
     "  process.exit(1);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-conflict') && has('close')) {",
+    "  process.stderr.write('simulated pm close conflict (test)\\n');",
+    "  process.exit(4);",
     "}",
     // Makes the status LOOKUP itself fail, so itemStatus() returns undefined.
     // An unknown status must never be read as proof that compensation worked.
@@ -310,6 +316,84 @@ test("--atomic refuses an incompatible host that omits the transaction SDK", asy
         error.message.includes("host-injected commitWorkspaceTransaction SDK primitive"),
     );
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed create compensation preserves transaction markers for reconciliation", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-reconcile";
+  const rowTag = "csv-txrow:csv-import-reconcile#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Recoverable orphan", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-fail"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the failed compensation target remains inspectable");
+    assert.equal(item.status, "open", "the simulated close failure leaves the item open");
+    assert.ok(item.tags?.includes(transactionTag), "the batch marker must remain on an open orphan");
+    assert.ok(item.tags?.includes(rowTag), "the row marker must remain on an open orphan");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed marker cleanup leaves a closed transaction-marked item for reconciliation", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-cleanup";
+  const rowTag = "csv-txrow:csv-import-cleanup#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Closed marked compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-update-fail"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the marker-cleanup target remains inspectable");
+    assert.equal(item.status, "closed", "compensation closes the item before marker cleanup");
+    assert.ok(item.tags?.includes(transactionTag), "a failed cleanup retains the batch marker");
+    assert.ok(item.tags?.includes(rowTag), "a failed cleanup retains the row marker");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a nonzero close conflict is not treated as proof that compensation closed the item", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-conflict";
+  const rowTag = "csv-txrow:csv-import-conflict#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Conflicted compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-conflict"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the conflict target remains inspectable");
+    assert.equal(item.status, "open", "a nonzero close receipt does not prove closure");
+    assert.ok(item.tags?.includes(transactionTag), "the batch marker survives the conflict");
+    assert.ok(item.tags?.includes(rowTag), "the row marker survives the conflict");
+  } finally {
+    restorePm();
     rmSync(root, { recursive: true, force: true });
   }
 });
