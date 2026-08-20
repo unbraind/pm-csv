@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Enforce exact all-source 100/100/100 coverage ([pm-csv-oqmm](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-oqmm.toon))
+
+### Fixed
+
+- Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
+- Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
+- Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
@@ -248,7 +260,3 @@
 ### Fixed
 
 - ci: fix release workflow step ordering ([pm-csv-qnmk](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-qnmk.toon))
-
-### Other
-
-- Release readiness hardening for pm-csv ([pm-csv-1pty](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-1pty.toon))

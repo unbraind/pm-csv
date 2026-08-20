@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { checkExtensionManifestCompatibility } from "@unbrained/pm-cli/sdk/authoring";
+
 /**
  * Shape of the fields this suite asserts on. Only the three dependency maps
  * matter here; the rest of the manifest is deliberately not modelled so an
@@ -11,12 +13,24 @@ interface DependencyManifest {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly devDependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly scripts?: Readonly<Record<string, string>>;
+}
+
+/** Untrusted extension-manifest JSON narrowed only where an assertion needs it. */
+interface ExtensionManifestDocument {
+  readonly pm_min_version?: unknown;
+  readonly [key: string]: unknown;
 }
 
 /** The published manifest, read from disk rather than imported so the assertions run against the same bytes npm publishes. */
 const manifest = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as DependencyManifest;
+
+/** The exact extension manifest bytes included in the published package. */
+const extensionManifest = JSON.parse(
+  readFileSync(new URL("../manifest.json", import.meta.url), "utf8"),
+) as ExtensionManifestDocument;
 
 /** The host CLI package whose placement in the manifest this suite governs. */
 const HOST_CLI = "@unbrained/pm-cli";
@@ -155,4 +169,49 @@ test("the host CLI dev dependency is pinned to an exact version at or above the 
     compareVersions(declared, peer.replace(/^>=/, "")) >= 0,
     `${HOST_CLI} dev pin ${declared} must be at or above the declared peer floor ${peer}: gating against a CLI older than the floor this package advertises would make that floor an untested claim`,
   );
+});
+
+test("the extension manifest declares the same floor enforced by the peer dependency", () => {
+  const peer = manifest.peerDependencies?.[HOST_CLI];
+  assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency`);
+  const declared = extensionManifest.pm_min_version;
+  assert.strictEqual(
+    typeof declared,
+    "string",
+    "manifest.json must declare the top-level pm_min_version enforced by the host CLI",
+  );
+  assert.strictEqual(
+    declared,
+    peer.replace(/^>=/, ""),
+    "manifest.json and package.json must advertise one compatibility floor",
+  );
+});
+
+test("the complete published extension manifest satisfies the current SDK contract", () => {
+  const dev = manifest.devDependencies?.[HOST_CLI];
+  assert.ok(dev, `${HOST_CLI} must be a devDependency so the manifest has a tested host version`);
+  const result = checkExtensionManifestCompatibility(extensionManifest, { pmVersion: dev });
+  assert.equal(result.compatible, true, "the declared version bounds must accept the pinned host CLI");
+  assert.deepEqual(
+    result.findings,
+    [],
+    `manifest.json must contain only current SDK-supported keys and valid bounds: ${JSON.stringify(result.findings)}`,
+  );
+});
+
+test("whole-tracker changelog scripts explicitly disable every pm output bound", () => {
+  for (const name of ["changelog:full", "release:notes"]) {
+    const script = manifest.scripts?.[name];
+    assert.ok(script, `package.json must declare ${name}`);
+    assert.match(
+      script,
+      /--pm-arg=--output-budget\s+--pm-arg=unbounded/u,
+      `${name} must disable pm's token budget before reading the complete tracker`,
+    );
+    assert.match(
+      script,
+      /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
+      `${name} must disable pm's row limit before reading the complete tracker`,
+    );
+  }
 });

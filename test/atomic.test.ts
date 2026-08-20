@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
+import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+
 import extension, { atomicTransactionId } from "../index.ts";
 
 // ---------------------------------------------------------------------------
@@ -28,12 +31,46 @@ interface RunCtx {
   sdk?: { commitWorkspaceTransaction?: unknown };
 }
 
+/** Minimal command definition retained by the focused atomic integration harness. */
+interface CapturedCommand {
+  name: string;
+  flags?: Array<{ long: string }>;
+  run(context: RunCtx): Promise<ImportCommandResult>;
+}
+
+/** Structured import receipt returned by the csv import command. */
+interface ImportCommandResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+/** Item fields inspected by the atomic integration assertions. */
+interface ListedItem {
+  id: string;
+  title: string;
+  status: string;
+  priority?: number;
+  tags?: string[];
+}
+
+/** Command failure shape exposed by package command errors. */
+interface CommandFailure extends Error {
+  exitCode?: number;
+}
+
+/** Success or failure from invoking the captured import handler. */
+type ImportOutcome =
+  | { result: ImportCommandResult; error?: never }
+  | { result?: never; error: CommandFailure };
+
 /** Activate the extension against a mock api, returning the registered commands. */
-function captureCommands(): any[] {
-  const commands: any[] = [];
+function captureCommands(): CapturedCommand[] {
+  const commands: CapturedCommand[] = [];
   const noop = () => {};
   const api = {
-    registerCommand: (def: any) => commands.push(def),
+    registerCommand: (def: CapturedCommand) => commands.push(def),
     registerParser: noop,
     registerPreflight: noop,
     registerService: noop,
@@ -54,7 +91,7 @@ function captureCommands(): any[] {
       onIndex: noop,
     },
   };
-  extension.activate(api as any);
+  extension.activate(api as unknown as ExtensionApi);
   return commands;
 }
 
@@ -72,13 +109,13 @@ function freshTracker(): string {
 }
 
 /** List all items in a tracker as JSON. */
-function listItems(pmRoot: string): any[] {
+function listItems(pmRoot: string): ListedItem[] {
   const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
     encoding: "utf-8",
     maxBuffer: 16 * 1024 * 1024,
   });
   if (r.status !== 0) throw new Error(`pm list-all failed: ${r.stderr}`);
-  return (JSON.parse(r.stdout).items ?? []) as any[];
+  return (JSON.parse(r.stdout) as { items?: ListedItem[] }).items ?? [];
 }
 
 /** Run the `csv import` command handler and return { result?, error? }. */
@@ -86,7 +123,7 @@ async function runImport(
   pmRoot: string,
   file: string,
   options: Record<string, unknown>,
-): Promise<{ result?: any; error?: Error }> {
+): Promise<ImportOutcome> {
   const commands = captureCommands();
   const cmd = commands.find((c) => c.name === "csv import");
   assert.ok(cmd, "csv import command should be registered");
@@ -95,12 +132,16 @@ async function runImport(
     args: [file],
     options,
     global: { author: "pi-agent" },
+    sdk: {
+      commitWorkspaceTransaction: (options: Parameters<typeof commitWorkspaceTransaction>[0]) =>
+        commitWorkspaceTransaction({ ...options, pmRoot }),
+    },
   };
   try {
     const result = await cmd.run(ctx);
     return { result };
   } catch (err) {
-    return { error: err as Error };
+    return { error: err as CommandFailure };
   }
 }
 
@@ -250,8 +291,26 @@ test("csv import declares --atomic flag", () => {
   const commands = captureCommands();
   const importCmd = commands.find((c) => c.name === "csv import");
   assert.ok(importCmd, "csv import command should be registered");
-  const longs = (importCmd.flags ?? []).map((f: any) => f.long);
+  const longs = (importCmd.flags ?? []).map((flag) => flag.long);
   assert.ok(longs.includes("--atomic"), "csv import should expose --atomic");
+});
+
+test("--atomic refuses an incompatible host that omits the transaction SDK", async () => {
+  const root = freshTracker();
+  try {
+    const file = join(root, "one.csv");
+    writeFileSync(file, "title\nOne\n", "utf8");
+    const command = captureCommands().find((candidate) => candidate.name === "csv import");
+    assert.ok(command, "csv import command should be registered");
+    await assert.rejects(
+      command.run({ pm_root: root, args: [file], options: { atomic: true } } satisfies RunCtx),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("host-injected commitWorkspaceTransaction SDK primitive"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("--atomic happy path: N valid rows create N items with correct ImportResult", async () => {
@@ -286,7 +345,7 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
     const { result, error } = await runImport(root, file, { atomic: true });
     // Atomic failure surfaces as a non-zero exit (CommandError), no result.
     assert.ok(error, "atomic import with a failing row should error");
-    assert.equal((error as any).exitCode, 1, "exit code should be 1");
+    assert.equal(error.exitCode, 1, "exit code should be 1");
     assert.match(
       error!.message,
       /rolled back/i,
@@ -430,7 +489,7 @@ test("--atomic combined with --stream fails fast with a clear usage error", asyn
   try {
     const { error } = await runImport(root, file, { atomic: true, stream: true });
     assert.ok(error, "--atomic + --stream should error");
-    assert.equal((error as any).exitCode, 2, "usage error exit code");
+    assert.equal(error.exitCode, 2, "usage error exit code");
     assert.match(error!.message, /--atomic cannot be combined with --stream/i);
   } finally {
     rmSync(root, { recursive: true, force: true });

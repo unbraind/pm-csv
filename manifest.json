@@ -10,8 +10,5 @@
     "commands",
     "importers",
     "schema"
-  ],
-  "pm": {
-    "compatibility": "v2"
-  }
+  ]
 }

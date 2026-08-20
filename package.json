@@ -25,14 +25,16 @@
     "test": "npm run build && npm run build:test && node --test test/*.test.ts",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck",
+    "check": "npm run typecheck && npm run lint && npm run duplicates",
+    "lint": "eslint --config scripts/eslint.config.ts --max-warnings=0 .",
+    "duplicates": "jscpd --config .jscpd.json",
     "audit:prod": "node --input-type=module -e \"import { spawnSync } from 'node:child_process'; import { devNull } from 'node:os'; const env = { ...process.env, npm_config_userconfig: devNull, NPM_CONFIG_USERCONFIG: devNull }; for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_config_allow_scripts') delete env[key]; const win = process.platform === 'win32'; const r = spawnSync(win ? 'npm.cmd' : 'npm', ['audit', '--omit=dev', '--ignore-scripts'], { stdio: 'inherit', env, shell: win }); process.exit(r.status ?? 1);\"",
     "pack:dry-run": "npm pack --dry-run",
-    "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release",
+    "changelog:full": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release",
     "changelog:check": "npm run changelog:full -- --check",
-    "release:check": "npm run typecheck && npm run docstring && npm run build && npm run coverage && npm run audit:prod && npm run pack:dry-run && npm run changelog:check",
+    "release:check": "npm run typecheck && npm run build && npm run lint && npm run duplicates && npm run docstring && npm run coverage && npm run audit:prod && npm run pack:dry-run && npm run changelog:check",
     "prepublishOnly": "npm run release:check",
-    "release:notes": "pm-changelog --pm-root .agents/pm --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release --pm-bin ./node_modules/.bin/pm --github-step-summary",
+    "release:notes": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release --pm-bin ./node_modules/.bin/pm --github-step-summary",
     "prepare": "node scripts/prepare-merge-driver.mjs",
     "merge:install": "pm merge install",
     "pm:validate": "pm validate --json",
@@ -48,9 +50,9 @@
       "test/*.test.ts"
     ],
     "thresholds": {
-      "lines": 81,
-      "branches": 74,
-      "functions": 88
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
     },
     "ignore": []
   },
@@ -58,8 +60,13 @@
     "@unbrained/pm-cli": ">=2026.8.15"
   },
   "devDependencies": {
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/plugin-syntax-typescript": "^8.0.3",
     "@types/node": "^26.1.1",
-    "@unbrained/pm-cli": "2026.8.15",
+    "@unbrained/pm-cli": "2026.8.20",
+    "eslint": "^10.8.1",
+    "jiti": "^2.7.0",
+    "jscpd": "^5.0.16",
     "pm-changelog": "^2026.8.6",
     "pm-ops": "2026.8.10",
     "typescript": "^7.0.2"

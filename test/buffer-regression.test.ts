@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { loadAppliedByTransaction, itemStatus, compensateCreate, describePmNullStatus } from "../index.ts";
+import {
+  loadAppliedByTransaction,
+  itemStatus,
+  compensateCreate,
+  describePmNullStatus,
+  type PmSpawn,
+} from "../index.ts";
 import type { SpawnSyncReturns } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -159,6 +165,17 @@ test("itemStatus still returns undefined for a genuinely absent item (non-zero e
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("itemStatus refuses to invent a status from malformed successful output", () => {
+  const malformed: PmSpawn = () => ({
+    status: 0,
+    stdout: "not json",
+    stderr: "",
+    pid: 1,
+    output: [],
+  }) as unknown as SpawnSyncReturns<string>;
+  assert.equal(itemStatus("unused", "pm-malformed", malformed), undefined);
 });
 
 test("loadAppliedByTransaction surfaces a buffer overrun as a named error, never a silent 'nothing applied'", () => {

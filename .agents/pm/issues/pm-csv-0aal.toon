@@ -1,0 +1,32 @@
+id: pm-csv-0aal
+title: Latest published manifest fails pm 2026.8.20 strict health
+description: "pm-csv 2026.8.16 still ships the legacy pm.compatibility object. The current host reports extension_manifest_unknown_key:project:pm-csv:key=pm and pm health --strict-exit fails even after installing the latest npm artifact. Remove only the inert legacy key after a complete-raw-manifest SDK regression test proves zero findings, update the development CLI/SDK to 2026.8.20, and validate a packed artifact in a fresh real host."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-20T18:43:49.717Z"
+updated_at: "2026-08-20T19:24:51.854Z"
+closed_at: "2026-08-20T19:24:51.841Z"
+completed_at: "2026-08-20T19:24:51.841Z"
+claim_principal: "harness:codex"
+author: "harness:codex"
+estimated_minutes: 120
+acceptance_criteria: "A regression test passes the complete raw manifest to the current public SDK and requires compatible true with zero findings; The manifest contains only current SDK-supported keys and keeps the enforced pm_min_version floor; A packed artifact installs and activates warning-free under pm 2026.8.20 in a fresh project; Release, coverage, docstring, duplication, vulnerability, PM, and privacy gates pass without lowering thresholds"
+severity: high
+environment: pm CLI 2026.8.20 with npm pm-csv 2026.8.16 installed in project scope
+repro_steps: "Install npm:pm-csv@2026.8.16 into a pm 2026.8.20 project and run pm health --strict-exit"
+resolution: Published manifest now contains only current supported keys and preserves pm_min_version.
+expected_result: pm 2026.8.20 compatibility check and strict extension health are green.
+actual_result: Complete manifest SDK regression and real project installation pass with zero extension findings.
+component: manifest
+notes[2]{created_at,author,text}:
+  "2026-08-20T18:44:35.822Z","harness:codex","TDD red evidence on pm SDK 2026.8.20: npm run build:test passed,then node --test test/packaging.test.ts failed only the new complete published manifest contract test. The SDK returned manifest_unknown_key at path pm with required pm and current 2026.8.20. The other dependency-floor and exact-pin assertions passed. This reproduces the installed-host strict-health failure from the exact package bytes before the fix."
+  "2026-08-20T19:24:51.436Z",codex,"GREEN: complete raw manifest passes the pm 2026.8.20 SDK compatibility contract with zero findings; project install plus pm health --strict-exit is clean apart from legacy tracker advisories."
+files[2]{path,scope,note}:
+  manifest.json,project,Published extension manifest contract
+  test/packaging.test.ts,project,Complete raw manifest and dependency floor regression tests
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode}:
+  node --test test/packaging.test.ts,test/packaging.test.ts,project,60,tracker
+close_reason: Removed obsolete pm.compatibility and verified current host activation.
+body: ""

@@ -374,44 +374,24 @@ function streamCSVFile(
 ): Promise<void> {
   const bufEnc: BufferEncoding = encoding === "utf-8" ? "utf8" : (encoding as BufferEncoding);
 
-  return new Promise<void>((resolve, reject) => {
+  return (async () => {
     const stream = createReadStream(filePath, { encoding: bufEnc });
     const parser = new StreamingCSVParser(delimiter, onRow);
-    let bomChecked = false;
-    let stopped = false;
-
-    const fail = (err: unknown) => {
-      if (stopped) return;
-      stopped = true;
-      stream.destroy();
-      reject(err);
-    };
-
-    stream.on("data", (chunk: Buffer | string) => {
-      if (stopped) return;
-      let text = typeof chunk === "string" ? chunk : chunk.toString(bufEnc);
-      if (!bomChecked) {
-        text = stripBOM(text);
-        bomChecked = true;
-      }
-      try {
+    let firstChunk = true;
+    try {
+      for await (const chunk of stream) {
+        // createReadStream was constructed with an encoding, so Node guarantees
+        // string chunks even though the broad async-iterator type retains Buffer.
+        const text = firstChunk ? stripBOM(chunk as string) : chunk as string;
+        firstChunk = false;
         parser.push(text);
-      } catch (err) {
-        fail(err);
       }
-    });
-    stream.on("end", () => {
-      if (stopped) return;
-      try {
-        parser.end();
-      } catch (err) {
-        fail(err);
-        return;
-      }
-      resolve();
-    });
-    stream.on("error", fail);
-  });
+      parser.end();
+    } catch (error: unknown) {
+      stream.destroy();
+      throw error;
+    }
+  })();
 }
 
 // ---------------------------------------------------------------------------
@@ -730,6 +710,11 @@ function decodeKeyTagValue(value: string): string {
   } catch {
     return value;
   }
+}
+
+/** Normalize JavaScript's open-ended thrown-value channel for operator errors. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -1062,9 +1047,9 @@ interface CsvImportOptions {
   atomic?: boolean;
   /**
    * Bound commit coordinator for the atomic path. Bound by the command path
-   * from the host-injected `ctx.sdk` (runtime-safe); the importer path resolves
-   * it via a dynamic `import("@unbrained/pm-cli/sdk")`. When `atomic` is set but
-   * this is absent, the atomic path dynamically imports the SDK itself.
+   * and importer capability from the host-injected `ctx.sdk`, so a copied
+   * extension never tries to resolve the host package through its own module
+   * tree. Atomic import refuses when an incompatible host omits this primitive.
    */
   commitTransaction?: (options: {
     transactionId: string;
@@ -1104,6 +1089,20 @@ interface ImportResult {
   previews: Record<string, unknown>[];
   /** Helpful warnings about unknown --map targets or missing source headers. */
   fieldMapWarnings: string[];
+}
+
+/** Create the canonical empty receipt shared by every CSV import engine. */
+function createImportResult(): ImportResult {
+  return {
+    imported: 0,
+    updated: 0,
+    skipped: 0,
+    filtered: 0,
+    autoMappings: [],
+    errors: [],
+    previews: [],
+    fieldMapWarnings: [],
+  };
 }
 
 interface ParsedRow {
@@ -1360,6 +1359,57 @@ function computeFieldMapWarnings(
   return warnings;
 }
 
+/** Resolve, validate, and report one raw import header set. */
+function resolveImportHeaders(
+  rawHeaders: string[],
+  opts: CsvImportOptions,
+): { headers: string[]; autoMappings: AutoFieldMapping[]; fieldMapWarnings: string[] } {
+  const fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
+  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
+  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
+  assertImportHeaders(headers, opts);
+  return { headers, autoMappings: mapResolution.autoMappings, fieldMapWarnings };
+}
+
+/** Read and resolve the shared in-memory prelude for normal and atomic imports. */
+function prepareInMemoryImport(
+  filePath: string,
+  opts: CsvImportOptions,
+): {
+  rawHeaders: string[];
+  dataRows: string[][];
+  result: ImportResult;
+  resolvedHeaders: ReturnType<typeof resolveImportHeaders> | undefined;
+} {
+  const { headers: rawHeaders, dataRows } = readCSVFile(
+    filePath,
+    opts.delimiter,
+    opts.encoding ?? "utf-8",
+    opts.skipHeaders ?? false,
+  );
+  return {
+    rawHeaders,
+    dataRows,
+    result: createImportResult(),
+    resolvedHeaders: rawHeaders.length > 0 ? resolveImportHeaders(rawHeaders, opts) : undefined,
+  };
+}
+
+/** Process one complete in-memory row set through the shared mutation core. */
+function processImportRows(
+  pmRoot: string,
+  dataRows: string[][],
+  headers: string[],
+  opts: CsvImportOptions,
+  result: ImportResult,
+): void {
+  const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
+  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+    const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
+    processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
+  }
+}
+
 /**
  * Import CSV rows into a pm tracker as items.
  *
@@ -1393,41 +1443,14 @@ function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Pr
  * every data row. Used when `--stream` is not set (the default).
  */
 function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOptions): ImportResult {
-  const { headers: rawHeaders, dataRows } = readCSVFile(
-    filePath,
-    opts.delimiter,
-    opts.encoding ?? "utf-8",
-    opts.skipHeaders ?? false,
-  );
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
+  const { dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  if (!resolvedHeaders) return result;
 
-  if (rawHeaders.length === 0) return result;
-
-  result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
-
-  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
-  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
-  result.autoMappings = mapResolution.autoMappings;
-
-  assertImportHeaders(headers, opts);
-
-  // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
-  const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map<string, string>();
-
-  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-    const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
-    processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
-  }
-
+  // Pre-load the dedup index whenever upserting, including dry-run: a preview
+  // that labels an existing key as a create is not a truthful preview.
+  result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+  result.autoMappings = resolvedHeaders.autoMappings;
+  processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
   return result;
 }
 
@@ -1588,8 +1611,8 @@ function loadAppliedByTransaction(
  * non-zero exit (item truly absent, or a failed lookup such as the
  * `fake-get-fail` regression) still returns `undefined` unchanged.
  */
-function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
-  const r = spawnSync("pm", ["--path", pmRoot, "get", id, "--json"], {
+function itemStatus(pmRoot: string, id: string, spawn: PmSpawn = spawnPm): ItemStatus | undefined {
+  const r = spawn(["--path", pmRoot, "get", id, "--json"], {
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
@@ -1686,39 +1709,15 @@ async function importCSVAtomic(
   filePath: string,
   opts: CsvImportOptions,
 ): Promise<ImportResult> {
-  const { headers: rawHeaders, dataRows } = readCSVFile(
-    filePath,
-    opts.delimiter,
-    opts.encoding ?? "utf-8",
-    opts.skipHeaders ?? false,
-  );
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
-
-  if (rawHeaders.length === 0) return result;
-
-  result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
-  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
-  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
-  result.autoMappings = mapResolution.autoMappings;
-  assertImportHeaders(headers, opts);
+  const { rawHeaders, dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  if (!resolvedHeaders) return result;
+  result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+  result.autoMappings = resolvedHeaders.autoMappings;
 
   // A dry-run atomic import just previews like the non-atomic path (no
   // transaction is committed, nothing is written).
   if (opts.dryRun) {
-    const keyIndex = new Map<string, string>();
-    for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-      const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
-      processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
-    }
+    processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
     return result;
   }
 
@@ -1761,7 +1760,7 @@ async function importCSVAtomic(
     const row = dataRows[rowIndex];
     // Compute the field accessor once and reuse for both `parsed` and the
     // --key value (previously rowFields() was called twice per row).
-    const { get, parsed } = rowFields(headers, row);
+    const { get, parsed } = rowFields(resolvedHeaders.headers, row);
 
     if (!parsed.title) {
       console.error(`Row ${lineNo}: skipping — 'title' is empty`);
@@ -1773,7 +1772,7 @@ async function importCSVAtomic(
       result.filtered++;
       continue;
     }
-    const keyValue = opts.keyField ? (get(opts.keyField) ?? "") : "";
+    const keyValue = opts.keyField ? get(opts.keyField) : "";
     const normalizedKey = keyValue ? normalizeKeyValue(keyValue) : "";
     // In-batch duplicate-key guard: an earlier planned CREATE in this run
     // already claimed this key. The first item does not exist yet at apply
@@ -1841,7 +1840,6 @@ async function importCSVAtomic(
         opts.source,
         ownershipTags,
       );
-      if (!newId) throw new Error(`pm create returned no id for row ${row.lineNo}`);
       appliedId = newId;
       return newId;
     };
@@ -1860,15 +1858,19 @@ async function importCSVAtomic(
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
 
-  const commitTransaction =
-    opts.commitTransaction ??
-    (await resolveCommitWorkspaceTransaction(pmRoot));
+  const commitTransaction = opts.commitTransaction;
+  if (!commitTransaction) {
+    throw new CommandError(
+      "--atomic requires the host-injected commitWorkspaceTransaction SDK primitive. Upgrade the pm CLI and invoke pm-csv through the pm host.",
+      EXIT_CODE.USAGE,
+    );
+  }
 
   let committed: WorkspaceTransactionCommitResult;
   try {
     committed = await commitTransaction({ transactionId, author, steps });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     // Every applied create has been compensated by the coordinator; no
     // committed items from this import remain in the tracker.
     throw new CommandError(
@@ -1895,91 +1897,13 @@ async function importCSVAtomic(
 }
 
 /**
- * Cached SDK commit coordinator. Resolved once per process via a dynamic
- * `import("@unbrained/pm-cli/sdk")` so repeated --atomic calls don't re-import.
- * `null` means a previous attempt failed and the failure is not retried within
- * this process (each CLI invocation is a fresh process, so this is safe).
- */
-let cachedCommitWorkspaceTransaction:
-  | ((options: {
-      pmRoot: string;
-      transactionId: string;
-      author: string;
-      steps: readonly WorkspaceTransactionStep[];
-      lockTtlSeconds?: number;
-      lockWaitMs?: number;
-    }) => Promise<WorkspaceTransactionCommitResult>)
-  | null
-  | undefined;
-
-/**
- * Dynamically resolve the SDK commit coordinator bound to a tracker root, for
- * the importer path (which has no host-injected `ctx.sdk`). Falls back to a
- * dynamic `import("@unbrained/pm-cli/sdk")` so a standalone-installed extension
- * still works when the SDK package is resolvable. The resolved function is
- * cached at module scope so repeated --atomic calls don't re-import. If the
- * import fails or `commitWorkspaceTransaction` is not exported, a clear,
- * actionable CommandError is thrown.
- */
-async function resolveCommitWorkspaceTransaction(
-  pmRoot: string,
-): Promise<(opts: {
-  transactionId: string;
-  author: string;
-  steps: readonly WorkspaceTransactionStep[];
-  lockTtlSeconds?: number;
-  lockWaitMs?: number;
-}) => Promise<WorkspaceTransactionCommitResult>> {
-  if (cachedCommitWorkspaceTransaction === null) {
-    throw new CommandError(
-      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but it could not be resolved (a prior attempt in this process failed). Ensure @unbrained/pm-cli is installed and up to date.",
-      EXIT_CODE.USAGE,
-    );
-  }
-  if (cachedCommitWorkspaceTransaction) {
-    const cached = cachedCommitWorkspaceTransaction;
-    return (opts) => cached({ pmRoot, ...opts });
-  }
-  let mod: typeof import("@unbrained/pm-cli/sdk");
-  try {
-    mod = await import("@unbrained/pm-cli/sdk");
-  } catch (err: unknown) {
-    cachedCommitWorkspaceTransaction = null;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new CommandError(
-      `--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the SDK could not be imported: ${msg}. Install or upgrade @unbrained/pm-cli.`,
-      EXIT_CODE.USAGE,
-    );
-  }
-  const commit = mod.commitWorkspaceTransaction;
-  if (typeof commit !== "function") {
-    cachedCommitWorkspaceTransaction = null;
-    throw new CommandError(
-      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the installed SDK does not export it as a function. Upgrade @unbrained/pm-cli to >=2026.7.19.",
-      EXIT_CODE.USAGE,
-    );
-  }
-  cachedCommitWorkspaceTransaction = commit;
-  return (opts) => commit({ pmRoot, ...opts });
-}
-
-/**
  * Streaming import: reads the file via a readable stream so large CSV files
  * are never fully loaded into memory. The header row (or positional
  * {@link IMPORT_COLUMNS} when `--skip-headers` is set) is resolved from the
  * first row, then every subsequent row is processed and upserted immediately.
  */
 async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
+  const result = createImportResult();
 
   let headers: string[] = [];
   let headerResolved = opts.skipHeaders ?? false;
@@ -1987,18 +1911,16 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
 
   if (headerResolved) {
     // --skip-headers: no header row in the file; use positional column order.
-    headers = [...IMPORT_COLUMNS];
-    result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
-    const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
-    headers = applyFieldMap(headers, mapResolution.fieldMap);
-    result.autoMappings = mapResolution.autoMappings;
-    assertImportHeaders(headers, opts);
+    const resolvedHeaders = resolveImportHeaders([...IMPORT_COLUMNS], opts);
+    headers = resolvedHeaders.headers;
+    result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+    result.autoMappings = resolvedHeaders.autoMappings;
   }
 
   // Load only after the input header has been validated so malformed input
   // reports its CSV error before any workspace lookup is attempted.
   let keyIndex = new Map<string, string>();
-  if (headerResolved && opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
+  if (headerResolved && opts.keyField) keyIndex = loadKeyIndex(pmRoot);
 
   await streamCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", (row: string[]) => {
     logicalRowIndex++;
@@ -2006,14 +1928,12 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
     if (!row.some((f) => f.trim() !== "")) return;
 
     if (!headerResolved) {
-      headers = row.map((h) => h.trim().toLowerCase());
-      result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
-      const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
-      headers = applyFieldMap(headers, mapResolution.fieldMap);
-      result.autoMappings = mapResolution.autoMappings;
-      assertImportHeaders(headers, opts);
+      const resolvedHeaders = resolveImportHeaders(row.map((header) => header.trim().toLowerCase()), opts);
+      headers = resolvedHeaders.headers;
+      result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+      result.autoMappings = resolvedHeaders.autoMappings;
       headerResolved = true;
-      if (opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
+      if (opts.keyField) keyIndex = loadKeyIndex(pmRoot);
       return;
     }
 
@@ -2035,6 +1955,15 @@ function appendRelationalArgs(args: string[], p: ParsedRow): void {
   if (p.sprint) args.push("--sprint", p.sprint);
   if (p.release) args.push("--release", p.release);
   if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
+}
+
+/** Append item fields shared by create and update mutation commands. */
+function appendMutableItemArgs(args: string[], p: ParsedRow, preserveEmptyBody: boolean): void {
+  if (preserveEmptyBody ? p.body !== undefined : Boolean(p.body)) args.push("--body", p.body ?? "");
+  if (p.priority !== undefined) args.push("--priority", String(p.priority));
+  if (p.type) args.push("--type", p.type);
+  if (p.deadline) args.push("--deadline", p.deadline);
+  appendRelationalArgs(args, p);
 }
 
 /**
@@ -2080,9 +2009,8 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
  *      states the item was left open, so the partial state is actionable and a
  *      retry can reconcile it.
  *
- * For a `closed` row, an empty id is therefore a hard error, not a silent
- * return; the empty-string return only happens for non-closed rows whose
- * `pm create` reported no id.
+ * An id-less successful receipt is therefore a hard error for every status,
+ * never a silent successful import.
  */
 function upsertCreate(
   pmRoot: string,
@@ -2106,11 +2034,7 @@ function upsertCreate(
   // after the create, never via `pm create --status closed`.
   const createStatus = p.status === "closed" ? "open" : p.status;
   const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
-  if (p.body) args.push("--body", p.body);
-  if (p.priority !== undefined) args.push("--priority", String(p.priority));
-  if (p.type) args.push("--type", p.type);
-  if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendMutableItemArgs(args, p, false);
   if (tags.length > 0) args.push("--tags", tags.join(","));
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
@@ -2184,16 +2108,12 @@ function upsertCreate(
     );
   }
   if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  if (!id) {
+    throw new Error(
+      `pm create succeeded for row (title '${p.title}', source status '${p.status}') but returned no id, so the source status cannot be applied and the created item cannot be identified or safely reconciled; it may have been left as an orphan — reconcile manually`,
+    );
+  }
   if (p.status === "closed") {
-    // (1) No id recovered: the close cannot be applied and the orphan cannot be
-    // compensated without its id. Hard failure — never a silent success — so
-    // the row is reported as failed, not imported. The created open orphan is
-    // unrecoverable from here; the error names the title for manual reconcile.
-    if (!id) {
-      throw new Error(
-        `pm create succeeded for closed row (title '${p.title}') but returned no id, so the terminal 'closed' status cannot be applied and the created open item cannot be compensated; it is left as an unrecoverable open orphan — reconcile manually`,
-      );
-    }
     const cr = spawnSync(
       "pm",
       ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
@@ -2268,11 +2188,7 @@ function upsertUpdate(
   extraTags?: string[],
 ): void {
   const args = ["--path", pmRoot, "update", id, "--title", p.title];
-  if (p.body !== undefined) args.push("--body", p.body);
-  if (p.priority !== undefined) args.push("--priority", String(p.priority));
-  if (p.type) args.push("--type", p.type);
-  if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendMutableItemArgs(args, p, true);
   // Preserve the csv-key tag (additive) and refresh the user tags.
   const addTags = [...p.tags];
   if (source) addTags.push(`${SOURCE_TAG_PREFIX}${encodeKeyTagValue(source)}`);
@@ -2515,6 +2431,76 @@ function assertStrictImportReady(filePath: string, opts: CsvValidateOptions): Cs
   return report;
 }
 
+/** Parsed import flags shared by the command and importer capability. */
+interface CsvImportInvocation {
+  options: CsvImportOptions;
+  strict: boolean;
+}
+
+/** Parse one host option record into the canonical CSV import contract. */
+function parseCsvImportInvocation(
+  rawOptions: Record<string, unknown>,
+  dryRun: boolean,
+): CsvImportInvocation {
+  return {
+    strict: readBoolOption(rawOptions, "strict"),
+    options: {
+      delimiter: resolveDelimiter(rawOptions["delimiter"] as string | undefined),
+      dryRun,
+      fieldMap: parseFieldMap(rawOptions["map"] as string | string[] | undefined),
+      autoMap: readBoolOption(rawOptions, "auto-map", "autoMap"),
+      keyField: ((rawOptions["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined,
+      encoding: resolveEncoding(rawOptions["encoding"] as string | undefined),
+      source: ((rawOptions["source"] as string | undefined) ?? "").trim() || undefined,
+      filter: parseImportFilter(
+        rawOptions["status"] as string | undefined,
+        rawOptions["type"] as string | undefined,
+        rawOptions["priority"] as string | undefined,
+      ),
+      skipHeaders: readBoolOption(rawOptions, "skip-headers", "skipHeaders"),
+      stream: readBoolOption(rawOptions, "stream"),
+      atomic: readBoolOption(rawOptions, "atomic"),
+    },
+  };
+}
+
+/** Validate strict input, then execute one fully parsed import invocation. */
+function executeCsvImport(
+  pmRoot: string,
+  filePath: string,
+  invocation: CsvImportInvocation,
+  commitTransaction: CsvImportOptions["commitTransaction"],
+  atomicAuthor: string | undefined,
+): Promise<ImportResult> {
+  if (invocation.strict) {
+    assertStrictImportReady(filePath, {
+      delimiter: invocation.options.delimiter,
+      fieldMap: invocation.options.fieldMap,
+      encoding: invocation.options.encoding,
+      autoMap: invocation.options.autoMap,
+      skipHeaders: invocation.options.skipHeaders,
+    });
+  }
+  return importCSV(pmRoot, filePath, {
+    ...invocation.options,
+    commitTransaction,
+    atomicAuthor,
+  });
+}
+
+/** Log an import's selected engine and execute it through the shared host path. */
+function executeLoggedCsvImport(
+  label: string,
+  pmRoot: string,
+  filePath: string,
+  invocation: CsvImportInvocation,
+  commitTransaction: CsvImportOptions["commitTransaction"],
+  atomicAuthor: string | undefined,
+): Promise<ImportResult> {
+  console.error(`${label} ${filePath}${invocation.options.stream ? " (streaming)" : ""}${invocation.options.atomic ? " (atomic)" : ""}`);
+  return executeCsvImport(pmRoot, filePath, invocation, commitTransaction, atomicAuthor);
+}
+
 // ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
@@ -2547,6 +2533,14 @@ interface CsvExportOptions {
   crlf?: boolean;
   /** Excel-friendly output: forces CRLF and prepends a UTF-8 BOM. */
   excel?: boolean;
+}
+
+/** Fully prepared export data shared by command and exporter presentation. */
+interface PreparedCsvExport {
+  outputPath: string | undefined;
+  csvText: string;
+  count: number;
+  eol: "\n" | "\r\n";
 }
 
 /**
@@ -2686,7 +2680,9 @@ function resolveExportColumns(
 
   const columns = [...EXPORT_COLUMNS] as string[];
   for (const f of discovered) {
-    if (!columns.includes(f.key)) columns.push(f.key);
+    // Discovery excludes built-ins and de-duplicates by key, so every result is
+    // additive by construction.
+    columns.push(f.key);
   }
   return { columns, columnSource };
 }
@@ -2792,17 +2788,34 @@ function buildCsvExport(
   };
 }
 
-/**
- * Local stand-in for the SDK's `defineExtension` identity helper.
- *
- * Declared here rather than imported so this package keeps a type-only
- * dependency on `@unbrained/pm-cli` and adds no runtime module edge. The
- * generic constraint is the SDK's own, so the extension object is contract-
- * checked against {@link ExtensionModule} exactly as the imported helper would.
- */
-const defineExtension = <TModule extends ExtensionModule>(module: TModule): TModule => module;
+/** Parse export flags and render the tracker through the shared export core. */
+function prepareCsvExport(
+  pmRoot: string,
+  rawOptions: Record<string, unknown>,
+): PreparedCsvExport {
+  const delimiter = resolveDelimiter(rawOptions["delimiter"] as string | undefined);
+  const discover = readBoolOption(rawOptions, "all-fields", "allFields", "discover-fields", "discoverFields");
+  const { columns, columnSource } = resolveExportColumns(
+    pmRoot,
+    rawOptions["columns"] as string | undefined,
+    discover,
+  );
+  return {
+    outputPath: rawOptions["output"] as string | undefined,
+    ...buildCsvExport(pmRoot, {
+      statusFilter: rawOptions["status"] as string | undefined,
+      typeFilter: rawOptions["type"] as string | undefined,
+      delimiter,
+      columns,
+      columnSource,
+      noHeader: readNoHeaderOption(rawOptions),
+      crlf: readBoolOption(rawOptions, "crlf"),
+      excel: readBoolOption(rawOptions, "excel"),
+    }),
+  };
+}
 
-export default defineExtension({
+export default {
   name: "pm-csv",
   version: "2026.8.16",
 
@@ -2810,29 +2823,13 @@ export default defineExtension({
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
-    // Guarded: only call when the running SDK exposes registerItemFields, so
-    // older hosts that lack the schema capability degrade to a no-op (and the
-    // manifest still declares "schema" because we genuinely implement it).
-    //
-    // NOTE: pm 2026.5.31 accepts the field into the schema registry but exposes
-    // no `pm create --csv_source` setter for extension-registered scalar fields,
-    // so the importer persists the provenance label as a `csv-source:` tag
-    // (stripped from exports and surfaced back via the csv_source export column).
+    // The declared pm host floor guarantees this SDK surface. Registration is
+    // deliberately fail-closed: silently omitting provenance would make a
+    // successfully activated package weaker than its manifest contract.
     // -----------------------------------------------------------------------
-    if (typeof api.registerItemFields === "function") {
-      try {
-        api.registerItemFields([
-          { name: "csv_source", type: "string", optional: true },
-        ]);
-      } catch (err: unknown) {
-        // Never let a schema-registration hiccup break command registration.
-        console.error(
-          `pm-csv: csv_source field not registered — ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    }
+    api.registerItemFields([
+      { name: "csv_source", type: "string", optional: true },
+    ]);
 
     // -----------------------------------------------------------------------
     // Command: pm csv import <file>
@@ -2892,55 +2889,25 @@ export default defineExtension({
           );
         }
 
-        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
         const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
-        const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
-        const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
-        const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
-        const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
-        const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
-        const strict = readBoolOption(ctx.options, "strict");
-        const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
-        const stream = readBoolOption(ctx.options, "stream");
-        const atomic = readBoolOption(ctx.options, "atomic");
-        const filter = parseImportFilter(
-          ctx.options["status"] as string | undefined,
-          ctx.options["type"] as string | undefined,
-          ctx.options["priority"] as string | undefined,
-        );
+        const invocation = parseCsvImportInvocation(ctx.options, dryRun);
         const absolutePath = resolve(filePath);
-
-        console.error(`Reading CSV from: ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
         let res: ImportResult;
         try {
-          if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
-          res = await importCSV(
+          res = await executeLoggedCsvImport(
+            "Reading CSV from:",
             ctx.pm_root,
             absolutePath,
-            {
-              delimiter,
-              dryRun,
-              fieldMap,
-              autoMap,
-              keyField,
-              encoding,
-              source,
-              filter,
-              skipHeaders,
-              stream,
-              atomic,
-              // Prefer the host-injected SDK coordinator (bound to the
-              // tracker root) so a standalone-installed extension never relies
-              // on package resolution; the atomic path falls back to a dynamic
-              // import when ctx.sdk is absent.
-              commitTransaction: ctx.sdk?.commitWorkspaceTransaction,
-              atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
-            },
+            invocation,
+            // Use the host-bound coordinator so a copied extension never
+            // resolves a second CLI/SDK through its own module tree.
+            ctx.sdk?.commitWorkspaceTransaction,
+            (ctx.global?.author as string | undefined) ?? undefined,
           );
         } catch (err: unknown) {
           if (err instanceof CommandError) throw err;
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = errorMessage(err);
           const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
           throw new CommandError(`Failed to import: ${msg}`, exitCode);
         }
@@ -3031,8 +2998,7 @@ export default defineExtension({
         try {
           report = validateCSV(absolutePath, { delimiter, fieldMap, autoMap, encoding, skipHeaders });
         } catch (err: unknown) {
-          if (err instanceof CommandError) throw err;
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = errorMessage(err);
           const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
           throw new CommandError(`Failed to validate: ${msg}`, exitCode);
         }
@@ -3101,29 +3067,8 @@ export default defineExtension({
         { long: "--excel", description: "Excel-friendly output: CRLF line endings + a UTF-8 BOM prefix" },
       ],
       async run(ctx) {
-        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-        const outputPath = ctx.options["output"] as string | undefined;
-        const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
-        const { columns, columnSource } = resolveExportColumns(
-          ctx.pm_root,
-          ctx.options["columns"] as string | undefined,
-          discover,
-        );
-        const noHeader = readNoHeaderOption(ctx.options);
-        const crlf = readBoolOption(ctx.options, "crlf");
-        const excel = readBoolOption(ctx.options, "excel");
-
         console.error("Fetching pm items…");
-        const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
-          statusFilter: ctx.options["status"] as string | undefined,
-          typeFilter: ctx.options["type"] as string | undefined,
-          delimiter,
-          columns,
-          columnSource,
-          noHeader,
-          crlf,
-          excel,
-        });
+        const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
 
         if (count === 0) {
           console.error("No items found.");
@@ -3150,28 +3095,7 @@ export default defineExtension({
     // Mirrors the importer so CSV is a first-class import/export pair.
     // -----------------------------------------------------------------------
     api.registerExporter("csv-export", async (ctx) => {
-      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-      const outputPath = ctx.options["output"] as string | undefined;
-      const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
-      const { columns, columnSource } = resolveExportColumns(
-        ctx.pm_root,
-        ctx.options["columns"] as string | undefined,
-        discover,
-      );
-      const noHeader = readNoHeaderOption(ctx.options);
-      const crlf = readBoolOption(ctx.options, "crlf");
-      const excel = readBoolOption(ctx.options, "excel");
-
-      const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
-        statusFilter: ctx.options["status"] as string | undefined,
-        typeFilter: ctx.options["type"] as string | undefined,
-        delimiter,
-        columns,
-        columnSource,
-        noHeader,
-        crlf,
-        excel,
-      });
+      const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
 
       if (outputPath) {
         const absolutePath = resolve(outputPath);
@@ -3194,48 +3118,21 @@ export default defineExtension({
         return;
       }
 
-      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-      const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
-      const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
-      const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
-      const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
-      const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
-      const strict = readBoolOption(ctx.options, "strict");
-      const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
-      const stream = readBoolOption(ctx.options, "stream");
-      const atomic = readBoolOption(ctx.options, "atomic");
-      const filter = parseImportFilter(
-        ctx.options["status"] as string | undefined,
-        ctx.options["type"] as string | undefined,
-        ctx.options["priority"] as string | undefined,
-      );
+      const invocation = parseCsvImportInvocation(ctx.options, false);
       const absolutePath = resolve(filePath);
-
-      console.error(`csv-import: reading ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
       let res: ImportResult;
       try {
-        if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
-        res = await importCSV(
+        res = await executeLoggedCsvImport(
+          "csv-import: reading",
           ctx.pm_root,
           absolutePath,
-          {
-            delimiter,
-            dryRun: false,
-            fieldMap,
-            autoMap,
-            keyField,
-            encoding,
-            source,
-            filter,
-            skipHeaders,
-            stream,
-            atomic,
-            atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
-          },
+          invocation,
+          ctx.sdk?.commitWorkspaceTransaction,
+          (ctx.global?.author as string | undefined) ?? undefined,
         );
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         console.error(`csv-import: failed — ${msg}`);
         return;
       }
@@ -3249,7 +3146,7 @@ export default defineExtension({
       );
     });
   },
-});
+} satisfies ExtensionModule & { readonly name: string; readonly version: string };
 
 // ---------------------------------------------------------------------------
 // Named exports — pure helpers exposed for unit testing (no side effects).
@@ -3268,10 +3165,12 @@ export {
   stringifyTags,
   encodeKeyTagValue,
   decodeKeyTagValue,
+  errorMessage,
   normalizeKeyValue,
   selectExportColumns,
   resolveEncoding,
   validateParsedCSV,
+  validateCSV,
   strictValidationIssues,
   parseImportFilter,
   rowMatchesFilter,
@@ -3300,6 +3199,7 @@ export { loadAppliedByTransaction, itemStatus, compensateCreate };
 // readers whose silently-partial behavior the regression tests pin. Exported
 // ONLY for those tests; production callers keep using the command paths.
 export { loadKeyIndex, buildCsvExport };
-export type { CsvExportOptions };
+export { importCSV };
+export type { CsvExportOptions, CsvImportOptions };
 // `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };

@@ -1,0 +1,32 @@
+id: pm-csv-zmcb
+title: Changelog scripts consume bounded tracker output and erase release history
+description: "On pm CLI 2026.8.20, npm run changelog:check invokes pm-changelog without universal output controls. The spawned list-all read is budgeted, so the generated replacement omits most historical release sections and proposes a destructive CHANGELOG rewrite. Pass explicit unbounded output budget and output limit controls to every changelog and release-notes read, and regression-test both scripts."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-20T18:47:31.143Z"
+updated_at: "2026-08-20T19:24:52.711Z"
+closed_at: "2026-08-20T19:24:52.698Z"
+completed_at: "2026-08-20T19:24:52.698Z"
+claim_principal: "harness:codex"
+author: "harness:codex"
+estimated_minutes: 60
+acceptance_criteria: "changelog:full and release:notes pass --output-budget unbounded and --output-limit unbounded to pm before list-all; A script-contract regression test prevents either whole-tracker read from becoming bounded; changelog:check preserves the complete committed release history under pm 2026.8.20"
+severity: high
+environment: pm CLI 2026.8.20 and pm-changelog resolved from the current package lock
+repro_steps: "Run npm run changelog:check and inspect the proposed replacement diff"
+resolution: Added output-budget and output-limit unbounded pm arguments to both scripts.
+expected_result: Generated changelog preserves every historical release section.
+actual_result: "changelog:check matches the committed complete history under pm 2026.8.20."
+component: changelog
+notes[2]{created_at,author,text}:
+  "2026-08-20T18:47:53.615Z","harness:codex","author=harness:codex,created_at=now,text=TDD red evidence: after adding a package script-contract test, npm run build:test passed and node --test test/packaging.test.ts failed because changelog:full lacks --pm-arg=--output-budget --pm-arg=unbounded. The test checks both changelog:full and release:notes and both universal output bounds."
+  "2026-08-20T19:24:52.250Z",codex,"GREEN: changelog:full and release:notes now pass both universal unbounded controls; changelog:check preserves the complete release history."
+files[2]{path,scope,note}:
+  package.json,project,Whole-tracker changelog command contracts
+  test/packaging.test.ts,project,Changelog script completeness regression
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode}:
+  node --test test/packaging.test.ts,test/packaging.test.ts,project,60,tracker
+close_reason: Whole-tracker changelog reads are explicitly unbounded and regression-tested.
+body: ""

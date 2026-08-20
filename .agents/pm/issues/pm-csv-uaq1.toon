@@ -1,0 +1,20 @@
+id: pm-csv-uaq1
+title: Full git history retains personal identity and redacted host-path blobs
+description: "A 195-commit all-ref scan found 283 historical blob/path matches across six tracker artifacts and 106 commits authored with a personal email address. No high-confidence secret token or private-key path hits were found. The prior head-only redaction item pm-csv-tl5j explicitly left old blobs intact, so current files may be clean while the public immutable history still violates the requested no-private-or-personal-history gate. Repair requires an authorized coordinated history rewrite and force-update; do not publish a new release until the maintainer approves the identity mapping and remote migration plan."
+type: Issue
+status: blocked
+priority: 0
+tags: []
+created_at: "2026-08-20T19:28:52.262Z"
+updated_at: "2026-08-20T19:28:52.262Z"
+author: codex
+estimated_minutes: 480
+acceptance_criteria: "Maintainer approves the destructive history-rewrite and identity mapping plan; Every reachable ref is rewritten or retired so the filename-only host-path scan returns zero; Commit authors use the approved public noreply identity throughout rewritten history; Secret scanning, PM history verification, clone acceptance, tags, open PRs, and downstream coordination are revalidated after the rewrite; No npm release is published before the rewritten remote and local canonical checkout agree"
+blocked_reason: "Requires explicit maintainer approval for destructive public history rewrite, tag migration, and force-update coordination."
+severity: critical
+environment: "All refs in the public pm-csv repository, 195 commits as of 2026-08-20"
+repro_steps: Enumerate git rev-list --all; scan blobs by filename for absolute home paths; count git log author emails.
+expected_result: "All reachable public history contains no private host paths, personal email identities, secrets, or keys, with a documented canonical identity mapping."
+actual_result: 283 host-path blob hits remain and 106 commits use a personal email; zero high-confidence secret token/private-key hits.
+component: repository-history
+body: ""

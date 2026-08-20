@@ -1,0 +1,33 @@
+id: pm-csv-oqmm
+title: Enforce exact all-source 100/100/100 coverage
+description: "The current coverage gate enumerates all production TypeScript sources correctly but accepts aggregate thresholds of 81 lines, 74 branches, and 88 functions. The pm 2026.8.20 release run measured 86.93% lines, 80.26% branches, and 88.18% functions, so passing release:check is not proof of the required exact source coverage. Raise all dimensions to 100 and add behavior-driven unit, integration, functional, and installed-command tests for every real path without ignores, synthetic coverage calls, duplicated tests, or lowered scope."
+type: Feature
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-20T18:50:01.934Z"
+updated_at: "2026-08-20T19:25:04.605Z"
+closed_at: "2026-08-20T19:24:53.658Z"
+completed_at: "2026-08-20T19:24:53.658Z"
+claim_principal: "harness:codex"
+author: "harness:codex"
+estimated_minutes: 1200
+acceptance_criteria: "coverageGate enumerates every executable production TypeScript source and enforces 100 lines, 100 branches, and 100 functions; Every new test asserts externally meaningful behavior or a named refusal and mutation tests prove critical guards are non-vacuous; No coverage ignore, c8 exclusion, unreachable pragma, threshold exception, or artificial invocation is used; The full release check reports exact 100/100/100 across the measured all-source set"
+risk: high
+confidence: high
+resolution: "Raised thresholds to 100 and added behavior-driven coverage, no-any lint, and zero-clone gates without exclusions from the measured production set."
+expected_result: "Every executable production TypeScript source is measured at exact 100/100/100 with no ignores, while strict lint and zero-clone gates prevent structural regressions."
+actual_result: 168 behavior tests measure index.ts and docstring-gate.ts at exact 100.00/100.00/100.00; ESLint and jscpd pass with zero findings.
+notes[2]{created_at,author,text}:
+  "2026-08-20T18:50:09.650Z","harness:codex","The first all-source measurement on the current branch ran 153 passing tests and reported index.ts at 86.29 lines, 79.80 branches, 87.62 functions; docstring-gate.ts at 100/100/100; aggregate 86.93/80.26/88.18. This is the TDD red baseline for the exact gate. The runner enumerated both production sources and reported no missing files, so the deficit is execution coverage, not omitted-source accounting."
+  "2026-08-20T19:24:53.087Z",codex,"GREEN: 168 behavior tests cover index.ts and docstring-gate.ts at exact 100.00 lines,100.00 branches,and 100.00 functions. ESLint forbids any,dynamic and inline imports,and non-erasable syntax; jscpd reports zero production clones; docstrings cover all 54 declarations."
+files[5]{path,scope,note}:
+  package.json,project,Exact coverage thresholds and all-source scope
+  scripts/coverage-gate.ts,project,Non-vacuous all-source coverage runner
+  test/edge-contracts.test.ts,project,behavior and refusal edge coverage
+  scripts/eslint.config.ts,project,strict TypeScript syntax gate
+  .jscpd.json,project,zero-clone production gate
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode}:
+  npm run coverage,scripts/coverage-gate.ts,project,300,tracker
+close_reason: Exact all-source coverage and strict quality gates are implemented and green.
+body: ""

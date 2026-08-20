@@ -1,0 +1,29 @@
+id: pm-csv-njaq
+title: Dry-run upserts misreport existing keys as creates
+description: "Both in-memory and atomic CSV dry-run previews constructed an empty key index instead of consulting the complete tracker corpus. A row whose --key provenance already exists was reported as wouldCreate, so the preview disagreed with the real import. Load and completeness-validate the key index for dry-runs too, without performing writes."
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-20T19:03:46.987Z"
+updated_at: "2026-08-20T19:24:55.250Z"
+closed_at: "2026-08-20T19:24:55.217Z"
+completed_at: "2026-08-20T19:24:55.217Z"
+claim_principal: codex
+author: codex
+severity: high
+repro_steps: "Create an item tagged csv-key:existing; import title=Existing with --key title --dry-run; observe wouldCreate=1 before the fix."
+resolution: Load and completeness-check csv-key provenance during normal and atomic previews.
+expected_result: Existing keys are reported as updates with no mutations.
+actual_result: Real tracker regressions pass for both preview engines.
+affected_version: 2026.8.16
+component: import-preview
+regression: true
+notes[1]{created_at,author,text}:
+  "2026-08-20T19:24:54.331Z",codex,"GREEN: keyed normal and atomic dry-runs both report wouldUpdate=1 and wouldCreate=0 for a real existing csv-key,while performing no writes."
+files[1]{path,scope,note}:
+  test/commands.test.ts,project,real tracker keyed preview regression
+tests[1]{command,path,scope,note}:
+  node --test test/commands.test.ts,test/commands.test.ts,project,truthful keyed dry-run previews
+close_reason: Both dry-run engines now consult the complete key index.
+body: ""

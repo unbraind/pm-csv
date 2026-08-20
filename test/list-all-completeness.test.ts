@@ -282,6 +282,45 @@ test("export classifies an unparseable stdout instead of crashing raw", { skip: 
   );
 });
 
+test("all whole-tracker readers classify process and parse failures without inventing empty data", { skip: !hasPmCli() }, () => {
+  const { pmRoot } = realEnvelope();
+  const failed: PmSpawn = () => ({
+    status: 1,
+    stdout: "",
+    stderr: "synthetic list failure",
+    pid: 1,
+    output: [],
+  }) as unknown as SpawnSyncReturns<string>;
+  assert.throws(() => loadKeyIndex(pmRoot, failed), /synthetic list failure/u);
+  assert.throws(
+    () => loadAppliedByTransaction(pmRoot, "csv-import-deadbeef", failed),
+    /synthetic list failure/u,
+  );
+  assert.throws(() => buildCsvExport(pmRoot, EXPORT_OPTS, failed), /synthetic list failure/u);
+  assert.throws(() => loadKeyIndex(pmRoot, seamFor("not json")), /building the upsert key index/u);
+  assert.throws(
+    () => loadAppliedByTransaction(pmRoot, "csv-import-deadbeef", seamFor("not json")),
+    /scanning for applied rows/u,
+  );
+
+  for (const code of ["ENOBUFS", "ENOENT"] as const) {
+    const error = Object.assign(new Error(`synthetic ${code}`), { code });
+    const errored: PmSpawn = () => ({
+      status: null,
+      signal: code === "ENOBUFS" ? "SIGTERM" : null,
+      error,
+      stdout: "",
+      stderr: "",
+      pid: 1,
+      output: [],
+    }) as unknown as SpawnSyncReturns<string>;
+    assert.throws(
+      () => buildCsvExport(pmRoot, EXPORT_OPTS, errored),
+      code === "ENOBUFS" ? /read buffer/u : /synthetic ENOENT/u,
+    );
+  }
+});
+
 
 test("no --limit reaches list-all, so the read is never bounded into a refusal", { skip: !hasPmCli() }, () => {
   // The stated contract is that `list-all` is invoked WITHOUT a row ceiling:
