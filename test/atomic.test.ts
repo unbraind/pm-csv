@@ -168,6 +168,8 @@ function realPmPath(): string {
  *     error, to exercise the close-failure / compensation paths.
  *   - `<root>/fake-close-conflict`: every `pm close ...` exits 4 while leaving
  *     the item open, proving an invalid-state receipt is not closure evidence.
+ *   - `<root>/fake-close-after-apply-conflict`: delegates the close so the item
+ *     becomes terminal, then exits 4 to simulate a lost/conflicting receipt.
  *   - `<root>/fake-create-kill`: `pm create --json` is terminated by SIGKILL
  *     before it writes anything (no output, no persisted item), so spawnSync
  *     reports `status: null`, `signal: "SIGKILL"`, no `error`, empty `stdout` —
@@ -212,6 +214,16 @@ function installFakePm(): () => void {
     "}",
     "if (root && existsSync(root + '/fake-close-conflict') && has('close')) {",
     "  process.stderr.write('simulated pm close conflict (test)\\n');",
+    "  process.exit(4);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-after-apply-conflict') && has('close')) {",
+    "  const r = spawnSync(realPm, args, { encoding: 'utf-8' });",
+    "  if (r.status !== 0) {",
+    "    if (r.stdout) writeSync(1, r.stdout);",
+    "    if (r.stderr) writeSync(2, r.stderr);",
+    "    process.exit(r.status == null ? 1 : r.status);",
+    "  }",
+    "  process.stderr.write('simulated post-apply close conflict (test)\\n');",
     "  process.exit(4);",
     "}",
     // Makes the status LOOKUP itself fail, so itemStatus() returns undefined.
@@ -392,6 +404,32 @@ test("a nonzero close conflict is not treated as proof that compensation closed 
     assert.equal(item.status, "open", "a nonzero close receipt does not prove closure");
     assert.ok(item.tags?.includes(transactionTag), "the batch marker survives the conflict");
     assert.ok(item.tags?.includes(rowTag), "the row marker survives the conflict");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a nonzero close receipt cleans markers only after a status recheck proves closure", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-race";
+  const rowTag = "csv-txrow:csv-import-race#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Raced compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-after-apply-conflict"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the raced compensation target remains inspectable");
+    assert.equal(item.status, "closed", "the delegated close persisted before the conflict receipt");
+    assert.ok(!item.tags?.includes(transactionTag), "confirmed closure removes the batch marker");
+    assert.ok(!item.tags?.includes(rowTag), "confirmed closure removes the row marker");
   } finally {
     restorePm();
     rmSync(root, { recursive: true, force: true });

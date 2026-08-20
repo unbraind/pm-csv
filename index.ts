@@ -1632,6 +1632,19 @@ function itemStatus(pmRoot: string, id: string, spawn: PmSpawn = spawnPm): ItemS
 }
 
 /**
+ * Read an item's status without letting a compensation-only lookup abort the
+ * remaining best-effort sweep. `undefined` deliberately means either absent or
+ * unverified; neither is positive evidence that an open item became closed.
+ */
+function compensationItemStatus(pmRoot: string, id: string): ItemStatus | undefined {
+  try {
+    return itemStatus(pmRoot, id);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Idempotently undo one row's create. First closes a still-open item via
  * `pm close` (NOT delete, to avoid the known history-resurrection issue), then
  * strips this transaction's ownership markers (`markers`) only after the item
@@ -1660,19 +1673,11 @@ function compensateCreate(
   markers: readonly string[] = [],
   reason: string = "atomic csv import rolled back",
 ): void {
-  // itemStatus throws on a stdout overrun / signal kill; compensation is a
-  // best-effort sweep, so an overrun in the status lookup itself is a no-op for
-  // THIS row (the operator can reconcile by id) and must never abort the sweep
-  // over the remaining applied creates. (itemStatus's only throw is the
-  // CommandError from assertPmOutputFit; a bare catch is therefore equivalent to
-  // catching CommandError and avoids an unreachable rethrow branch.)
-  let status: ItemStatus | undefined;
-  try {
-    status = itemStatus(pmRoot, id);
-  } catch {
-    return; // status lookup overran/killed: no-op for this row, sweep continues
-  }
-  if (status === undefined) return; // item no longer exists
+  // A failed status lookup is a no-op for this row and must never abort the
+  // sweep over the remaining applied creates. The item remains marked for
+  // reconciliation when it still exists.
+  const status = compensationItemStatus(pmRoot, id);
+  if (status === undefined) return; // absent or unverified; never invent closure
   if (status !== "closed") {
     // Compensation is an internal rollback, not a user closure: it must
     // reliably undo the create regardless of closure-validation governance, so
@@ -1685,12 +1690,14 @@ function compensateCreate(
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
     if (closeResult.status !== 0) {
-      // Keep both ownership markers on a still-open orphan so transaction-id
-      // reconciliation can locate it. A non-zero receipt is not proof that the
-      // item became terminal, so cleanup must wait for a later confirmed status
-      // even when the host reports an invalid-state/already-closed conflict.
-      console.error(`atomic import: compensation close failed for ${id}: ${closeResult.stderr?.trim() || closeResult.stdout?.trim()}`);
-      return;
+      // A non-zero receipt is not proof either way: the close may have persisted
+      // before its receipt failed. Re-read the item and clean markers only with
+      // exact terminal evidence; otherwise retain identity for reconciliation.
+      const postCloseStatus = compensationItemStatus(pmRoot, id);
+      if (postCloseStatus !== "closed") {
+        console.error(`atomic import: compensation close failed for ${id}: ${closeResult.stderr?.trim() || closeResult.stdout?.trim()}`);
+        return;
+      }
     }
   }
   if (markers.length > 0) {
