@@ -1699,10 +1699,11 @@ function compensateCreate(
  * {@link WorkspaceTransactionStep} committed under a single workspace
  * writer-locked, crash-recoverable transaction. On success the same
  * {@link ImportResult} as the non-atomic path is returned (counts derived from
- * the committed step results). On failure every applied create is compensated
- * (closed) so no committed items remain, and a clear error is thrown. An
- * interrupted run resumes from the durable journal (inspect() skips already
- * applied rows).
+ * the committed step results). On failure the coordinator attempts reverse-
+ * order compensation, but callers receive a conservative reconciliation
+ * warning because create cleanup is best-effort and updates to pre-existing
+ * items are intentionally not reverted. An interrupted run resumes from the
+ * durable journal (inspect() skips already applied rows).
  */
 async function importCSVAtomic(
   pmRoot: string,
@@ -1871,10 +1872,12 @@ async function importCSVAtomic(
     committed = await commitTransaction({ transactionId, author, steps });
   } catch (err: unknown) {
     const msg = errorMessage(err);
-    // Every applied create has been compensated by the coordinator; no
-    // committed items from this import remain in the tracker.
+    // The coordinator invokes compensations in reverse order, but this package
+    // cannot prove a clean tracker: create cleanup deliberately tolerates an
+    // unavailable status lookup or failed close so the remaining sweep can
+    // continue, and update steps intentionally preserve pre-existing items.
     throw new CommandError(
-      `Atomic CSV import failed and was rolled back — every applied create was compensated (closed); the tracker has no committed items from this import. Transaction id: ${transactionId}. Underlying error: ${msg}`,
+      `Atomic CSV import failed. The transaction coordinator attempted reverse-order compensation, but pm-csv cannot claim a clean tracker: created items are closed on a best-effort basis, and pre-existing item updates are intentionally not reverted. Mutations from transaction ${transactionId} may remain; inspect and reconcile that transaction before retrying. Underlying error: ${msg}`,
       EXIT_CODE.GENERIC_FAILURE,
     );
   }

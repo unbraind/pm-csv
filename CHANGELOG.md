@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Atomic aggregate failure receipt overstates rollback certainty ([pm-csv-5si5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-5si5.toon))
 - Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
 - Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
 - Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))

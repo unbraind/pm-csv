@@ -1,0 +1,34 @@
+id: pm-csv-5si5
+title: Atomic aggregate failure receipt overstates rollback certainty
+description: "Greptile review of PR 73 found that the aggregate atomic-import catch claimed every create was compensated and no committed items remained. That is stronger than the implementation: create cleanup is best-effort and deliberately tolerates an unavailable status lookup or failed close so the remaining sweep can continue, while update compensation is intentionally a no-op pending pm-csv-71zg. Replace the false clean-state assertion with an explicit reconciliation warning that names the transaction and both limitations."
+type: Issue
+status: closed
+priority: 1
+tags[4]: atomic,diagnostics,review,rollback
+created_at: "2026-08-20T19:48:21.857Z"
+updated_at: "2026-08-20T19:50:40.439Z"
+closed_at: "2026-08-20T19:50:40.425Z"
+completed_at: "2026-08-20T19:50:40.425Z"
+author: codex
+estimated_minutes: 60
+acceptance_criteria: A red regression rejects the old rolled-back and clean-tracker assertion; Every aggregate atomic failure names the transaction and says mutations may remain; The receipt explicitly identifies best-effort create cleanup and intentionally non-reverted pre-existing updates; The receipt directs the operator to inspect and reconcile before retrying; Exact all-source coverage and all release gates remain green
+risk: high
+confidence: high
+severity: critical
+repro_steps: Run an atomic keyed import whose first row updates an existing item and whose later row fails; inspect the aggregate CommandError.
+resolution: Replace the unconditional rollback assertion with a conservative transaction-specific reconciliation receipt.
+expected_result: Atomic failure output never claims a clean tracker unless the implementation has actually verified every mutation was reverted.
+actual_result: "The receipt now states that reverse-order compensation was attempted, created-item cleanup is best-effort, pre-existing updates are not reverted, mutations may remain, and the operator must inspect and reconcile the transaction before retrying."
+component: atomic-import
+regression: true
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-71zg,related,"2026-08-20T19:48:21.857Z",codex,review,asserted
+notes[1]{created_at,author,text}:
+  "2026-08-20T19:48:35.516Z",codex,"TDD red: the two focused atomic tests failed against the old clean-tracker message. GREEN after the receipt change: both focused real-tracker tests pass and retain assertions for the actual mutation outcomes."
+files[2]{path,scope,note}:
+  index.ts,project,truthful aggregate atomic failure receipt
+  test/atomic.test.ts,project,red and green receipt regressions
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,note}:
+  "npm run release:check",package.json,project,300,tracker,exact full release gate
+close_reason: "Greptile P1 fixed with TDD: the aggregate atomic failure receipt no longer asserts complete rollback, names both compensation limits, includes the transaction id, and requires reconciliation. npm run release:check passes 168 tests at exact 100.00/100.00/100.00, 62 documented declarations, zero clones, zero production audit vulnerabilities, and a clean packed artifact."
+body: ""

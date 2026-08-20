@@ -348,9 +348,10 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
     assert.equal(error.exitCode, 1, "exit code should be 1");
     assert.match(
       error!.message,
-      /rolled back/i,
-      "error should clearly state the import was rolled back",
+      /cannot claim a clean tracker/i,
+      "error must not overstate best-effort compensation as a proven rollback",
     );
+    assert.match(error!.message, /may remain.*reconcile/is);
 
     const items = listItems(root);
     // Every item created by the transaction before the failure must be
@@ -579,7 +580,9 @@ test("--atomic --key upsert mid-import failure: created rows compensated, pre-ex
   try {
     const { error } = await runImport(root, file, { atomic: true, key: "key" });
     assert.ok(error, "atomic upsert with a failing row should error");
-    assert.match(error!.message, /rolled back/i);
+    assert.match(error!.message, /pre-existing item updates are intentionally not reverted/i);
+    assert.match(error!.message, /cannot claim a clean tracker/i);
+    assert.match(error!.message, /may remain.*reconcile/is);
 
     const items = listItems(root);
     // The pre-existing updated item must remain OPEN (update not reverted) and
