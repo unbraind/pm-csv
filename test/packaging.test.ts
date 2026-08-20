@@ -227,7 +227,9 @@ test("public atomic contracts disclose best-effort compensation and reconciliati
   assert.doesNotMatch(publicContract, /all-or-nothing/u);
   assert.doesNotMatch(publicContract, /every applied create is compensated/u);
   assert.doesNotMatch(publicContract, /No committed \(open\) items from the import remain/u);
+  assert.doesNotMatch(extensionSource, /markers before closing the item/u);
   assert.match(publicContract, /best-effort/u);
   assert.match(publicContract, /pre-existing item updates are intentionally not reverted/u);
   assert.match(publicContract, /inspect and reconcile/u);
+  assert.match(extensionSource, /markers only after closure succeeds/u);
 });

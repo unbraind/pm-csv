@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- loadAppliedByTransaction comment describes unsafe pre-fix marker ordering ([pm-csv-21ik](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-21ik.toon))
 - Failed atomic create compensation erases orphan reconciliation markers ([pm-csv-qebc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-qebc.toon))
 - Atomic aggregate failure receipt overstates rollback certainty ([pm-csv-5si5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-5si5.toon))
 - Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))

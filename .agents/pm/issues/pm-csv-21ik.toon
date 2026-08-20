@@ -1,0 +1,37 @@
+id: pm-csv-21ik
+title: loadAppliedByTransaction comment describes unsafe pre-fix marker ordering
+description: "CodeRabbit exact-head review of PR 73 found that the resume-invariant comment still said compensateCreate strips ownership markers before closing, contradicting the corrected close-before-cleanup implementation and teaching the unsafe order that loses orphan identity."
+type: Issue
+status: closed
+priority: 2
+tags[3]: atomic,documentation,review
+created_at: "2026-08-20T20:18:22.424Z"
+updated_at: "2026-08-20T20:20:53.642Z"
+closed_at: "2026-08-20T20:20:53.626Z"
+completed_at: "2026-08-20T20:20:53.626Z"
+author: codex
+estimated_minutes: 20
+acceptance_criteria: "A red source-contract regression rejects the stale marker-before-close explanation; The docstring states that markers are removed only after closure succeeds or a closed state is confirmed; The docstring states failed closure preserves both markers for reconciliation; npm run release:check remains exact 100/100/100/100"
+risk: medium
+confidence: high
+severity: medium
+repro_steps: Read the loadAppliedByTransaction docstring at the exact 58ee095 head and compare its described marker order with compensateCreate.
+resolution: "Replace the unsafe pre-fix ordering statement with the actual invariant: compensateCreate removes ownership markers only after closure succeeds or a terminal state was already confirmed, while failed closure retains both markers for reconciliation."
+expected_result: "The invariant says marker removal happens only after closure succeeds or the item is confirmed closed, and failed closure retains both markers for reconciliation."
+actual_result: The loadAppliedByTransaction docstring now matches compensateCreate and a source-contract regression prevents the stale marker-before-close explanation from returning.
+affected_version: unreleased
+fixed_version: unreleased
+component: atomic-import
+regression: true
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-qebc,related,"2026-08-20T20:18:22.424Z",codex,review,detected
+notes[1]{created_at,author,text}:
+  "2026-08-20T20:20:53.160Z",codex,"TDD receipt: the focused packaging regression failed against exact head 58ee095 because the stale phrase remained, then passed after the invariant was corrected."
+learnings[1]{created_at,author,text}:
+  "2026-08-20T20:20:53.160Z",codex,Executable source-contract checks are useful for safety comments whose ordering is itself part of the recovery design.
+files[1]{path,scope,note}:
+  index.ts,project,resume and compensation invariant
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,note}:
+  "npm run release:check",package.json,project,300,tracker,exact full release gate
+close_reason: "CodeRabbit P2 fixed with a red-to-green source-contract test. npm run release:check passes 172 tests at exact 100.00/100.00/100.00 coverage, 62 documented declarations, zero clones, zero production vulnerabilities, clean packaging, and a current changelog."
+body: ""

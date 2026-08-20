@@ -1532,12 +1532,15 @@ export function atomicTransactionId(
  * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
  * closed item (upsertCreate/upsertUpdate apply the row's status, routing
  * terminal transitions through `pm close --reason`), so it must
- * still be recognized on resume and never re-imported. Conversely a rolled-back
- * create must NOT be recognized: `compensateCreate()` therefore STRIPS the
- * `csv-tx`/`csv-txrow` markers before closing the item, so a compensated
- * tombstone carries no marker and a post-rollback retry re-imports its row.
- * (This is why matching by marker-presence is correct for both a
- * legitimately-closed applied row and a rolled-back one; see compensateCreate.)
+ * still be recognized on resume and never re-imported. Conversely a
+ * successfully compensated create must NOT be recognized:
+ * `compensateCreate()` removes the markers only after closure succeeds or the
+ * item is already confirmed closed, so a compensated
+ * tombstone carries no marker and a post-rollback retry re-imports its row. If
+ * closure fails, both markers remain and make the orphan discoverable for
+ * reconciliation. (This is why matching by marker-presence is correct for both
+ * a legitimately-closed applied row and a rolled-back one; see
+ * compensateCreate.)
  */
 function loadAppliedByTransaction(
   pmRoot: string,
