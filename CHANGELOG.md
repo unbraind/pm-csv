@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))
 - Post-apply close conflict retains applied transaction markers ([pm-csv-zv31](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zv31.toon))
 - loadAppliedByTransaction comment describes unsafe pre-fix marker ordering ([pm-csv-21ik](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-21ik.toon))
 - Failed atomic create compensation erases orphan reconciliation markers ([pm-csv-qebc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-qebc.toon))

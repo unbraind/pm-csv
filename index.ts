@@ -1557,9 +1557,10 @@ function loadAppliedByTransaction(
   // the previous guard (`r.error || r.status !== 0`) then returned an EMPTY map,
   // so inspect() concluded "nothing was applied" and a resumed atomic import
   // silently re-imported every already-applied row — wrong data, not a crash.
-  // Route that overrun through {@link assertPmOutputFit} as a hard, named error
-  // instead. A genuine non-zero exit (not a buffer condition) still falls through
-  // to the best-effort empty map, preserving the resume scan's tolerance.
+  // Route unusable null-status output through {@link assertPmOutputFit} as a
+  // hard, named error. The following non-zero branch rejects ordinary command failures.
+  // Parse failures and incomplete envelopes below also refuse the resume scan;
+  // none of these unreadable states may become an empty applied-row map.
   assertPmOutputFit(r, "list-all");
   // Fail closed on both failure shapes, for the same reason the completeness
   // gate below refuses: an empty resume map says "nothing was applied", so a

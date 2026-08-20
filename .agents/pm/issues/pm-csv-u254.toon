@@ -1,0 +1,37 @@
+id: pm-csv-u254
+title: Resume reader comment falsely permits empty map on list-all failure
+description: "CodeRabbit exact-head review of PR 73 found that loadAppliedByTransaction documentation says an ordinary nonzero pm list-all result falls through to a best-effort empty map, while the corrected implementation throws CommandError. The stale comment teaches a data-duplicating behavior: an empty applied-row map can make resume re-import rows that already exist."
+type: Issue
+status: closed
+priority: 2
+tags[4]: completeness,documentation,resume,review
+created_at: "2026-08-20T20:33:56.692Z"
+updated_at: "2026-08-20T20:37:03.737Z"
+closed_at: "2026-08-20T20:37:03.722Z"
+completed_at: "2026-08-20T20:37:03.722Z"
+author: codex
+estimated_minutes: 20
+acceptance_criteria: "A red source-contract regression rejects the best-effort empty-map claim; The comment distinguishes null-status rejection from ordinary nonzero rejection; The comment states parse and incomplete envelopes fail closed; Existing whole-tracker failure regressions remain green; npm run release:check passes exact 100/100/100/100"
+risk: high
+confidence: high
+severity: high
+repro_steps: Read the comment immediately before assertPmOutputFit in loadAppliedByTransaction and compare it with the following r.status nonzero CommandError branch.
+resolution: "Replace the obsolete best-effort empty-map statement with the actual fail-closed pipeline: assertPmOutputFit rejects unusable null status, the following branch rejects ordinary nonzero command failures, and parse or completeness failures also refuse resume."
+expected_result: "The comment states null-status output is rejected by assertPmOutputFit, ordinary nonzero results are rejected by the following branch, and parse/incomplete envelopes also fail closed."
+actual_result: "The safety comment now matches the existing CommandError branches, and the source-contract test prevents the data-duplicating empty-map claim from returning."
+affected_version: unreleased
+fixed_version: unreleased
+component: whole-tracker-read
+regression: true
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-mua3,related,"2026-08-20T20:33:56.692Z",codex,review,detected
+notes[1]{created_at,author,text}:
+  "2026-08-20T20:37:03.100Z",codex,"TDD receipt: the focused source-contract test failed against exact head 50379d9 on the best-effort empty-map phrase, then passed with real nonzero/process/parse/truncation reader regressions after the comment correction."
+learnings[1]{created_at,author,text}:
+  "2026-08-20T20:37:03.100Z",codex,"Fail-closed implementation comments are part of the safety boundary: stale tolerance language can invite a future refactor that converts missing evidence into false empty state."
+files[1]{path,scope,note}:
+  index.ts,project,fail-closed resume reader contract
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,note}:
+  "npm run release:check",package.json,project,300,tracker,exact full release gate
+close_reason: "CodeRabbit P2 fixed with a red-to-green source-contract check plus real whole-reader regressions. npm run release:check passes 173 tests at exact 100.00/100.00/100.00 coverage, 63 documented declarations, zero clones, zero production vulnerabilities, clean packaging, and current changelog."
+body: ""

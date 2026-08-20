@@ -228,8 +228,10 @@ test("public atomic contracts disclose best-effort compensation and reconciliati
   assert.doesNotMatch(publicContract, /every applied create is compensated/u);
   assert.doesNotMatch(publicContract, /No committed \(open\) items from the import remain/u);
   assert.doesNotMatch(extensionSource, /markers before closing the item/u);
+  assert.doesNotMatch(extensionSource, /best-effort empty map/u);
   assert.match(publicContract, /best-effort/u);
   assert.match(publicContract, /pre-existing item updates are intentionally not reverted/u);
   assert.match(publicContract, /inspect and reconcile/u);
   assert.match(extensionSource, /markers only after closure succeeds/u);
+  assert.match(extensionSource, /following non-zero branch rejects ordinary command failures/u);
 });
