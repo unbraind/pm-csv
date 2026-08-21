@@ -4,6 +4,9 @@ CSV importer and exporter for [pm-cli](https://github.com/unbraind/pm-cli).
 
 Import pm items from a CSV file, export them back out, or wire up a programmatic `csv-import` importer — all with zero external runtime dependencies.
 
+The extension requires pm CLI 2026.8.20 or newer. Its development and release
+gates are pinned to pm CLI/SDK 2026.8.21 so host behavior stays reproducible.
+
 ---
 
 ## Installation
@@ -181,6 +184,15 @@ the effective mapped headers.
 
 Export all pm items (or a filtered subset) to CSV. Without `--output` the CSV is returned in the command result object.
 
+Every export, upsert index, and atomic-resume scan reads the whole tracker with
+canonical `pm list --all`, strict source reads, full metadata, and explicitly
+unbounded row and token controls. The public pm SDK certifies source status,
+filter scope, pagination, projection, counts, and item identity before pm-csv
+uses a row. pm-csv additionally rejects missing or contradictory omission,
+read-output, and unreadable-item receipts tracked in pm-cli issue 1078. A
+partial or unverifiable workspace therefore fails closed instead of exporting
+missing rows, creating duplicate upserts, or reapplying an atomic import.
+
 ```
 pm csv export
 pm csv export --output items.csv
@@ -352,6 +364,11 @@ no-op without breaking any other behavior.
 ---
 
 ## Building
+
+`npm run accept:packed` packs the real artifact and exercises strict CSV import
+plus complete CSV export in fresh npm/npx and Bun/bunx projects on the pinned
+development host, and in npm/npx on the declared minimum host. It is mandatory
+inside `npm run release:check`.
 
 ```bash
 npm install

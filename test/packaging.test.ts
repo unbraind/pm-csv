@@ -113,20 +113,21 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
   // npm 7+ auto-installs the newest version a peer range admits, so a floor does
   // admit a FUTURE regressed CLI. No range declared today can exclude a
   // regression that does not exist yet. What actually protects this package is
-  // the runtime completeness refusal on every `list-all` read, which detects a
-  // regressed host by observing `truncated` / `has_more` / `completeness` /
-  // `omission_receipt` rather than by guessing version numbers.
+  // the SDK-backed runtime certification on every canonical complete-list
+  // read, which detects a regressed host from source, pagination, projection,
+  // omission, read-output, count, and identity receipts rather than guessing
+  // version numbers.
   //
-  // The floor's job is narrower: exclude 2026.8.14, whose `list-all` silently
-  // returned 10 of 682 items, and everything older that predates the receipt.
+  // The floor's job is narrower: require the canonical list and public
+  // complete-list SDK contracts shipped in 2026.8.20.
   assert.match(
     peer,
     MINIMUM_VERSION_RANGE,
     `${HOST_CLI} must declare a ">=x.y.z" floor, not "${peer}": a pm extension cannot pin the host CLI a user installs, so an exact peer pin makes every later CLI patch a peer conflict`,
   );
   assert.ok(
-    compareVersions(peer.replace(/^>=/, ""), "2026.8.15") >= 0,
-    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.15: 2026.8.14 truncates \`list-all\` to 10 items and earlier releases predate the completeness receipt this package refuses on`,
+    compareVersions(peer.replace(/^>=/, ""), "2026.8.20") >= 0,
+    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.20 so the canonical list and public complete-list SDK contracts are available`,
   );
 });
 
@@ -193,16 +194,20 @@ test("the extension manifest declares the same floor enforced by the peer depend
   );
 });
 
-test("the complete published extension manifest satisfies the current SDK contract", () => {
+test("the complete published extension manifest satisfies minimum and development SDK hosts", () => {
   const dev = manifest.devDependencies?.[HOST_CLI];
   assert.ok(dev, `${HOST_CLI} must be a devDependency so the manifest has a tested host version`);
-  const result = checkExtensionManifestCompatibility(extensionManifest, { pmVersion: dev });
-  assert.equal(result.compatible, true, "the declared version bounds must accept the pinned host CLI");
-  assert.deepEqual(
-    result.findings,
-    [],
-    `manifest.json must contain only current SDK-supported keys and valid bounds: ${JSON.stringify(result.findings)}`,
-  );
+  const minimum = extensionManifest.pm_min_version;
+  assert.equal(typeof minimum, "string");
+  for (const host of [minimum as string, dev]) {
+    const result = checkExtensionManifestCompatibility(extensionManifest, { pmVersion: host });
+    assert.equal(result.compatible, true, `the declared version bounds must accept host ${host}`);
+    assert.deepEqual(
+      result.findings,
+      [],
+      `manifest.json must contain only SDK-supported keys and valid bounds on host ${host}: ${JSON.stringify(result.findings)}`,
+    );
+  }
 });
 
 test("whole-tracker changelog scripts explicitly disable every pm output bound", () => {

@@ -108,13 +108,28 @@ function freshTracker(): string {
   return root;
 }
 
-/** List all items in a tracker as JSON. */
+/** List every item in a tracker through the canonical strict unbounded query. */
 function listItems(pmRoot: string): ListedItem[] {
-  const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
+  const r = spawnSync("pm", [
+    "--pm-path",
+    pmRoot,
+    "list",
+    "--all",
+    "--json",
+    "--include-body",
+    "--strict-read",
+    "--no-truncate",
+    "--output-budget",
+    "unbounded",
+    "--output-limit",
+    "unbounded",
+    "--output-include",
+    "full",
+  ], {
     encoding: "utf-8",
     maxBuffer: 16 * 1024 * 1024,
   });
-  if (r.status !== 0) throw new Error(`pm list-all failed: ${r.stderr}`);
+  if (r.status !== 0) throw new Error(`pm list --all failed: ${r.stderr}`);
   return (JSON.parse(r.stdout) as { items?: ListedItem[] }).items ?? [];
 }
 

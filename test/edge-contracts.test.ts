@@ -47,6 +47,46 @@ function successfulEnvelope(envelope: unknown): PmSpawn {
   }) as unknown as SpawnSyncReturns<string>;
 }
 
+/** Build one fully certifiable canonical list envelope around supplied rows. */
+function completeEnvelope(items: Array<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    items,
+    count: items.length,
+    total: items.length,
+    has_more: false,
+    next_cursor: null,
+    truncated: false,
+    completeness: {
+      status: "complete",
+      unreadable_item_count: 0,
+      unreadable_directory_count: 0,
+    },
+    filters: {
+      status: "all",
+      exclude_terminal: false,
+      include_body: true,
+      no_truncate: true,
+      strict_read: true,
+      runtime_filters: {},
+    },
+    projection: { mode: "full", fields: null },
+    omission_receipt: {
+      has_omissions: false,
+      omitted_field_group_count: 0,
+      omitted_field_groups: [],
+    },
+    read_output: {
+      contract_version: 1,
+      command: "list",
+      requested_dimensions: ["include", "amount", "cost"],
+      within_budget: true,
+      strings_compacted: false,
+      rows_compacted: false,
+      result_omitted: false,
+    },
+  };
+}
+
 test("edge helper contracts cover alternate encodings, null receipts, and empty strict reports", async () => {
   const root = mkdtempSync(join(tmpdir(), "pm-csv-stream-edge-"));
   try {
@@ -60,11 +100,8 @@ test("edge helper contracts cover alternate encodings, null receipts, and empty 
     assert.equal(resolveDelimiter("comma"), ",");
     assert.equal(errorMessage("raw failure"), "raw failure");
     assert.deepEqual(parseFieldMap(", title=title, ,"), { title: "title" });
-    assert.throws(() => assertListAllComplete(null), /completeness\.status=\(missing\)/u);
-    assert.doesNotThrow(() => assertListAllComplete({
-      items: [],
-      completeness: { status: "complete" },
-    }));
+    assert.throws(() => assertListAllComplete(null), /invalid_envelope/u);
+    assert.doesNotThrow(() => assertListAllComplete(completeEnvelope([])));
     assert.deepEqual(strictValidationIssues({
       ok: true,
       rowCount: 0,
@@ -125,17 +162,11 @@ test("edge helper contracts cover alternate encodings, null receipts, and empty 
 test("direct import and reader seams cover default options and fallback receipt shapes", async () => {
   const root = freshTracker();
   try {
-    const complete = {
-      count: 0,
-      total: 0,
-      truncated: false,
-      has_more: false,
-      completeness: { status: "complete" },
-    };
+    const complete = completeEnvelope([]);
     assert.equal(loadKeyIndex("unused", successfulEnvelope(complete)).size, 0);
     assert.equal(loadAppliedByTransaction("unused", "csv-import-none", successfulEnvelope(complete)).byRowIndex.size, 0);
 
-    const untagged = { ...complete, count: 1, total: 1, items: [{ id: "pm-untagged" }] };
+    const untagged = completeEnvelope([{ id: "pm-untagged" }]);
     assert.equal(loadKeyIndex("unused", successfulEnvelope(untagged)).size, 0);
     assert.equal(loadAppliedByTransaction("unused", "csv-import-none", successfulEnvelope(untagged)).byRowIndex.size, 0);
     assert.equal(itemStatus("unused", "pm-fallback", successfulEnvelope({ status: "open" })), "open");
@@ -223,8 +254,7 @@ test("direct import and reader seams cover default options and fallback receipt 
 });
 
 test("export handles filters, provenance, internal tags, missing arrays, and remapped custom fields", () => {
-  const envelope = {
-    items: [
+  const envelope = completeEnvelope([
       {
         id: "pm-one",
         title: "One",
@@ -236,13 +266,7 @@ test("export handles filters, provenance, internal tags, missing arrays, and rem
       },
       { id: "pm-two", title: "Two", status: "open", type: "Task" },
       { id: "pm-three", title: "Three", status: "closed", type: "Feature" },
-    ],
-    count: 3,
-    total: 3,
-    truncated: false,
-    has_more: false,
-    completeness: { status: "complete" },
-  };
+    ]);
   const rendered = buildCsvExport("unused", {
     statusFilter: "open",
     typeFilter: "Task",
@@ -257,13 +281,7 @@ test("export handles filters, provenance, internal tags, missing arrays, and rem
   const noItems = buildCsvExport("unused", {
     delimiter: ",",
     columns: ["id"],
-  }, successfulEnvelope({
-    count: 0,
-    total: 0,
-    truncated: false,
-    has_more: false,
-    completeness: { status: "complete" },
-  }));
+  }, successfulEnvelope(completeEnvelope([])));
   assert.equal(noItems.count, 0);
 
   const failed: PmSpawn = () => ({
@@ -273,7 +291,7 @@ test("export handles filters, provenance, internal tags, missing arrays, and rem
     pid: 1,
     output: [],
   }) as unknown as SpawnSyncReturns<string>;
-  assert.throws(() => buildCsvExport("unused", { delimiter: ",", columns: ["id"] }, failed), /pm list-all failed/u);
+  assert.throws(() => buildCsvExport("unused", { delimiter: ",", columns: ["id"] }, failed), /pm list --all failed/u);
 });
 
 test("command paths exercise rich create/update, headerless streaming, strict success, and generic file failures", async () => {

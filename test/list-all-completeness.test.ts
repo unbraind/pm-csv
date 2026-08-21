@@ -17,7 +17,7 @@ import {
 } from "../index.ts";
 
 // ---------------------------------------------------------------------------
-// Regression tests for the list-all completeness refusal.
+// Regression tests for the canonical complete-list refusal.
 //
 // The 2026.8.14 failure mode this file pins: pm's list-all defaulted to a
 // truncated answer (10 of 682 items on this host's fixture workspace) and all
@@ -29,7 +29,7 @@ import {
 // count/total figures.
 //
 // Every refusal below is driven from a REAL envelope (captured from the real
-// pm CLI's `list-all --json` output against a real workspace) with exactly one
+// pm CLI's canonical `list --all` output against a real workspace) with exactly one
 // field mutated, injected through the PmSpawn seam — not a hand-written mock
 // of the envelope shape.
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ function hasPmCli(): boolean {
   }
 }
 
-/** Captured real `pm list-all --json` envelope plus the root it came from. */
+/** Captured real canonical complete-list envelope plus the root it came from. */
 interface EnvelopeFixture {
   pmRoot: string;
   envelope: Record<string, unknown>;
@@ -69,14 +69,29 @@ function realEnvelope(): EnvelopeFixture {
     const created = spawnSync("pm", args, { encoding: "utf-8" });
     assert.strictEqual(created.status, 0, `pm create failed: ${created.stderr}`);
   }
-  // The exact argv buildCsvExport uses, so the captured envelope is the one
-  // the production export path would have parsed.
+  // The exact canonical argv every whole-tracker reader must use, so the
+  // captured envelope carries every receipt the production paths certify.
   const read = spawnSync(
     "pm",
-    ["--path", pmRoot, "list-all", "--json", "--include-body"],
+    [
+      "--pm-path",
+      pmRoot,
+      "list",
+      "--all",
+      "--json",
+      "--include-body",
+      "--strict-read",
+      "--no-truncate",
+      "--output-budget",
+      "unbounded",
+      "--output-limit",
+      "unbounded",
+      "--output-include",
+      "full",
+    ],
     { encoding: "utf-8" },
   );
-  assert.strictEqual(read.status, 0, `pm list-all failed: ${read.stderr}`);
+  assert.strictEqual(read.status, 0, `pm list --all failed: ${read.stderr}`);
   cached = { pmRoot, envelope: JSON.parse(read.stdout) as Record<string, unknown>, stdout: read.stdout };
   // One captured fixture serves every test; tear the workspace down once the
   // whole file has run so nothing leaks into /tmp across local runs.
@@ -115,7 +130,14 @@ test("real list-all envelope baseline is complete with all items", { skip: !hasP
   assert.strictEqual(fx.envelope.has_more, false);
   assert.strictEqual((fx.envelope.completeness as Record<string, unknown>).status, "complete");
   const omission = fx.envelope.omission_receipt as Record<string, unknown> | undefined;
-  assert.ok(omission === undefined || omission.has_omissions === false);
+  assert.strictEqual(omission?.has_omissions, false);
+  assert.deepStrictEqual(omission?.omitted_field_groups, []);
+  const readOutput = fx.envelope.read_output as Record<string, unknown> | undefined;
+  assert.strictEqual(readOutput?.command, "list");
+  assert.strictEqual(readOutput?.within_budget, true);
+  assert.strictEqual(readOutput?.strings_compacted, false);
+  assert.strictEqual(readOutput?.rows_compacted, false);
+  assert.strictEqual(readOutput?.result_omitted, false);
   assert.strictEqual(Array.isArray(fx.envelope.items) && fx.envelope.items.length, 3);
   assert.strictEqual(fx.envelope.count, 3);
   assert.strictEqual(fx.envelope.total, 3);
@@ -127,8 +149,8 @@ test("export refuses an envelope with truncated=true", { skip: !hasPmCli() }, ()
     () => buildCsvExport(pmRoot, EXPORT_OPTS, seamFor(mutatedStdout((env) => { env.truncated = true; }))),
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
-      assert.match(err.message, /truncated=true/, "message must name the tripped signal");
-      assert.match(err.message, /count 3 of total 3/, "message must name the counts");
+      assert.match(err.message, /page_incomplete/u, "message must name the stable SDK finding");
+      assert.match(err.message, /count=3 of total=3/u, "message must name the counts");
       return true;
     },
   );
@@ -140,8 +162,8 @@ test("export refuses an envelope with has_more=true", { skip: !hasPmCli() }, () 
     () => buildCsvExport(pmRoot, EXPORT_OPTS, seamFor(mutatedStdout((env) => { env.has_more = true; }))),
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
-      assert.match(err.message, /has_more=true/, "message must name the tripped signal");
-      assert.match(err.message, /count 3 of total 3/, "message must name the counts");
+      assert.match(err.message, /page_incomplete/u, "message must name the stable SDK finding");
+      assert.match(err.message, /count=3 of total=3/u, "message must name the counts");
       return true;
     },
   );
@@ -155,8 +177,8 @@ test("export refuses an envelope with completeness.status partial", { skip: !has
     }))),
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
-      assert.match(err.message, /completeness\.status="partial"/, "message must name the tripped signal");
-      assert.match(err.message, /count 3 of total 3/, "message must name the counts");
+      assert.match(err.message, /source_incomplete/u, "message must name the stable SDK finding");
+      assert.match(err.message, /count=3 of total=3/u, "message must name the counts");
       return true;
     },
   );
@@ -171,7 +193,7 @@ test("export refuses an envelope with omission_receipt.has_omissions=true", { sk
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
       assert.match(err.message, /omission_receipt\.has_omissions=true/, "message must name the tripped signal");
-      assert.match(err.message, /count 3 of total 3/, "message must name the counts");
+      assert.match(err.message, /count=3 of total=3/u, "message must name the counts");
       return true;
     },
   );
@@ -184,8 +206,8 @@ test("the upsert key index refuses a truncated envelope instead of missing keys"
     () => loadKeyIndex(pmRoot, seamFor(mutatedStdout((env) => { env.truncated = true; }))),
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
-      assert.match(err.message, /truncated=true/);
-      assert.match(err.message, /count 3 of total 3/);
+      assert.match(err.message, /page_incomplete/u);
+      assert.match(err.message, /count=3 of total=3/u);
       return true;
     },
   );
@@ -198,8 +220,8 @@ test("the resume scan refuses a truncated envelope instead of seeing nothing app
     () => loadAppliedByTransaction(pmRoot, "csv-import-deadbeef", seamFor(mutatedStdout((env) => { env.truncated = true; }))),
     (err: unknown) => {
       assert.ok(err instanceof CommandError);
-      assert.match(err.message, /truncated=true/);
-      assert.match(err.message, /count 3 of total 3/);
+      assert.match(err.message, /page_incomplete/u);
+      assert.match(err.message, /count=3 of total=3/u);
       return true;
     },
   );
@@ -228,57 +250,54 @@ test("happy path: a complete envelope flows every item through all three readers
   assert.ok(applied.byRowIndex.has(0) && applied.byRowIndex.has(1));
 });
 
-test("assertListAllComplete covers the missing-receipt and listed-groups shapes", () => {
-  assert.throws(
-    () => assertListAllComplete({ items: [], count: 0, total: 0, truncated: false, has_more: false }),
-    (err: unknown) => {
-      assert.ok(err instanceof CommandError);
-      assert.match(err.message, /completeness\.status=\(missing\)/);
-      return true;
-    },
-  );
-  assert.throws(
-    () => assertListAllComplete({
-      items: [],
-      count: 0,
-      total: 0,
-      truncated: false,
-      has_more: false,
-      completeness: { status: "complete", unreadable_item_count: 0, unreadable_directory_count: 0 },
-      omission_receipt: { has_omissions: true, omitted_field_groups: ["body"] },
-    }),
-    (err: unknown) => {
-      assert.ok(err instanceof CommandError);
-      assert.match(err.message, /omitted_field_groups: body/);
-      return true;
-    },
-  );
-  assert.throws(
-    () => assertListAllComplete({
-      items: [{ id: "a" }, { id: "b" }],
-      truncated: true,
-      completeness: { status: "complete" },
-    }),
-    (err: unknown) => {
-      assert.ok(err instanceof CommandError);
-      assert.match(err.message, /count 2 of total 2/);
-      return true;
-    },
-  );
-  assert.doesNotThrow(() => assertListAllComplete({
-    items: [{ id: "a" }],
-    truncated: false,
-    has_more: false,
-    completeness: { status: "complete", unreadable_item_count: 0, unreadable_directory_count: 0 },
-    omission_receipt: { has_omissions: false },
-  }));
+test("assertListAllComplete refuses missing and contradictory current receipts", () => {
+  const cases: Array<[(env: Record<string, unknown>) => void, RegExp]> = [
+    [(env) => { delete env.completeness; }, /source_unchecked/u],
+    [(env) => { delete env.omission_receipt; }, /omission_receipt=<missing>/u],
+    [(env) => {
+      const omission = env.omission_receipt as Record<string, unknown>;
+      omission.omitted_field_group_count = 1;
+      omission.omitted_field_groups = ["body"];
+    }, /omission_receipt\.omitted_field_group_count=1/u],
+    [(env) => {
+      (env.completeness as Record<string, unknown>).unreadable_item_count = 1;
+    }, /completeness\.unreadable_item_count=1/u],
+    [(env) => { delete env.read_output; }, /read_output=<missing>/u],
+    [(env) => {
+      (env.read_output as Record<string, unknown>).rows_compacted = true;
+    }, /budget_compaction/u],
+    [(env) => {
+      delete (env.read_output as Record<string, unknown>).requested_dimensions;
+    }, /read_output\.requested_dimensions=<missing>/u],
+    [(env) => {
+      (env.read_output as Record<string, unknown>).requested_dimensions = ["include"];
+    }, /read_output\.requested_dimensions missing amount/u],
+    [(env) => { env.output_budget_truncation = { reason: "synthetic" }; }, /output_budget_truncation=<present>/u],
+    [(env) => { env.output_budget_exceeded = true; }, /output_budget_exceeded=<present>/u],
+    [(env) => {
+      const items = env.items as Array<Record<string, unknown>>;
+      items.push({ ...items[0] });
+      env.count = items.length;
+      env.total = items.length;
+    }, /duplicate_item_id/u],
+    [(env) => {
+      (env.items as Array<Record<string, unknown>>)[0].id = " ";
+    }, /invalid_item_id/u],
+  ];
+  for (const [mutate, expected] of cases) {
+    assert.throws(
+      () => assertListAllComplete(JSON.parse(mutatedStdout(mutate)) as unknown),
+      expected,
+    );
+  }
+  assert.throws(() => assertListAllComplete([]), /invalid_envelope/u);
 });
 
 test("export classifies an unparseable stdout instead of crashing raw", { skip: !hasPmCli() }, () => {
   const { pmRoot } = realEnvelope();
   assert.throws(
     () => buildCsvExport(pmRoot, EXPORT_OPTS, seamFor("not json")),
-    /Could not parse `pm list-all --json` output/,
+    /Could not parse `pm list --all --json` output/,
   );
 });
 
@@ -330,23 +349,31 @@ test("all whole-tracker readers classify process and parse failures without inve
 });
 
 
-test("no --limit reaches list-all, so the read is never bounded into a refusal", { skip: !hasPmCli() }, () => {
-  // The stated contract is that `list-all` is invoked WITHOUT a row ceiling:
-  // omitting --limit is what makes it return everything, and with the
-  // completeness gate in place a ceiling converts every workspace past that size
-  // from a large read into a hard refusal of export, resume and upsert. Nothing
-  // pinned that, so a well-meaning "add a sensible limit" change would have
-  // passed review and broken large workspaces silently.
+test("all whole-tracker readers send the exact canonical strict unbounded argv", { skip: !hasPmCli() }, () => {
   const fx = realEnvelope();
   const calls: string[][] = [];
   buildCsvExport(fx.pmRoot, EXPORT_OPTS, seamFor(fx.stdout, calls));
-  assert.ok(calls.length > 0, "the seam should have been invoked");
+  loadKeyIndex(fx.pmRoot, seamFor(fx.stdout, calls));
+  loadAppliedByTransaction(fx.pmRoot, "csv-import-deadbeef", seamFor(fx.stdout, calls));
+  assert.strictEqual(calls.length, 3);
+  const expected = [
+    "--pm-path",
+    fx.pmRoot,
+    "list",
+    "--all",
+    "--json",
+    "--include-body",
+    "--strict-read",
+    "--no-truncate",
+    "--output-budget",
+    "unbounded",
+    "--output-limit",
+    "unbounded",
+    "--output-include",
+    "full",
+  ];
   for (const argv of calls) {
-    assert.ok(argv.includes("list-all"), `expected a list-all invocation, got: ${argv.join(" ")}`);
-    assert.ok(
-      !argv.includes("--limit"),
-      `list-all must not be bounded by --limit, got: ${argv.join(" ")}`,
-    );
+    assert.deepStrictEqual(argv, expected);
   }
 });
 
@@ -357,6 +384,6 @@ test("an envelope whose count disagrees with total is refused even with every fl
       env.count = 10;
       env.total = 682;
     }))),
-    /disagree while every completeness flag is clear/,
+    /count_mismatch:.*count=10 of total=682/u,
   );
 });

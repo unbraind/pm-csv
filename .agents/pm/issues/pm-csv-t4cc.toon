@@ -1,0 +1,42 @@
+id: pm-csv-t4cc
+title: Replace deprecated complete-list aliases with the canonical certified reader
+description: "Migrate every pm-csv whole-tracker subprocess from the deprecated list-all alias to canonical list --all and certify the complete corpus through the public pm SDK before upsert, resume, or export consumes rows."
+type: Issue
+status: in_progress
+priority: 1
+tags[5]: agents,cli-ux,completeness,pm-sdk,tdd
+created_at: "2026-08-21T07:27:49.254Z"
+updated_at: "2026-08-21T07:46:56.503Z"
+assignee: codex
+claim_principal: codex
+author: codex
+estimated_minutes: 360
+acceptance_criteria: "All three runtime readers invoke pm list --all with JSON, strict-read, no-truncate, full projection, and both unbounded output controls; the public SDK inspectCompleteListResult and certifyCompleteListResult own shared validation while narrow supplemental checks reject the verified pm-cli issue 1078 gaps; malformed, bounded, omitted, unreadable, contradictory, duplicate-ID, and bare-array outputs fail closed before any mutation or export; exact argv and red-first behavior tests pass; the raw manifest is SDK-compatible at its minimum and development hosts; a mandatory packed npm/npx, Bun/bunx, and minimum-host matrix exercises the real extension; release, coverage, docstring, audit, pack, changelog, privacy, CI, and review gates are recorded honestly; PR remains unmerged and unpublished while the independent history blocker is open"
+reporter: codex
+severity: high
+environment: Installed pm CLI and SDK 2026.8.21 on the existing PR 73 feature branch
+repro_steps: "Run rg for list-all in index.ts and inspect loadKeyIndex, loadAppliedByTransaction, and buildCsvExport; each production subprocess still sends the deprecated alias and the package hand-maintains only part of the complete-list receipt contract."
+expected_result: "Every whole-tracker read uses the canonical command and the current public SDK contract with explicit unbounded full output, producing no alias diagnostic and refusing every unverifiable corpus."
+actual_result: "All three whole-tracker consumers now share canonical pm list --all argv with all statuses, JSON bodies, strict-read, no-truncate, full projection, and both unbounded controls. Public SDK inspection and certification own the common source, filter, pagination, projection, count, omission, and identity policy; a narrow supplement rejects the missing or contradictory unreadable, omission, and read-output evidence reproduced in pm-cli issue 1078. Development exact-pins pm CLI and SDK 2026.8.21; peer and manifest floors are 2026.8.20. Red-first tests failed on old argv and missing receipts, then passed. The full gate passes 173 tests, 66 documented declarations, zero clones, exact 3414 of 3414 lines, 746 of 746 branches, and 125 of 125 functions, a zero-production-vulnerability audit, clean nine-file pack, current generated changelog, and mandatory packed npm current, Bun current, and npm minimum scenarios with real strict import and complete export. PR 73 remains subject to fresh exact-head CI/review and independent history issue 72."
+affected_version: pm-csv 2026.8.16 source on PR 73
+component: whole-tracker readers
+customer_impact: "A deprecated or insufficiently certified reader can pollute stderr, miss rows during upsert/resume/export, duplicate imported work, or publish an incomplete CSV as success."
+files[9]{path,scope,note}:
+  index.ts,project,Canonical SDK-certified whole-tracker reader
+  manifest.json,project,Minimum compatible host contract
+  package-lock.json,project,Reproducible pm CLI SDK development dependency
+  package.json,project,Exact development host and mandatory acceptance gate
+  scripts/accept-packed.ts,project,Fresh npm Bun and minimum-host extension acceptance
+  test/atomic.test.ts,project,Canonical real-tracker test helper
+  test/edge-contracts.test.ts,project,Full-envelope reader seam coverage
+  test/list-all-completeness.test.ts,project,Red-first receipt and exact argv coverage
+  test/packaging.test.ts,project,Minimum and development SDK manifest contract
+tests[2]{command,path,scope,timeout_seconds}:
+  "npm run release:check",.,project,900
+  "npm run accept:packed",scripts/accept-packed.ts,project,300
+docs[4]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli-companion/blob/010e922423f6581c27296e92a7a1855c8d721003/.agents/pm/issues/pm-cli-website-cbyb.toon",global,Companion canonical-command migration ledger
+  "https://github.com/unbraind/pm-cli/issues/1078",global,Public SDK complete-list certification gaps
+  CHANGELOG.md,project,Generated unreleased change record
+  README.md,project,Canonical reader and packed acceptance contract
+body: ""

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
+import { certifyCompleteListResult, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
 
 import type {
   WorkspaceTransactionStep,
@@ -32,7 +33,7 @@ const EXIT_CODE = {
 /**
  * Error carrying a semantic process exit code, thrown by every failure path
  * the command runtime must turn into a clean nonzero exit (including the
- * list-all completeness refusals). Exported so regression tests can assert the
+ * complete-list refusals). Exported so regression tests can assert the
  * typed failure instead of matching on message text alone.
  */
 export class CommandError extends Error {
@@ -536,42 +537,105 @@ function assertPmOutputFit(result: SpawnSyncReturns<string>, label: string): voi
   );
 }
 
-/** Subset of the `pm list-all --json` envelope the completeness gate reads.
- *
- * `items` is typed loosely because the CLI owns its row shape; the fields below
- * it are the 2026.8.15 completeness receipt whose signals this package refuses
- * to consume silently at every list-all call site. */
-export interface ListAllEnvelope {
-  /** Rows the CLI actually returned. Length can be less than {@link ListAllEnvelope.total}. */
-  items?: PmItem[];
-  /** Number of rows in `items` as reported by the CLI. */
-  count?: number;
-  /** Number of rows that exist in the workspace. */
-  total?: number;
-  /** True when the row list was cut short (output budget, `--limit`, cursor). */
-  truncated?: boolean;
-  /** True when more rows exist past a cursor boundary. */
-  has_more?: boolean;
-  /** Readability receipt for the directories/items backing the list. */
-  completeness?: {
-    status?: string;
-    unreadable_item_count?: number;
-    unreadable_directory_count?: number;
-  };
-  /** Receipt for field groups omitted from the projection. */
-  omission_receipt?: {
-    has_omissions?: boolean;
-    omitted_field_group_count?: number;
-    omitted_field_groups?: string[];
-  };
+/** Canonical argv shared by every whole-tracker subprocess. */
+const COMPLETE_LIST_ARGS = [
+  "list",
+  "--all",
+  "--json",
+  "--include-body",
+  "--strict-read",
+  "--no-truncate",
+  "--output-budget",
+  "unbounded",
+  "--output-limit",
+  "unbounded",
+  "--output-include",
+  "full",
+] as const;
+
+/** Build one canonical complete-list request for a tracker root. */
+function completeListArgs(pmRoot: string): string[] {
+  return ["--pm-path", pmRoot, ...COMPLETE_LIST_ARGS];
+}
+
+/** Narrow an unknown JSON value to a non-array record. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/** Render a receipt value while preserving a missing field as evidence. */
+function describeReceiptValue(value: unknown): string {
+  return value === undefined ? "<missing>" : JSON.stringify(value);
+}
+
+/** Collect the pm 2026.8.21 receipt gaps not yet rejected by the public SDK. */
+function supplementalCompleteListFindings(record: Record<string, unknown>): string[] {
+  const findings: string[] = [];
+  const completeness = asRecord(record.completeness);
+  for (const field of ["unreadable_item_count", "unreadable_directory_count"] as const) {
+    const value = completeness?.[field];
+    if (!Number.isSafeInteger(value) || value !== 0) {
+      findings.push(`completeness.${field}=${describeReceiptValue(value)}`);
+    }
+  }
+
+  const omission = asRecord(record.omission_receipt);
+  if (omission === undefined) {
+    findings.push("omission_receipt=<missing>");
+  } else {
+    if (omission.has_omissions !== false) {
+      findings.push(`omission_receipt.has_omissions=${describeReceiptValue(omission.has_omissions)}`);
+    }
+    if (!Number.isSafeInteger(omission.omitted_field_group_count) || omission.omitted_field_group_count !== 0) {
+      findings.push(`omission_receipt.omitted_field_group_count=${describeReceiptValue(omission.omitted_field_group_count)}`);
+    }
+    if (!Array.isArray(omission.omitted_field_groups) || omission.omitted_field_groups.length !== 0) {
+      findings.push(`omission_receipt.omitted_field_groups=${describeReceiptValue(omission.omitted_field_groups)}`);
+    }
+  }
+
+  const readOutput = asRecord(record.read_output);
+  if (readOutput === undefined) {
+    findings.push("read_output=<missing>");
+  } else {
+    for (const [field, expected] of [
+      ["contract_version", 1],
+      ["command", "list"],
+      ["within_budget", true],
+      ["strings_compacted", false],
+      ["rows_compacted", false],
+      ["result_omitted", false],
+    ] as const) {
+      if (readOutput[field] !== expected) {
+        findings.push(`read_output.${field}=${describeReceiptValue(readOutput[field])}`);
+      }
+    }
+    const dimensions = readOutput.requested_dimensions;
+    if (!Array.isArray(dimensions)) {
+      findings.push("read_output.requested_dimensions=<missing>");
+    } else {
+      for (const dimension of ["include", "amount", "cost"] as const) {
+        if (!dimensions.includes(dimension)) {
+          findings.push(`read_output.requested_dimensions missing ${dimension}`);
+        }
+      }
+    }
+  }
+
+  if (record.output_budget_truncation !== undefined) findings.push("output_budget_truncation=<present>");
+  if (record.output_budget_exceeded !== undefined) findings.push("output_budget_exceeded=<present>");
+  return findings;
 }
 
 /**
- * Refuse an incomplete `pm list-all` envelope instead of consuming it.
+ * Refuse an incomplete canonical `pm list --all` envelope instead of consuming it.
  *
  * Reading `.items` without consulting the envelope's completeness receipt is
  * how this package once shipped a 10-row CSV export from a 682-item workspace
- * (pm 2026.8.14 defaulted list-all to a truncated answer; verified on this
+ * (pm 2026.8.14 defaulted the deprecated list-all alias to a truncated answer;
+ * verified on this
  * host), saw none of the applied rows on an atomic-import resume scan, and
  * missed upsert keys - each reporting success. Any one of four independent
  * signals means the rows in `items` are NOT the whole workspace, so this
@@ -592,68 +656,32 @@ export interface ListAllEnvelope {
  * workspace, so refusing loudly is simpler and safer than a paging loop that
  * could itself silently drop rows.
  *
- * @param envelope - Parsed `pm list-all --json` output (any shape; non-envelope
- *                  input trips the completeness signal).
- * @throws {@link CommandError} naming the first tripped signal and the counts.
+ * Shared source, filter, pagination, projection, count, and identity rules come
+ * from the public SDK. A narrow package supplement rejects the missing or
+ * contradictory omission, read-output, and unreadable-counter evidence
+ * reproduced in pm-cli issue 1078. The returned rows are therefore safe for
+ * mutation planning, resume reconciliation, and CSV export.
+ *
+ * @param envelope - Parsed canonical complete-list JSON output.
+ * @returns Every certified full item row.
+ * @throws {@link CommandError} naming every tripped signal and the counts.
  */
-export function assertListAllComplete(envelope: unknown): void {
-  const env = (envelope ?? {}) as ListAllEnvelope;
-  // count/total are reported straight from the envelope when present; fall
-  // back to counting rows so a hand-shaped envelope still reports honest
-  // figures instead of `undefined`.
-  const count = typeof env.count === "number"
-    ? env.count
-    : Array.isArray(env.items) ? env.items.length : 0;
-  const total = typeof env.total === "number" ? env.total : count;
-  const counts = `count ${count} of total ${total}`;
-  if (env.truncated === true) {
+export function assertListAllComplete(envelope: unknown): PmItem[] {
+  const record = asRecord(envelope);
+  const sdkFindings = inspectCompleteListResult(envelope).findings
+    .map((finding) => `${finding.code}: ${finding.message}`);
+  const findings = record === undefined
+    ? sdkFindings
+    : [...sdkFindings, ...supplementalCompleteListFindings(record)];
+  if (findings.length > 0 || record === undefined) {
+    const count = record && typeof record.count === "number" ? record.count : "unknown";
+    const total = record && typeof record.total === "number" ? record.total : "unknown";
     throw new CommandError(
-      `Refusing incomplete pm list-all answer: truncated=true (${counts}). `
-      + "The item list was cut short (output budget or limit); a partial result "
-      + "would report success while missing items. Narrow the query "
-      + "(--status/--type) or raise the output budget, then retry.",
+      `pm list --all complete-corpus answer was refused: ${findings.join("; ")}; count=${count} of total=${total}. `
+      + "A partial workspace read would corrupt import reconciliation or CSV export; retry the canonical strict unbounded read.",
     );
   }
-  if (env.has_more === true) {
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: has_more=true (${counts}). `
-      + "Rows exist beyond the returned page; consuming the page as the whole "
-      + "workspace would silently drop them.",
-    );
-  }
-  if (env.completeness?.status !== "complete") {
-    const status = env.completeness?.status === undefined ? "(missing)" : JSON.stringify(env.completeness.status);
-    const unreadable = `unreadable_item_count=${env.completeness?.unreadable_item_count ?? 0}`
-      + `, unreadable_directory_count=${env.completeness?.unreadable_directory_count ?? 0}`;
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: completeness.status=${status} `
-      + `(${unreadable}; ${counts}). Some workspace items could not be read, so `
-      + "the returned list is not the whole workspace.",
-    );
-  }
-  if (env.omission_receipt?.has_omissions === true) {
-    const groups = env.omission_receipt?.omitted_field_groups ?? [];
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: omission_receipt.has_omissions=true `
-      + `(omitted_field_groups: ${groups.length ? groups.join(", ") : "(none listed)"}; ${counts}). `
-      + "Field groups were dropped from the projection, so the rows are present "
-      + "but degraded; re-read without the field-omitting options.",
-    );
-  }
-  // Last, and independent of the four flags: the envelope's own arithmetic.
-  // `count` and `total` are read above only to describe the other refusals, but
-  // they are themselves a completeness claim — an envelope reporting count 10 of
-  // total 682 with every flag clear is internally inconsistent, and trusting the
-  // flags over the arithmetic would consume 10 rows as the whole workspace. This
-  // is the case where the receipt contradicts itself, and the safe reading of a
-  // self-contradictory receipt is "not complete".
-  if (typeof env.count === "number" && typeof env.total === "number" && env.count !== env.total) {
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: ${counts} disagree while every `
-      + "completeness flag is clear. The envelope contradicts itself, so it cannot "
-      + "be treated as the whole workspace.",
-    );
-  }
+  return certifyCompleteListResult(record).items as PmItem[];
 }
 
 /** Minimal spawn options the seam forwards to `spawnSync`. */
@@ -665,7 +693,7 @@ export interface PmSpawnOptions {
 }
 
 /**
- * Injectable seam over the `pm` shell-out every list-all reader uses.
+ * Injectable seam over the `pm` shell-out every complete-list reader uses.
  *
  * A parameter defaulting to the real `spawnPm`, so production callers are
  * unchanged while tests substitute a canned envelope - captured from the real
@@ -1208,27 +1236,27 @@ function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): 
 
 /**
  * List existing items once and build a lookup from csv-key provenance value to
- * item id, for idempotent upsert. The list-all answer must be COMPLETE — a
+ * item id, for idempotent upsert. The complete-list answer must be COMPLETE — a
  * truncated answer silently missing keys would turn upserts into duplicate
  * creates — so the envelope's receipt is checked before any key is read.
  */
 function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, string> {
   const index = new Map<string, string>();
   const result = spawn(
-    ["--path", pmRoot, "list-all", "--json"],
+    completeListArgs(pmRoot),
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   // Route a stdout overrun (status: null, empty stderr, ENOBUFS) through
   // assertPmOutputFit as a hard, named error instead of the generic
-  // "pm list-all failed" the old `result.error` branch reported. An overrun is
+  // "pm list --all failed" the old `result.error` branch reported. An overrun is
   // a size problem, not a pm failure: a too-large workspace would otherwise
   // surface as a bare Node message and send the operator to pm's stderr instead
   // of to PM_LIST_MAX_BUFFER, and — worse — a null status combined with this
   // package's `status !== 0` guard would degrade into an empty key index,
   // turning every upsert into a duplicate create.
-  assertPmOutputFit(result, "list-all");
+  assertPmOutputFit(result, "pm list --all");
   if (result.status !== 0) {
-    throw new CommandError(result.stderr?.trim() || "pm list-all failed");
+    throw new CommandError(result.stderr?.trim() || "pm list --all failed");
   }
   let items: PmItem[] = [];
   let parsed: unknown;
@@ -1241,13 +1269,12 @@ function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, str
     // silent-partial failure the completeness gate below exists to stop, so the
     // two paths must agree.
     throw new CommandError(
-      "Could not parse `pm list-all --json` output while building the upsert key index. "
+      "Could not parse `pm list --all --json` output while building the upsert key index. "
         + "Refusing rather than treating an unreadable response as an empty workspace, "
         + "which would make --upsert create duplicates.",
     );
   }
-  assertListAllComplete(parsed);
-  items = (parsed as ListAllEnvelope).items ?? [];
+  items = assertListAllComplete(parsed);
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (tag.startsWith(KEY_TAG_PREFIX)) {
@@ -1549,7 +1576,7 @@ function loadAppliedByTransaction(
 ): { byRowIndex: Map<number, string> } {
   const byRowIndex = new Map<number, string>();
   const rowMarkerPrefix = `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`;
-  const r = spawn(["--path", pmRoot, "list-all", "--json"], {
+  const r = spawn(completeListArgs(pmRoot), {
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
@@ -1561,7 +1588,7 @@ function loadAppliedByTransaction(
   // hard, named error. The following non-zero branch rejects ordinary command failures.
   // Parse failures and incomplete envelopes below also refuse the resume scan;
   // none of these unreadable states may become an empty applied-row map.
-  assertPmOutputFit(r, "list-all");
+  assertPmOutputFit(r, "pm list --all");
   // Fail closed on both failure shapes, for the same reason the completeness
   // gate below refuses: an empty resume map says "nothing was applied", so a
   // resume RE-IMPORTS rows that already landed. An unreadable answer is not an
@@ -1569,7 +1596,7 @@ function loadAppliedByTransaction(
   if (r.status !== 0) {
     throw new CommandError(
       r.stderr?.trim()
-        || "pm list-all failed while scanning for applied rows. Refusing rather than "
+        || "pm list --all failed while scanning for applied rows. Refusing rather than "
            + "treating an unreadable response as an empty transaction, which would re-import applied rows.",
     );
   }
@@ -1579,7 +1606,7 @@ function loadAppliedByTransaction(
     parsed = JSON.parse(r.stdout);
   } catch {
     throw new CommandError(
-      "Could not parse `pm list-all --json` output while scanning for applied rows. "
+      "Could not parse `pm list --all --json` output while scanning for applied rows. "
         + "Refusing rather than treating an unreadable response as an empty transaction, "
         + "which would re-import rows that already landed.",
     );
@@ -1587,8 +1614,7 @@ function loadAppliedByTransaction(
   // An incomplete envelope must refuse here, NOT degrade to an empty map: a
   // resume scan that misses applied rows silently re-imports them (wrong
   // data, the exact failure this package exists to prevent).
-  assertListAllComplete(parsed);
-  items = (parsed as ListAllEnvelope).items ?? [];
+  items = assertListAllComplete(parsed);
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (!tag.startsWith(rowMarkerPrefix)) continue;
@@ -2713,10 +2739,10 @@ function resolveExportColumns(
 /**
  * Read every item from a tracker and render the CSV export body.
  *
- * Shells out to `pm list-all --json --include-body` with an explicit
+ * Shells out to canonical `pm list --all --json --include-body` with an explicit
  * `maxBuffer`, because a stdout overrun kills the child with a null status and
  * an EMPTY stderr — which would otherwise surface as an unexplained
- * "pm list-all failed" rather than as the size problem it is.
+ * "pm list --all failed" rather than as the size problem it is.
  *
  * Status and type filters are applied after the read, not pushed into the
  * query. Each item's `csv_source` is then derived from its internal source tag
@@ -2743,31 +2769,30 @@ function buildCsvExport(
   spawn: PmSpawn = spawnPm,
 ): { csvText: string; count: number; eol: "\n" | "\r\n" } {
   const result = spawn(
-    ["--path", pmRoot, "list-all", "--json", "--include-body"],
+    completeListArgs(pmRoot),
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   // A stdout overrun kills the child with status null and EMPTY stderr, so name
-  // the real cause instead of reporting an unexplained "pm list-all failed".
+  // the real cause instead of reporting an unexplained "pm list --all failed".
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     throw new CommandError(
       code === "ENOBUFS"
-        ? `pm list-all output exceeded the ${pmListMaxBuffer()} byte read buffer; narrow the export (--status/--type) or raise the PM_LIST_MAX_BUFFER env var.`
-        : `pm list-all failed: ${result.error.message}`,
+        ? `pm list --all output exceeded the ${pmListMaxBuffer()} byte read buffer; narrow the export (--status/--type) or raise the PM_LIST_MAX_BUFFER env var.`
+        : `pm list --all failed: ${result.error.message}`,
     );
   }
   if (result.status !== 0) {
-    throw new CommandError(result.stderr || "pm list-all failed");
+    throw new CommandError(result.stderr || "pm list --all failed");
   }
 
-  let parsed: ListAllEnvelope;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout) as ListAllEnvelope;
+    parsed = JSON.parse(result.stdout) as unknown;
   } catch (err) {
-    throw new CommandError(`Could not parse \`pm list-all --json\` output: ${err instanceof Error ? err.message : String(err)}`);
+    throw new CommandError(`Could not parse \`pm list --all --json\` output: ${err instanceof Error ? err.message : String(err)}`);
   }
-  assertListAllComplete(parsed);
-  let items: PmItem[] = parsed.items ?? [];
+  let items = assertListAllComplete(parsed);
   if (opts.statusFilter) items = items.filter((i) => i.status === opts.statusFilter);
   if (opts.typeFilter) items = items.filter((i) => i.type === opts.typeFilter);
 
@@ -3218,7 +3243,7 @@ export {
 // with synthetic results.
 // ---------------------------------------------------------------------------
 export { loadAppliedByTransaction, itemStatus, compensateCreate };
-// list-all completeness surface: the shared refusal gate plus the two internal
+// Complete-list surface: the shared refusal gate plus the two internal
 // readers whose silently-partial behavior the regression tests pin. Exported
 // ONLY for those tests; production callers keep using the command paths.
 export { loadKeyIndex, buildCsvExport };
