@@ -1,0 +1,39 @@
+id: pm-csv-zv31
+title: Post-apply close conflict retains applied transaction markers
+description: "Greptile exact-head review of PR 73 found that treating every nonzero close receipt as an unverified failure preserves markers even when the close mutation actually persisted and the item is terminal. The next import then mistakes the compensated row for an applied row and skips recreating it. Re-read status after a nonzero close receipt: clean markers only with exact closed evidence, otherwise retain them for reconciliation."
+type: Issue
+status: closed
+priority: 1
+tags[5]: atomic,compensation,race,reconciliation,review
+created_at: "2026-08-20T20:26:34.789Z"
+updated_at: "2026-08-20T20:29:48.067Z"
+closed_at: "2026-08-20T20:29:48.047Z"
+completed_at: "2026-08-20T20:29:48.047Z"
+author: codex
+estimated_minutes: 60
+acceptance_criteria: "A red real-tracker race regression persists close but returns exit 4 and proves old code retains markers; Compensation rechecks status after every nonzero close receipt; Exact closed evidence permits marker cleanup; Open or unknown status preserves both markers; Status lookup failure remains best-effort and never aborts the compensation sweep; npm run release:check passes exact 100/100/100/100"
+risk: high
+confidence: high
+severity: critical
+repro_steps: Create a marked open item; make the pm close wrapper persist the close but return exit 4; run compensateCreate; inspect status and transaction markers; retry would otherwise skip the closed tombstone.
+resolution: "After any nonzero compensation close receipt, re-read the item status through the best-effort status seam. Remove transaction markers only when that recheck proves closed; retain markers and surface the close failure for open, absent, or unverified results."
+expected_result: "After any nonzero close receipt, an exact closed status recheck permits marker cleanup; open or unknown status preserves both markers; no receipt alone is treated as closure evidence."
+actual_result: "The post-apply exit-4 race now rechecks as closed and removes both markers, while the existing exit-4-with-open-state regression retains both markers. Status read overruns remain non-throwing in the compensation sweep."
+affected_version: unreleased
+fixed_version: unreleased
+component: atomic-import
+regression: true
+dependencies[2]{id,kind,created_at,author,source_kind,author_source}:
+  pm-csv-21ik,related,"2026-08-20T20:26:34.789Z",codex,review,detected
+  pm-csv-qebc,related,"2026-08-20T20:26:34.789Z",codex,review,detected
+notes[1]{created_at,author,text}:
+  "2026-08-20T20:29:47.551Z",codex,"TDD receipt: the real wrapper delegated pm close so it persisted, then returned exit 4. The new regression was red because both markers remained on the closed tombstone and is green after the evidence-based status recheck."
+learnings[1]{created_at,author,text}:
+  "2026-08-20T20:29:47.551Z",codex,"A mutation receipt and mutation state are independent evidence. After an ambiguous receipt, recovery should query authoritative state and branch only on exact positive evidence."
+files[2]{path,scope,note}:
+  index.ts,project,evidence-based post-close compensation
+  test/atomic.test.ts,project,post-apply conflict race regression
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,note}:
+  "npm run release:check",package.json,project,300,tracker,exact full release gate
+close_reason: "Greptile P1 fixed with a real post-apply exit-4 race regression. npm run release:check passes 173 tests at exact 100.00/100.00/100.00 coverage, 63 documented declarations, zero clones, zero production vulnerabilities, clean packaging, and current changelog."
+body: ""

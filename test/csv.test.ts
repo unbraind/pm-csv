@@ -31,6 +31,7 @@ import {
   suggestClosest,
   validateFieldMapTargets,
   checkMapSourcesPresent,
+  type ParsedRow,
 } from "../index.ts";
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -280,6 +281,7 @@ test("csv-key provenance values are encoded before comma-separated tag transport
   assert.equal(encoded, "Fix%20navbar%2C%20urgent");
   assert.equal(decodeKeyTagValue(encoded), value);
   assert.equal(decodeKeyTagValue("legacy,raw"), "legacy,raw");
+  assert.equal(decodeKeyTagValue("%E0%A4%A"), "%E0%A4%A", "malformed legacy escapes remain inspectable");
 });
 
 test("normalizeKeyValue: folds case + trims so re-import dedups despite pm tag lowercasing", () => {
@@ -439,7 +441,7 @@ test("strictValidationIssues promotes warning-class row issues to blocking impor
 // Import row-filtering (parseImportFilter + rowMatchesFilter)
 // ---------------------------------------------------------------------------
 
-function makeRow(over: Partial<Record<string, unknown>> = {}): any {
+function makeRow(over: Partial<ParsedRow> = {}): ParsedRow {
   return {
     title: "T",
     status: "open",
@@ -700,6 +702,14 @@ test("StreamingCSVParser: handles CRLF split exactly across chunks", () => {
   assert.deepEqual(rows, [["a", "b"], ["1", "2"]]);
 });
 
+test("StreamingCSVParser: preserves a final bare carriage return as data", () => {
+  const rows: string[][] = [];
+  const parser = new StreamingCSVParser(",", (row) => rows.push(row));
+  parser.push("a,b\r");
+  parser.end();
+  assert.deepEqual(rows, [["a", "b\r"]]);
+});
+
 test("StreamingCSVParser: empty input produces no rows", () => {
   const rows: string[][] = [];
   const parser = new StreamingCSVParser(",", (r) => rows.push(r));
@@ -742,6 +752,30 @@ test("streamCSVFile: rejects on a non-existent file", async () => {
   await assert.rejects(
     () => streamCSVFile("/nonexistent/path/file.csv", ",", "utf-8", () => {}),
   );
+});
+
+test("streamCSVFile: propagates row-consumer failures during data and final flush", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-stream-"));
+  const duringData = join(root, "data.csv");
+  const duringEnd = join(root, "final.csv");
+  writeFileSync(duringData, "title\nOne\n", "utf8");
+  writeFileSync(duringEnd, "title", "utf8");
+  try {
+    await assert.rejects(
+      streamCSVFile(duringData, ",", "utf-8", () => {
+        throw new Error("consumer data failure");
+      }),
+      /consumer data failure/u,
+    );
+    await assert.rejects(
+      streamCSVFile(duringEnd, ",", "utf-8", () => {
+        throw new Error("consumer final failure");
+      }),
+      /consumer final failure/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

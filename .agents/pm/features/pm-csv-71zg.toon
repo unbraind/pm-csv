@@ -6,7 +6,9 @@ status: open
 priority: 2
 tags[4]: atomic,csv,rollback,transaction
 created_at: "2026-08-09T00:13:19.589Z"
-updated_at: "2026-08-09T00:13:19.589Z"
+updated_at: "2026-08-20T19:48:36.027Z"
 author: claude
 acceptance_criteria: "The transaction record stores the prior values of every field an update will modify, written before the update subprocess runs; compensation restores those values rather than writing an invented value; the record format change is versioned so an in-flight transaction written by an older version is detected and refused rather than mis-restored; a regression test drives a mid-import failure after an update and asserts the pre-import field values are restored exactly"
+notes[1]{created_at,author,text}:
+  "2026-08-20T19:48:35.990Z",codex,"PR 73 Greptile review reconfirmed this open capability gap: aggregate atomic failures can only make a conservative reconciliation claim until prior update state is journaled and restored. pm-csv-5si5 fixes the misleading receipt without pretending this feature is complete."
 body: ""

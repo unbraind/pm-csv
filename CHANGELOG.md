@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Enforce exact all-source 100/100/100 coverage ([pm-csv-oqmm](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-oqmm.toon))
+
+### Fixed
+
+- Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
+- Adopt the canonical certified complete-list reader ([pm-csv-t4cc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-t4cc.toon))
+- Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))
+- Post-apply close conflict retains applied transaction markers ([pm-csv-zv31](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zv31.toon))
+- loadAppliedByTransaction comment describes unsafe pre-fix marker ordering ([pm-csv-21ik](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-21ik.toon))
+- Failed atomic create compensation erases orphan reconciliation markers ([pm-csv-qebc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-qebc.toon))
+- Atomic aggregate failure receipt overstates rollback certainty ([pm-csv-5si5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-5si5.toon))
+- Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
+- Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed

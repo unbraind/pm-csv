@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import extension, { atomicTransactionId } from "../index.ts";
+import { commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
+import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+
+import extension, { atomicTransactionId, compensateCreate } from "../index.ts";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the `--atomic` CSV import path (pm-cli >= 2026.7.19
@@ -28,12 +31,46 @@ interface RunCtx {
   sdk?: { commitWorkspaceTransaction?: unknown };
 }
 
+/** Minimal command definition retained by the focused atomic integration harness. */
+interface CapturedCommand {
+  name: string;
+  flags?: Array<{ long: string }>;
+  run(context: RunCtx): Promise<ImportCommandResult>;
+}
+
+/** Structured import receipt returned by the csv import command. */
+interface ImportCommandResult {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+/** Item fields inspected by the atomic integration assertions. */
+interface ListedItem {
+  id: string;
+  title: string;
+  status: string;
+  priority?: number;
+  tags?: string[];
+}
+
+/** Command failure shape exposed by package command errors. */
+interface CommandFailure extends Error {
+  exitCode?: number;
+}
+
+/** Success or failure from invoking the captured import handler. */
+type ImportOutcome =
+  | { result: ImportCommandResult; error?: never }
+  | { result?: never; error: CommandFailure };
+
 /** Activate the extension against a mock api, returning the registered commands. */
-function captureCommands(): any[] {
-  const commands: any[] = [];
+function captureCommands(): CapturedCommand[] {
+  const commands: CapturedCommand[] = [];
   const noop = () => {};
   const api = {
-    registerCommand: (def: any) => commands.push(def),
+    registerCommand: (def: CapturedCommand) => commands.push(def),
     registerParser: noop,
     registerPreflight: noop,
     registerService: noop,
@@ -54,7 +91,7 @@ function captureCommands(): any[] {
       onIndex: noop,
     },
   };
-  extension.activate(api as any);
+  extension.activate(api as unknown as ExtensionApi);
   return commands;
 }
 
@@ -71,14 +108,29 @@ function freshTracker(): string {
   return root;
 }
 
-/** List all items in a tracker as JSON. */
-function listItems(pmRoot: string): any[] {
-  const r = spawnSync("pm", ["--path", pmRoot, "list-all", "--json"], {
+/** List every item in a tracker through the canonical strict unbounded query. */
+function listItems(pmRoot: string): ListedItem[] {
+  const r = spawnSync("pm", [
+    "--pm-path",
+    pmRoot,
+    "list",
+    "--all",
+    "--json",
+    "--include-body",
+    "--strict-read",
+    "--no-truncate",
+    "--output-budget",
+    "unbounded",
+    "--output-limit",
+    "unbounded",
+    "--output-include",
+    "full",
+  ], {
     encoding: "utf-8",
     maxBuffer: 16 * 1024 * 1024,
   });
-  if (r.status !== 0) throw new Error(`pm list-all failed: ${r.stderr}`);
-  return (JSON.parse(r.stdout).items ?? []) as any[];
+  if (r.status !== 0) throw new Error(`pm list --all failed: ${r.stderr}`);
+  return (JSON.parse(r.stdout) as { items?: ListedItem[] }).items ?? [];
 }
 
 /** Run the `csv import` command handler and return { result?, error? }. */
@@ -86,7 +138,7 @@ async function runImport(
   pmRoot: string,
   file: string,
   options: Record<string, unknown>,
-): Promise<{ result?: any; error?: Error }> {
+): Promise<ImportOutcome> {
   const commands = captureCommands();
   const cmd = commands.find((c) => c.name === "csv import");
   assert.ok(cmd, "csv import command should be registered");
@@ -95,12 +147,16 @@ async function runImport(
     args: [file],
     options,
     global: { author: "pi-agent" },
+    sdk: {
+      commitWorkspaceTransaction: (options: Parameters<typeof commitWorkspaceTransaction>[0]) =>
+        commitWorkspaceTransaction({ ...options, pmRoot }),
+    },
   };
   try {
     const result = await cmd.run(ctx);
     return { result };
   } catch (err) {
-    return { error: err as Error };
+    return { error: err as CommandFailure };
   }
 }
 
@@ -125,6 +181,10 @@ function realPmPath(): string {
  *     recovered". No real item is created.
  *   - `<root>/fake-close-fail`: every `pm close ...` exits 1 with a simulated
  *     error, to exercise the close-failure / compensation paths.
+ *   - `<root>/fake-close-conflict`: every `pm close ...` exits 4 while leaving
+ *     the item open, proving an invalid-state receipt is not closure evidence.
+ *   - `<root>/fake-close-after-apply-conflict`: delegates the close so the item
+ *     becomes terminal, then exits 4 to simulate a lost/conflicting receipt.
  *   - `<root>/fake-create-kill`: `pm create --json` is terminated by SIGKILL
  *     before it writes anything (no output, no persisted item), so spawnSync
  *     reports `status: null`, `signal: "SIGKILL"`, no `error`, empty `stdout` —
@@ -166,6 +226,20 @@ function installFakePm(): () => void {
     "if (root && existsSync(root + '/fake-close-fail') && has('close')) {",
     "  process.stderr.write('simulated pm close failure (test)\\n');",
     "  process.exit(1);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-conflict') && has('close')) {",
+    "  process.stderr.write('simulated pm close conflict (test)\\n');",
+    "  process.exit(4);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-after-apply-conflict') && has('close')) {",
+    "  const r = spawnSync(realPm, args, { encoding: 'utf-8' });",
+    "  if (r.status !== 0) {",
+    "    if (r.stdout) writeSync(1, r.stdout);",
+    "    if (r.stderr) writeSync(2, r.stderr);",
+    "    process.exit(r.status == null ? 1 : r.status);",
+    "  }",
+    "  process.stderr.write('simulated post-apply close conflict (test)\\n');",
+    "  process.exit(4);",
     "}",
     // Makes the status LOOKUP itself fail, so itemStatus() returns undefined.
     // An unknown status must never be read as proof that compensation worked.
@@ -250,8 +324,131 @@ test("csv import declares --atomic flag", () => {
   const commands = captureCommands();
   const importCmd = commands.find((c) => c.name === "csv import");
   assert.ok(importCmd, "csv import command should be registered");
-  const longs = (importCmd.flags ?? []).map((f: any) => f.long);
+  const longs = (importCmd.flags ?? []).map((flag) => flag.long);
   assert.ok(longs.includes("--atomic"), "csv import should expose --atomic");
+});
+
+test("--atomic refuses an incompatible host that omits the transaction SDK", async () => {
+  const root = freshTracker();
+  try {
+    const file = join(root, "one.csv");
+    writeFileSync(file, "title\nOne\n", "utf8");
+    const missingTracker = join(root, "missing-tracker");
+    const command = captureCommands().find((candidate) => candidate.name === "csv import");
+    assert.ok(command, "csv import command should be registered");
+    await assert.rejects(
+      command.run({ pm_root: missingTracker, args: [file], options: { atomic: true } } satisfies RunCtx),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("host-injected commitWorkspaceTransaction SDK primitive"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed create compensation preserves transaction markers for reconciliation", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-reconcile";
+  const rowTag = "csv-txrow:csv-import-reconcile#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Recoverable orphan", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-fail"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the failed compensation target remains inspectable");
+    assert.equal(item.status, "open", "the simulated close failure leaves the item open");
+    assert.ok(item.tags?.includes(transactionTag), "the batch marker must remain on an open orphan");
+    assert.ok(item.tags?.includes(rowTag), "the row marker must remain on an open orphan");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed marker cleanup leaves a closed transaction-marked item for reconciliation", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-cleanup";
+  const rowTag = "csv-txrow:csv-import-cleanup#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Closed marked compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-update-fail"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the marker-cleanup target remains inspectable");
+    assert.equal(item.status, "closed", "compensation closes the item before marker cleanup");
+    assert.ok(item.tags?.includes(transactionTag), "a failed cleanup retains the batch marker");
+    assert.ok(item.tags?.includes(rowTag), "a failed cleanup retains the row marker");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a nonzero close conflict is not treated as proof that compensation closed the item", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-conflict";
+  const rowTag = "csv-txrow:csv-import-conflict#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Conflicted compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-conflict"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the conflict target remains inspectable");
+    assert.equal(item.status, "open", "a nonzero close receipt does not prove closure");
+    assert.ok(item.tags?.includes(transactionTag), "the batch marker survives the conflict");
+    assert.ok(item.tags?.includes(rowTag), "the row marker survives the conflict");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a nonzero close receipt cleans markers only after a status recheck proves closure", () => {
+  const root = freshTracker();
+  const transactionTag = "csv-tx:csv-import-race";
+  const rowTag = "csv-txrow:csv-import-race#0";
+  const created = spawnSync(
+    "pm",
+    ["--path", root, "create", "--title", "Raced compensation", "--tags", `${transactionTag},${rowTag}`, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  const id = (JSON.parse(created.stdout) as { id: string }).id;
+  writeFileSync(join(root, "fake-close-after-apply-conflict"), "");
+  const restorePm = installFakePm();
+  try {
+    compensateCreate(root, id, [rowTag, transactionTag], "test atomic compensation");
+    const item = listItems(root).find((candidate) => candidate.id === id);
+    assert.ok(item, "the raced compensation target remains inspectable");
+    assert.equal(item.status, "closed", "the delegated close persisted before the conflict receipt");
+    assert.ok(!item.tags?.includes(transactionTag), "confirmed closure removes the batch marker");
+    assert.ok(!item.tags?.includes(rowTag), "confirmed closure removes the row marker");
+  } finally {
+    restorePm();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("--atomic happy path: N valid rows create N items with correct ImportResult", async () => {
@@ -286,12 +483,13 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
     const { result, error } = await runImport(root, file, { atomic: true });
     // Atomic failure surfaces as a non-zero exit (CommandError), no result.
     assert.ok(error, "atomic import with a failing row should error");
-    assert.equal((error as any).exitCode, 1, "exit code should be 1");
+    assert.equal(error.exitCode, 1, "exit code should be 1");
     assert.match(
       error!.message,
-      /rolled back/i,
-      "error should clearly state the import was rolled back",
+      /cannot claim a clean tracker/i,
+      "error must not overstate best-effort compensation as a proven rollback",
     );
+    assert.match(error!.message, /may remain.*reconcile/is);
 
     const items = listItems(root);
     // Every item created by the transaction before the failure must be
@@ -430,7 +628,7 @@ test("--atomic combined with --stream fails fast with a clear usage error", asyn
   try {
     const { error } = await runImport(root, file, { atomic: true, stream: true });
     assert.ok(error, "--atomic + --stream should error");
-    assert.equal((error as any).exitCode, 2, "usage error exit code");
+    assert.equal(error.exitCode, 2, "usage error exit code");
     assert.match(error!.message, /--atomic cannot be combined with --stream/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -520,7 +718,9 @@ test("--atomic --key upsert mid-import failure: created rows compensated, pre-ex
   try {
     const { error } = await runImport(root, file, { atomic: true, key: "key" });
     assert.ok(error, "atomic upsert with a failing row should error");
-    assert.match(error!.message, /rolled back/i);
+    assert.match(error!.message, /pre-existing item updates are intentionally not reverted/i);
+    assert.match(error!.message, /cannot claim a clean tracker/i);
+    assert.match(error!.message, /may remain.*reconcile/is);
 
     const items = listItems(root);
     // The pre-existing updated item must remain OPEN (update not reverted) and

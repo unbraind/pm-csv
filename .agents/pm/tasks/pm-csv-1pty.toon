@@ -6,18 +6,34 @@ status: closed
 priority: 1
 tags[5]: automation,pm-package,privacy,release,typescript
 created_at: "2026-05-26T11:07:53.503Z"
-updated_at: "2026-05-26T11:07:53.503Z"
+updated_at: "2026-08-20T19:56:10.810Z"
+closed_at: "2026-08-20T19:53:27.615Z"
+completed_at: "2026-05-26T11:07:53.503Z"
 author: codex
 acceptance_criteria: Package installs with pm install; npm release gate passes; changelog is generated from package-local pm data; tracked files and reachable git history have no secret pattern hits.
 risk: medium
 confidence: high
 release: 0.1.0
-files[3]{path,scope,note}:
-  package.json,project,null
-  .github/workflows/release.yml,project,null
-  .agents/pm,project,null
-tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
-  "npm run release:check",null,project,null,null,null,null,null,null,null,null,null,null,null,null,passed in package verification loop
-docs[1]{path,scope,note}:
-  CHANGELOG.md,project,null
-body: "Implemented release-ready package metadata and automation for pm-csv using the latest pm CLI 2026.5.24 and pm SDK contracts. Added local pm project tracking, CI/release workflows, pm-changelog integration, TypeScript checks, production audit gates, dry-run packaging, installability metadata, and registry metadata. Verified no private tokens or personal files are present in tracked files or reachable git history before release preparation."
+resolution: Completed the original 2026-05-26 release-hardening scope; later full-history privacy evidence is tracked as an independent future-publication blocker.
+expected_result: Package-local release tooling and checks are established while later evidence can supersede publication approval without erasing historical changelog records.
+actual_result: The original hardening remains implemented and its historical changelog entry is retained; the 2026-08-20 all-ref audit independently blocks future publication through pm-csv-uaq1.
+notes[3]{created_at,author,text}:
+  "2026-08-20T19:38:43.301Z",codex,"Superseding evidence: the 2026-08-20 all-ref audit invalidates the earlier release-readiness statement for reachable history. Current tree checks remain clean; publication is blocked by pm-csv-uaq1 until the maintainer authorizes and coordinates history repair."
+  "2026-08-20T19:53:27.138Z",codex,PR 73 CodeRabbit correctly noted that the retained body contradicted the newer all-ref finding and that reopening a released item erased its historical changelog entry. The body is now truthful; this historical task is re-closed while pm-csv-uaq1 remains the active future-publication blocker.
+  "2026-08-20T19:56:10.790Z",codex,Corrected completed_at back to the original 2026-05-26 completion boundary so pm-changelog preserves the historical release entry instead of reclassifying it as new Unreleased work.
+files[4]:
+  - path: .agents/pm
+    scope: project
+  - path: .github/workflows/release.yml
+    scope: project
+  - path: LICENSE
+    scope: project
+    note: MIT license for the public pm-csv package
+  - path: package.json
+    scope: project
+tests[1]{command,scope,note}:
+  "npm run release:check",project,passed in package verification loop
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+close_reason: Preserve the completed 2026-05-26 release-hardening record without treating it as current publication approval; the superseding full-history privacy gate remains active in pm-csv-uaq1 and GitHub issue 72.
+body: "The 2026-05-26 package hardening established pm tracking, changelog generation, CI/release automation, and then-current source/package checks. Current-tree package and acceptance gates still pass. A broader 2026-08-20 all-ref audit superseded the earlier reachable-history privacy conclusion by finding historical personal identity and absolute host-path artifacts; future publication remains blocked by pm-csv-uaq1 and GitHub issue 72 pending explicitly authorized coordinated history repair."

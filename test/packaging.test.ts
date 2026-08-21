@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { checkExtensionManifestCompatibility } from "@unbrained/pm-cli/sdk/authoring";
+
 /**
  * Shape of the fields this suite asserts on. Only the three dependency maps
  * matter here; the rest of the manifest is deliberately not modelled so an
@@ -11,12 +13,33 @@ interface DependencyManifest {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly devDependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly scripts?: Readonly<Record<string, string>>;
+}
+
+/** Untrusted extension-manifest JSON narrowed only where an assertion needs it. */
+interface ExtensionManifestDocument {
+  readonly pm_min_version?: unknown;
+  readonly [key: string]: unknown;
 }
 
 /** The published manifest, read from disk rather than imported so the assertions run against the same bytes npm publishes. */
 const manifest = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as DependencyManifest;
+
+/** The exact extension manifest bytes included in the published package. */
+const extensionManifest = JSON.parse(
+  readFileSync(new URL("../manifest.json", import.meta.url), "utf8"),
+) as ExtensionManifestDocument;
+
+/** Public documentation whose atomic guarantees must match runtime recovery behavior. */
+const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+
+/** Authoring surface containing the SDK option and registered flag descriptions. */
+const extensionSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+
+/** Daily release workflow whose direct pm-changelog calls must remain unbounded. */
+const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
 /** The host CLI package whose placement in the manifest this suite governs. */
 const HOST_CLI = "@unbrained/pm-cli";
@@ -93,20 +116,21 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
   // npm 7+ auto-installs the newest version a peer range admits, so a floor does
   // admit a FUTURE regressed CLI. No range declared today can exclude a
   // regression that does not exist yet. What actually protects this package is
-  // the runtime completeness refusal on every `list-all` read, which detects a
-  // regressed host by observing `truncated` / `has_more` / `completeness` /
-  // `omission_receipt` rather than by guessing version numbers.
+  // the SDK-backed runtime certification on every canonical complete-list
+  // read, which detects a regressed host from source, pagination, projection,
+  // omission, read-output, count, and identity receipts rather than guessing
+  // version numbers.
   //
-  // The floor's job is narrower: exclude 2026.8.14, whose `list-all` silently
-  // returned 10 of 682 items, and everything older that predates the receipt.
+  // The floor's job is narrower: require the canonical list and public
+  // complete-list SDK contracts shipped in 2026.8.20.
   assert.match(
     peer,
     MINIMUM_VERSION_RANGE,
     `${HOST_CLI} must declare a ">=x.y.z" floor, not "${peer}": a pm extension cannot pin the host CLI a user installs, so an exact peer pin makes every later CLI patch a peer conflict`,
   );
   assert.ok(
-    compareVersions(peer.replace(/^>=/, ""), "2026.8.15") >= 0,
-    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.15: 2026.8.14 truncates \`list-all\` to 10 items and earlier releases predate the completeness receipt this package refuses on`,
+    compareVersions(peer.replace(/^>=/, ""), "2026.8.20") >= 0,
+    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.20 so the canonical list and public complete-list SDK contracts are available`,
   );
 });
 
@@ -155,4 +179,85 @@ test("the host CLI dev dependency is pinned to an exact version at or above the 
     compareVersions(declared, peer.replace(/^>=/, "")) >= 0,
     `${HOST_CLI} dev pin ${declared} must be at or above the declared peer floor ${peer}: gating against a CLI older than the floor this package advertises would make that floor an untested claim`,
   );
+});
+
+test("the extension manifest declares the same floor enforced by the peer dependency", () => {
+  const peer = manifest.peerDependencies?.[HOST_CLI];
+  assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency`);
+  const declared = extensionManifest.pm_min_version;
+  assert.strictEqual(
+    typeof declared,
+    "string",
+    "manifest.json must declare the top-level pm_min_version enforced by the host CLI",
+  );
+  assert.strictEqual(
+    declared,
+    peer.replace(/^>=/, ""),
+    "manifest.json and package.json must advertise one compatibility floor",
+  );
+});
+
+test("the complete published extension manifest satisfies minimum and development SDK hosts", () => {
+  const dev = manifest.devDependencies?.[HOST_CLI];
+  assert.ok(dev, `${HOST_CLI} must be a devDependency so the manifest has a tested host version`);
+  const minimum = extensionManifest.pm_min_version;
+  assert.equal(typeof minimum, "string");
+  for (const host of [minimum as string, dev]) {
+    const result = checkExtensionManifestCompatibility(extensionManifest, { pmVersion: host });
+    assert.equal(result.compatible, true, `the declared version bounds must accept host ${host}`);
+    assert.deepEqual(
+      result.findings,
+      [],
+      `manifest.json must contain only SDK-supported keys and valid bounds on host ${host}: ${JSON.stringify(result.findings)}`,
+    );
+  }
+});
+
+test("whole-tracker changelog scripts explicitly disable every pm output bound", () => {
+  for (const name of ["changelog:full", "release:notes"]) {
+    const script = manifest.scripts?.[name];
+    assert.ok(script, `package.json must declare ${name}`);
+    assert.match(
+      script,
+      /--pm-arg=--output-budget\s+--pm-arg=unbounded/u,
+      `${name} must disable pm's token budget before reading the complete tracker`,
+    );
+    assert.match(
+      script,
+      /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
+      `${name} must disable pm's row limit before reading the complete tracker`,
+    );
+  }
+
+  const workflowInvocations = releaseWorkflow
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("npx pm-changelog "));
+  assert.equal(workflowInvocations.length, 3, "the release workflow must expose all three direct pm-changelog reads to this gate");
+  for (const invocation of workflowInvocations) {
+    assert.match(
+      invocation,
+      /--pm-arg=--output-budget\s+--pm-arg=unbounded/u,
+      "every release-workflow pm-changelog read must disable the token budget",
+    );
+    assert.match(
+      invocation,
+      /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
+      "every release-workflow pm-changelog read must disable the row limit",
+    );
+  }
+});
+
+test("public atomic contracts disclose best-effort compensation and reconciliation", () => {
+  const publicContract = `${readme}\n${extensionSource}`;
+  assert.doesNotMatch(publicContract, /all-or-nothing/u);
+  assert.doesNotMatch(publicContract, /every applied create is compensated/u);
+  assert.doesNotMatch(publicContract, /No committed \(open\) items from the import remain/u);
+  assert.doesNotMatch(extensionSource, /markers before closing the item/u);
+  assert.doesNotMatch(extensionSource, /best-effort empty map/u);
+  assert.match(publicContract, /best-effort/u);
+  assert.match(publicContract, /pre-existing item updates are intentionally not reverted/u);
+  assert.match(publicContract, /inspect and reconcile/u);
+  assert.match(extensionSource, /markers only after closure succeeds/u);
+  assert.match(extensionSource, /following non-zero branch rejects ordinary command failures/u);
 });

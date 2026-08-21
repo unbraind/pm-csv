@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
+import { certifyCompleteListResult, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
 
 import type {
   WorkspaceTransactionStep,
@@ -32,7 +33,7 @@ const EXIT_CODE = {
 /**
  * Error carrying a semantic process exit code, thrown by every failure path
  * the command runtime must turn into a clean nonzero exit (including the
- * list-all completeness refusals). Exported so regression tests can assert the
+ * complete-list refusals). Exported so regression tests can assert the
  * typed failure instead of matching on message text alone.
  */
 export class CommandError extends Error {
@@ -374,44 +375,24 @@ function streamCSVFile(
 ): Promise<void> {
   const bufEnc: BufferEncoding = encoding === "utf-8" ? "utf8" : (encoding as BufferEncoding);
 
-  return new Promise<void>((resolve, reject) => {
+  return (async () => {
     const stream = createReadStream(filePath, { encoding: bufEnc });
     const parser = new StreamingCSVParser(delimiter, onRow);
-    let bomChecked = false;
-    let stopped = false;
-
-    const fail = (err: unknown) => {
-      if (stopped) return;
-      stopped = true;
-      stream.destroy();
-      reject(err);
-    };
-
-    stream.on("data", (chunk: Buffer | string) => {
-      if (stopped) return;
-      let text = typeof chunk === "string" ? chunk : chunk.toString(bufEnc);
-      if (!bomChecked) {
-        text = stripBOM(text);
-        bomChecked = true;
-      }
-      try {
+    let firstChunk = true;
+    try {
+      for await (const chunk of stream) {
+        // createReadStream was constructed with an encoding, so Node guarantees
+        // string chunks even though the broad async-iterator type retains Buffer.
+        const text = firstChunk ? stripBOM(chunk as string) : chunk as string;
+        firstChunk = false;
         parser.push(text);
-      } catch (err) {
-        fail(err);
       }
-    });
-    stream.on("end", () => {
-      if (stopped) return;
-      try {
-        parser.end();
-      } catch (err) {
-        fail(err);
-        return;
-      }
-      resolve();
-    });
-    stream.on("error", fail);
-  });
+      parser.end();
+    } catch (error: unknown) {
+      stream.destroy();
+      throw error;
+    }
+  })();
 }
 
 // ---------------------------------------------------------------------------
@@ -556,42 +537,105 @@ function assertPmOutputFit(result: SpawnSyncReturns<string>, label: string): voi
   );
 }
 
-/** Subset of the `pm list-all --json` envelope the completeness gate reads.
- *
- * `items` is typed loosely because the CLI owns its row shape; the fields below
- * it are the 2026.8.15 completeness receipt whose signals this package refuses
- * to consume silently at every list-all call site. */
-export interface ListAllEnvelope {
-  /** Rows the CLI actually returned. Length can be less than {@link ListAllEnvelope.total}. */
-  items?: PmItem[];
-  /** Number of rows in `items` as reported by the CLI. */
-  count?: number;
-  /** Number of rows that exist in the workspace. */
-  total?: number;
-  /** True when the row list was cut short (output budget, `--limit`, cursor). */
-  truncated?: boolean;
-  /** True when more rows exist past a cursor boundary. */
-  has_more?: boolean;
-  /** Readability receipt for the directories/items backing the list. */
-  completeness?: {
-    status?: string;
-    unreadable_item_count?: number;
-    unreadable_directory_count?: number;
-  };
-  /** Receipt for field groups omitted from the projection. */
-  omission_receipt?: {
-    has_omissions?: boolean;
-    omitted_field_group_count?: number;
-    omitted_field_groups?: string[];
-  };
+/** Canonical argv shared by every whole-tracker subprocess. */
+const COMPLETE_LIST_ARGS = [
+  "list",
+  "--all",
+  "--json",
+  "--include-body",
+  "--strict-read",
+  "--no-truncate",
+  "--output-budget",
+  "unbounded",
+  "--output-limit",
+  "unbounded",
+  "--output-include",
+  "full",
+] as const;
+
+/** Build one canonical complete-list request for a tracker root. */
+function completeListArgs(pmRoot: string): string[] {
+  return ["--pm-path", pmRoot, ...COMPLETE_LIST_ARGS];
+}
+
+/** Narrow an unknown JSON value to a non-array record. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/** Render a receipt value while preserving a missing field as evidence. */
+function describeReceiptValue(value: unknown): string {
+  return value === undefined ? "<missing>" : JSON.stringify(value);
+}
+
+/** Collect the pm 2026.8.21 receipt gaps not yet rejected by the public SDK. */
+function supplementalCompleteListFindings(record: Record<string, unknown>): string[] {
+  const findings: string[] = [];
+  const completeness = asRecord(record.completeness);
+  for (const field of ["unreadable_item_count", "unreadable_directory_count"] as const) {
+    const value = completeness?.[field];
+    if (!Number.isSafeInteger(value) || value !== 0) {
+      findings.push(`completeness.${field}=${describeReceiptValue(value)}`);
+    }
+  }
+
+  const omission = asRecord(record.omission_receipt);
+  if (omission === undefined) {
+    findings.push("omission_receipt=<missing>");
+  } else {
+    if (omission.has_omissions !== false) {
+      findings.push(`omission_receipt.has_omissions=${describeReceiptValue(omission.has_omissions)}`);
+    }
+    if (!Number.isSafeInteger(omission.omitted_field_group_count) || omission.omitted_field_group_count !== 0) {
+      findings.push(`omission_receipt.omitted_field_group_count=${describeReceiptValue(omission.omitted_field_group_count)}`);
+    }
+    if (!Array.isArray(omission.omitted_field_groups) || omission.omitted_field_groups.length !== 0) {
+      findings.push(`omission_receipt.omitted_field_groups=${describeReceiptValue(omission.omitted_field_groups)}`);
+    }
+  }
+
+  const readOutput = asRecord(record.read_output);
+  if (readOutput === undefined) {
+    findings.push("read_output=<missing>");
+  } else {
+    for (const [field, expected] of [
+      ["contract_version", 1],
+      ["command", "list"],
+      ["within_budget", true],
+      ["strings_compacted", false],
+      ["rows_compacted", false],
+      ["result_omitted", false],
+    ] as const) {
+      if (readOutput[field] !== expected) {
+        findings.push(`read_output.${field}=${describeReceiptValue(readOutput[field])}`);
+      }
+    }
+    const dimensions = readOutput.requested_dimensions;
+    if (!Array.isArray(dimensions)) {
+      findings.push("read_output.requested_dimensions=<missing>");
+    } else {
+      for (const dimension of ["include", "amount", "cost"] as const) {
+        if (!dimensions.includes(dimension)) {
+          findings.push(`read_output.requested_dimensions missing ${dimension}`);
+        }
+      }
+    }
+  }
+
+  if (record.output_budget_truncation !== undefined) findings.push("output_budget_truncation=<present>");
+  if (record.output_budget_exceeded !== undefined) findings.push("output_budget_exceeded=<present>");
+  return findings;
 }
 
 /**
- * Refuse an incomplete `pm list-all` envelope instead of consuming it.
+ * Refuse an incomplete canonical `pm list --all` envelope instead of consuming it.
  *
  * Reading `.items` without consulting the envelope's completeness receipt is
  * how this package once shipped a 10-row CSV export from a 682-item workspace
- * (pm 2026.8.14 defaulted list-all to a truncated answer; verified on this
+ * (pm 2026.8.14 defaulted the deprecated list-all alias to a truncated answer;
+ * verified on this
  * host), saw none of the applied rows on an atomic-import resume scan, and
  * missed upsert keys - each reporting success. Any one of four independent
  * signals means the rows in `items` are NOT the whole workspace, so this
@@ -612,68 +656,32 @@ export interface ListAllEnvelope {
  * workspace, so refusing loudly is simpler and safer than a paging loop that
  * could itself silently drop rows.
  *
- * @param envelope - Parsed `pm list-all --json` output (any shape; non-envelope
- *                  input trips the completeness signal).
- * @throws {@link CommandError} naming the first tripped signal and the counts.
+ * Shared source, filter, pagination, projection, count, and identity rules come
+ * from the public SDK. A narrow package supplement rejects the missing or
+ * contradictory omission, read-output, and unreadable-counter evidence
+ * reproduced in pm-cli issue 1078. The returned rows are therefore safe for
+ * mutation planning, resume reconciliation, and CSV export.
+ *
+ * @param envelope - Parsed canonical complete-list JSON output.
+ * @returns Every certified full item row.
+ * @throws {@link CommandError} naming every tripped signal and the counts.
  */
-export function assertListAllComplete(envelope: unknown): void {
-  const env = (envelope ?? {}) as ListAllEnvelope;
-  // count/total are reported straight from the envelope when present; fall
-  // back to counting rows so a hand-shaped envelope still reports honest
-  // figures instead of `undefined`.
-  const count = typeof env.count === "number"
-    ? env.count
-    : Array.isArray(env.items) ? env.items.length : 0;
-  const total = typeof env.total === "number" ? env.total : count;
-  const counts = `count ${count} of total ${total}`;
-  if (env.truncated === true) {
+export function assertListAllComplete(envelope: unknown): PmItem[] {
+  const record = asRecord(envelope);
+  const sdkFindings = inspectCompleteListResult(envelope).findings
+    .map((finding) => `${finding.code}: ${finding.message}`);
+  const findings = record === undefined
+    ? sdkFindings
+    : [...sdkFindings, ...supplementalCompleteListFindings(record)];
+  if (findings.length > 0 || record === undefined) {
+    const count = record && typeof record.count === "number" ? record.count : "unknown";
+    const total = record && typeof record.total === "number" ? record.total : "unknown";
     throw new CommandError(
-      `Refusing incomplete pm list-all answer: truncated=true (${counts}). `
-      + "The item list was cut short (output budget or limit); a partial result "
-      + "would report success while missing items. Narrow the query "
-      + "(--status/--type) or raise the output budget, then retry.",
+      `pm list --all complete-corpus answer was refused: ${findings.join("; ")}; count=${count} of total=${total}. `
+      + "A partial workspace read would corrupt import reconciliation or CSV export; retry the canonical strict unbounded read.",
     );
   }
-  if (env.has_more === true) {
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: has_more=true (${counts}). `
-      + "Rows exist beyond the returned page; consuming the page as the whole "
-      + "workspace would silently drop them.",
-    );
-  }
-  if (env.completeness?.status !== "complete") {
-    const status = env.completeness?.status === undefined ? "(missing)" : JSON.stringify(env.completeness.status);
-    const unreadable = `unreadable_item_count=${env.completeness?.unreadable_item_count ?? 0}`
-      + `, unreadable_directory_count=${env.completeness?.unreadable_directory_count ?? 0}`;
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: completeness.status=${status} `
-      + `(${unreadable}; ${counts}). Some workspace items could not be read, so `
-      + "the returned list is not the whole workspace.",
-    );
-  }
-  if (env.omission_receipt?.has_omissions === true) {
-    const groups = env.omission_receipt?.omitted_field_groups ?? [];
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: omission_receipt.has_omissions=true `
-      + `(omitted_field_groups: ${groups.length ? groups.join(", ") : "(none listed)"}; ${counts}). `
-      + "Field groups were dropped from the projection, so the rows are present "
-      + "but degraded; re-read without the field-omitting options.",
-    );
-  }
-  // Last, and independent of the four flags: the envelope's own arithmetic.
-  // `count` and `total` are read above only to describe the other refusals, but
-  // they are themselves a completeness claim — an envelope reporting count 10 of
-  // total 682 with every flag clear is internally inconsistent, and trusting the
-  // flags over the arithmetic would consume 10 rows as the whole workspace. This
-  // is the case where the receipt contradicts itself, and the safe reading of a
-  // self-contradictory receipt is "not complete".
-  if (typeof env.count === "number" && typeof env.total === "number" && env.count !== env.total) {
-    throw new CommandError(
-      `Refusing incomplete pm list-all answer: ${counts} disagree while every `
-      + "completeness flag is clear. The envelope contradicts itself, so it cannot "
-      + "be treated as the whole workspace.",
-    );
-  }
+  return certifyCompleteListResult(record).items as PmItem[];
 }
 
 /** Minimal spawn options the seam forwards to `spawnSync`. */
@@ -685,7 +693,7 @@ export interface PmSpawnOptions {
 }
 
 /**
- * Injectable seam over the `pm` shell-out every list-all reader uses.
+ * Injectable seam over the `pm` shell-out every complete-list reader uses.
  *
  * A parameter defaulting to the real `spawnPm`, so production callers are
  * unchanged while tests substitute a canned envelope - captured from the real
@@ -730,6 +738,11 @@ function decodeKeyTagValue(value: string): string {
   } catch {
     return value;
   }
+}
+
+/** Normalize JavaScript's open-ended thrown-value channel for operator errors. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -1052,19 +1065,21 @@ interface CsvImportOptions {
   /** Stream the file row-by-row instead of loading it fully into memory. */
   stream?: boolean;
   /**
-   * Import all creates atomically under one workspace writer-locked,
-   * crash-recoverable transaction (pm-cli >= 2026.7.19
-   * `commitWorkspaceTransaction`). On failure every applied create is
-   * compensated (closed) and the tracker is left with no committed items from
-   * this import; an interrupted run resumes from the durable journal.
-   * Incompatible with `--stream` (an unbounded stream cannot be one transaction).
+   * Import under one workspace writer-locked, crash-recoverable transaction
+   * (pm-cli >= 2026.7.19 `commitWorkspaceTransaction`). On failure the
+   * coordinator attempts reverse-order, best-effort create compensation;
+   * pre-existing item updates are intentionally not reverted. An interrupted
+   * run resumes from the durable journal, while a failed compensation remains
+   * transaction-marked so an operator can inspect and reconcile it before a
+   * retry. Incompatible with `--stream` (an unbounded stream cannot be one
+   * transaction).
    */
   atomic?: boolean;
   /**
    * Bound commit coordinator for the atomic path. Bound by the command path
-   * from the host-injected `ctx.sdk` (runtime-safe); the importer path resolves
-   * it via a dynamic `import("@unbrained/pm-cli/sdk")`. When `atomic` is set but
-   * this is absent, the atomic path dynamically imports the SDK itself.
+   * and importer capability from the host-injected `ctx.sdk`, so a copied
+   * extension never tries to resolve the host package through its own module
+   * tree. Atomic import refuses when an incompatible host omits this primitive.
    */
   commitTransaction?: (options: {
     transactionId: string;
@@ -1104,6 +1119,20 @@ interface ImportResult {
   previews: Record<string, unknown>[];
   /** Helpful warnings about unknown --map targets or missing source headers. */
   fieldMapWarnings: string[];
+}
+
+/** Create the canonical empty receipt shared by every CSV import engine. */
+function createImportResult(): ImportResult {
+  return {
+    imported: 0,
+    updated: 0,
+    skipped: 0,
+    filtered: 0,
+    autoMappings: [],
+    errors: [],
+    previews: [],
+    fieldMapWarnings: [],
+  };
 }
 
 interface ParsedRow {
@@ -1207,27 +1236,27 @@ function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): 
 
 /**
  * List existing items once and build a lookup from csv-key provenance value to
- * item id, for idempotent upsert. The list-all answer must be COMPLETE — a
+ * item id, for idempotent upsert. The complete-list answer must be COMPLETE — a
  * truncated answer silently missing keys would turn upserts into duplicate
  * creates — so the envelope's receipt is checked before any key is read.
  */
 function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, string> {
   const index = new Map<string, string>();
   const result = spawn(
-    ["--path", pmRoot, "list-all", "--json"],
+    completeListArgs(pmRoot),
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   // Route a stdout overrun (status: null, empty stderr, ENOBUFS) through
   // assertPmOutputFit as a hard, named error instead of the generic
-  // "pm list-all failed" the old `result.error` branch reported. An overrun is
+  // "pm list --all failed" the old `result.error` branch reported. An overrun is
   // a size problem, not a pm failure: a too-large workspace would otherwise
   // surface as a bare Node message and send the operator to pm's stderr instead
   // of to PM_LIST_MAX_BUFFER, and — worse — a null status combined with this
   // package's `status !== 0` guard would degrade into an empty key index,
   // turning every upsert into a duplicate create.
-  assertPmOutputFit(result, "list-all");
+  assertPmOutputFit(result, "pm list --all");
   if (result.status !== 0) {
-    throw new CommandError(result.stderr?.trim() || "pm list-all failed");
+    throw new CommandError(result.stderr?.trim() || "pm list --all failed");
   }
   let items: PmItem[] = [];
   let parsed: unknown;
@@ -1240,13 +1269,12 @@ function loadKeyIndex(pmRoot: string, spawn: PmSpawn = spawnPm): Map<string, str
     // silent-partial failure the completeness gate below exists to stop, so the
     // two paths must agree.
     throw new CommandError(
-      "Could not parse `pm list-all --json` output while building the upsert key index. "
+      "Could not parse `pm list --all --json` output while building the upsert key index. "
         + "Refusing rather than treating an unreadable response as an empty workspace, "
         + "which would make --upsert create duplicates.",
     );
   }
-  assertListAllComplete(parsed);
-  items = (parsed as ListAllEnvelope).items ?? [];
+  items = assertListAllComplete(parsed);
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (tag.startsWith(KEY_TAG_PREFIX)) {
@@ -1360,11 +1388,62 @@ function computeFieldMapWarnings(
   return warnings;
 }
 
+/** Resolve, validate, and report one raw import header set. */
+function resolveImportHeaders(
+  rawHeaders: string[],
+  opts: CsvImportOptions,
+): { headers: string[]; autoMappings: AutoFieldMapping[]; fieldMapWarnings: string[] } {
+  const fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
+  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
+  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
+  assertImportHeaders(headers, opts);
+  return { headers, autoMappings: mapResolution.autoMappings, fieldMapWarnings };
+}
+
+/** Read and resolve the shared in-memory prelude for normal and atomic imports. */
+function prepareInMemoryImport(
+  filePath: string,
+  opts: CsvImportOptions,
+): {
+  rawHeaders: string[];
+  dataRows: string[][];
+  result: ImportResult;
+  resolvedHeaders: ReturnType<typeof resolveImportHeaders> | undefined;
+} {
+  const { headers: rawHeaders, dataRows } = readCSVFile(
+    filePath,
+    opts.delimiter,
+    opts.encoding ?? "utf-8",
+    opts.skipHeaders ?? false,
+  );
+  return {
+    rawHeaders,
+    dataRows,
+    result: createImportResult(),
+    resolvedHeaders: rawHeaders.length > 0 ? resolveImportHeaders(rawHeaders, opts) : undefined,
+  };
+}
+
+/** Process one complete in-memory row set through the shared mutation core. */
+function processImportRows(
+  pmRoot: string,
+  dataRows: string[][],
+  headers: string[],
+  opts: CsvImportOptions,
+  result: ImportResult,
+): void {
+  const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
+  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+    const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
+    processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
+  }
+}
+
 /**
  * Import CSV rows into a pm tracker as items.
  *
  * Rejects rather than throws when `--atomic` is combined with `--stream`: the
- * two are genuinely incompatible, because an all-or-nothing commit needs the
+ * two are genuinely incompatible, because a bounded transaction plan needs the
  * whole row set in hand and a stream is unbounded. Returning a rejected promise
  * keeps the failure on the same channel as the rest of the async path.
  *
@@ -1378,7 +1457,7 @@ function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Pr
   if (opts.atomic && opts.stream) {
     return Promise.reject(
       new CommandError(
-        "--atomic cannot be combined with --stream: an unbounded stream cannot be committed as one all-or-nothing transaction.",
+        "--atomic cannot be combined with --stream: an unbounded stream cannot be committed as one bounded transaction.",
         EXIT_CODE.USAGE,
       ),
     );
@@ -1393,41 +1472,14 @@ function importCSV(pmRoot: string, filePath: string, opts: CsvImportOptions): Pr
  * every data row. Used when `--stream` is not set (the default).
  */
 function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOptions): ImportResult {
-  const { headers: rawHeaders, dataRows } = readCSVFile(
-    filePath,
-    opts.delimiter,
-    opts.encoding ?? "utf-8",
-    opts.skipHeaders ?? false,
-  );
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
+  const { dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  if (!resolvedHeaders) return result;
 
-  if (rawHeaders.length === 0) return result;
-
-  result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
-
-  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
-  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
-  result.autoMappings = mapResolution.autoMappings;
-
-  assertImportHeaders(headers, opts);
-
-  // Pre-load the dedup index only when upserting (one extra pm call, not per-row).
-  const keyIndex = opts.keyField && !opts.dryRun ? loadKeyIndex(pmRoot) : new Map<string, string>();
-
-  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-    const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
-    processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
-  }
-
+  // Pre-load the dedup index whenever upserting, including dry-run: a preview
+  // that labels an existing key as a create is not a truthful preview.
+  result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+  result.autoMappings = resolvedHeaders.autoMappings;
+  processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
   return result;
 }
 
@@ -1507,12 +1559,15 @@ export function atomicTransactionId(
  * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
  * closed item (upsertCreate/upsertUpdate apply the row's status, routing
  * terminal transitions through `pm close --reason`), so it must
- * still be recognized on resume and never re-imported. Conversely a rolled-back
- * create must NOT be recognized: `compensateCreate()` therefore STRIPS the
- * `csv-tx`/`csv-txrow` markers before closing the item, so a compensated
- * tombstone carries no marker and a post-rollback retry re-imports its row.
- * (This is why matching by marker-presence is correct for both a
- * legitimately-closed applied row and a rolled-back one; see compensateCreate.)
+ * still be recognized on resume and never re-imported. Conversely a
+ * successfully compensated create must NOT be recognized:
+ * `compensateCreate()` removes the markers only after closure succeeds or the
+ * item is already confirmed closed, so a compensated
+ * tombstone carries no marker and a post-rollback retry re-imports its row. If
+ * closure fails, both markers remain and make the orphan discoverable for
+ * reconciliation. (This is why matching by marker-presence is correct for both
+ * a legitimately-closed applied row and a rolled-back one; see
+ * compensateCreate.)
  */
 function loadAppliedByTransaction(
   pmRoot: string,
@@ -1521,7 +1576,7 @@ function loadAppliedByTransaction(
 ): { byRowIndex: Map<number, string> } {
   const byRowIndex = new Map<number, string>();
   const rowMarkerPrefix = `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`;
-  const r = spawn(["--path", pmRoot, "list-all", "--json"], {
+  const r = spawn(completeListArgs(pmRoot), {
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
@@ -1529,10 +1584,11 @@ function loadAppliedByTransaction(
   // the previous guard (`r.error || r.status !== 0`) then returned an EMPTY map,
   // so inspect() concluded "nothing was applied" and a resumed atomic import
   // silently re-imported every already-applied row — wrong data, not a crash.
-  // Route that overrun through {@link assertPmOutputFit} as a hard, named error
-  // instead. A genuine non-zero exit (not a buffer condition) still falls through
-  // to the best-effort empty map, preserving the resume scan's tolerance.
-  assertPmOutputFit(r, "list-all");
+  // Route unusable null-status output through {@link assertPmOutputFit} as a
+  // hard, named error. The following non-zero branch rejects ordinary command failures.
+  // Parse failures and incomplete envelopes below also refuse the resume scan;
+  // none of these unreadable states may become an empty applied-row map.
+  assertPmOutputFit(r, "pm list --all");
   // Fail closed on both failure shapes, for the same reason the completeness
   // gate below refuses: an empty resume map says "nothing was applied", so a
   // resume RE-IMPORTS rows that already landed. An unreadable answer is not an
@@ -1540,7 +1596,7 @@ function loadAppliedByTransaction(
   if (r.status !== 0) {
     throw new CommandError(
       r.stderr?.trim()
-        || "pm list-all failed while scanning for applied rows. Refusing rather than "
+        || "pm list --all failed while scanning for applied rows. Refusing rather than "
            + "treating an unreadable response as an empty transaction, which would re-import applied rows.",
     );
   }
@@ -1550,7 +1606,7 @@ function loadAppliedByTransaction(
     parsed = JSON.parse(r.stdout);
   } catch {
     throw new CommandError(
-      "Could not parse `pm list-all --json` output while scanning for applied rows. "
+      "Could not parse `pm list --all --json` output while scanning for applied rows. "
         + "Refusing rather than treating an unreadable response as an empty transaction, "
         + "which would re-import rows that already landed.",
     );
@@ -1558,8 +1614,7 @@ function loadAppliedByTransaction(
   // An incomplete envelope must refuse here, NOT degrade to an empty map: a
   // resume scan that misses applied rows silently re-imports them (wrong
   // data, the exact failure this package exists to prevent).
-  assertListAllComplete(parsed);
-  items = (parsed as ListAllEnvelope).items ?? [];
+  items = assertListAllComplete(parsed);
   for (const item of items) {
     for (const tag of item.tags ?? []) {
       if (!tag.startsWith(rowMarkerPrefix)) continue;
@@ -1588,8 +1643,8 @@ function loadAppliedByTransaction(
  * non-zero exit (item truly absent, or a failed lookup such as the
  * `fake-get-fail` regression) still returns `undefined` unchanged.
  */
-function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
-  const r = spawnSync("pm", ["--path", pmRoot, "get", id, "--json"], {
+function itemStatus(pmRoot: string, id: string, spawn: PmSpawn = spawnPm): ItemStatus | undefined {
+  const r = spawn(["--path", pmRoot, "get", id, "--json"], {
     encoding: "utf-8",
     maxBuffer: pmListMaxBuffer(),
   });
@@ -1604,18 +1659,32 @@ function itemStatus(pmRoot: string, id: string): ItemStatus | undefined {
 }
 
 /**
- * Idempotently undo one row's create. First STRIPS this transaction's ownership
- * markers (`markers`) from the item, then closes it via `pm close` (NOT delete,
- * to avoid the known history-resurrection issue) when it is still open.
+ * Read an item's status without letting a compensation-only lookup abort the
+ * remaining best-effort sweep. `undefined` deliberately means either absent or
+ * unverified; neither is positive evidence that an open item became closed.
+ */
+function compensationItemStatus(pmRoot: string, id: string): ItemStatus | undefined {
+  try {
+    return itemStatus(pmRoot, id);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Idempotently undo one row's create. First closes a still-open item via
+ * `pm close` (NOT delete, to avoid the known history-resurrection issue), then
+ * strips this transaction's ownership markers (`markers`) only after the item
+ * is confirmed closed.
  *
- * Stripping the markers is what makes marker-presence a correct "applied"
- * signal: a rolled-back row no longer carries a marker, so a post-rollback
- * retry re-imports it, while a *successfully* imported row (even one whose CSV
- * status is `closed`/`canceled`) keeps its marker and is resumed idempotently.
- * The strip runs whether the item is open or already closed (a closed-status
- * create being rolled back must also lose its marker); the close only runs for
- * a still-open item. Every step tolerates a missing item / absent tag, so a
- * repeated compensation (e.g. after a crash mid-compensation) is a safe no-op.
+ * Stripping the markers after closure makes marker-presence a correct
+ * reconciliation signal: a compensated row no longer carries a marker, so a
+ * post-rollback retry re-imports it, while a *successfully* imported row (even
+ * one whose CSV status is `closed`/`canceled`) keeps its marker and is resumed
+ * idempotently. If the close fails, the markers deliberately remain so the open
+ * orphan can be found by transaction id and reconciled before retrying. The
+ * strip also runs for an item that was already closed; every step tolerates a
+ * missing item / absent tag, so repeated compensation is a safe no-op.
  *
  * The status lookup itself is also tolerated: if `itemStatus` throws (a stdout
  * overrun or a signal kill on the `pm get`), the throw is caught and this row's
@@ -1631,43 +1700,42 @@ function compensateCreate(
   markers: readonly string[] = [],
   reason: string = "atomic csv import rolled back",
 ): void {
-  // itemStatus throws on a stdout overrun / signal kill; compensation is a
-  // best-effort sweep, so an overrun in the status lookup itself is a no-op for
-  // THIS row (the operator can reconcile by id) and must never abort the sweep
-  // over the remaining applied creates. (itemStatus's only throw is the
-  // CommandError from assertPmOutputFit; a bare catch is therefore equivalent to
-  // catching CommandError and avoids an unreachable rethrow branch.)
-  let status: ItemStatus | undefined;
-  try {
-    status = itemStatus(pmRoot, id);
-  } catch {
-    return; // status lookup overran/killed: no-op for this row, sweep continues
+  // A failed status lookup is a no-op for this row and must never abort the
+  // sweep over the remaining applied creates. The item remains marked for
+  // reconciliation when it still exists.
+  const status = compensationItemStatus(pmRoot, id);
+  if (status === undefined) return; // absent or unverified; never invent closure
+  if (status !== "closed") {
+    // Compensation is an internal rollback, not a user closure: it must
+    // reliably undo the create regardless of closure-validation governance, so
+    // it bypasses `--validate-close` (off). `require_close_reason` still applies
+    // and is satisfied by `reason`. Used by both the atomic transaction path
+    // (rollback) and the non-atomic `upsertCreate` close-failure path.
+    const closeResult = spawnSync(
+      "pm",
+      ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
+      { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
+    );
+    if (closeResult.status !== 0) {
+      // A non-zero receipt is not proof either way: the close may have persisted
+      // before its receipt failed. Re-read the item and clean markers only with
+      // exact terminal evidence; otherwise retain identity for reconciliation.
+      const postCloseStatus = compensationItemStatus(pmRoot, id);
+      if (postCloseStatus !== "closed") {
+        console.error(`atomic import: compensation close failed for ${id}: ${closeResult.stderr?.trim() || closeResult.stdout?.trim()}`);
+        return;
+      }
+    }
   }
-  if (status === undefined) return; // item no longer exists
   if (markers.length > 0) {
-    // Best-effort: remove the tx markers so this row is no longer "applied".
-    spawnSync(
+    const markerCleanup = spawnSync(
       "pm",
       ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
-  }
-  if (status === "closed") return; // terminal already; markers stripped above
-  // Compensation is an internal rollback, not a user closure: it must reliably
-  // undo the create regardless of closure-validation governance, so it bypasses
-  // `--validate-close` (off). `require_close_reason` still applies and is
-  // satisfied by `reason`. Without this a strict tracker would block the
-  // rollback and leave the orphan open — the very leak compensation exists to
-  // prevent. Used by both the atomic transaction path (rollback) and the
-  // non-atomic `upsertCreate` close-failure path.
-  const r = spawnSync(
-    "pm",
-    ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
-    { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
-  );
-  if (r.status !== 0 && r.status !== 4) {
-    // Exit 4 is "already closed" / invalid state — treat as already compensated.
-    console.error(`atomic import: compensation close failed for ${id}: ${r.stderr?.trim() || r.stdout?.trim()}`);
+    if (markerCleanup.status !== 0) {
+      console.error(`atomic import: compensation marker cleanup failed for ${id}: ${markerCleanup.stderr?.trim() || markerCleanup.stdout?.trim()}`);
+    }
   }
 }
 
@@ -1676,50 +1744,35 @@ function compensateCreate(
  * {@link WorkspaceTransactionStep} committed under a single workspace
  * writer-locked, crash-recoverable transaction. On success the same
  * {@link ImportResult} as the non-atomic path is returned (counts derived from
- * the committed step results). On failure every applied create is compensated
- * (closed) so no committed items remain, and a clear error is thrown. An
- * interrupted run resumes from the durable journal (inspect() skips already
- * applied rows).
+ * the committed step results). On failure the coordinator attempts reverse-
+ * order compensation, but callers receive a conservative reconciliation
+ * warning because create cleanup is best-effort and updates to pre-existing
+ * items are intentionally not reverted. An interrupted run resumes from the
+ * durable journal (inspect() skips already applied rows).
  */
 async function importCSVAtomic(
   pmRoot: string,
   filePath: string,
   opts: CsvImportOptions,
 ): Promise<ImportResult> {
-  const { headers: rawHeaders, dataRows } = readCSVFile(
-    filePath,
-    opts.delimiter,
-    opts.encoding ?? "utf-8",
-    opts.skipHeaders ?? false,
-  );
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
-
-  if (rawHeaders.length === 0) return result;
-
-  result.fieldMapWarnings = computeFieldMapWarnings(rawHeaders, opts.fieldMap);
-  const mapResolution = resolveImportFieldMap(rawHeaders, opts.fieldMap, opts.autoMap ?? false);
-  const headers = applyFieldMap(rawHeaders, mapResolution.fieldMap);
-  result.autoMappings = mapResolution.autoMappings;
-  assertImportHeaders(headers, opts);
+  const { rawHeaders, dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  if (!resolvedHeaders) return result;
+  result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+  result.autoMappings = resolvedHeaders.autoMappings;
 
   // A dry-run atomic import just previews like the non-atomic path (no
   // transaction is committed, nothing is written).
   if (opts.dryRun) {
-    const keyIndex = new Map<string, string>();
-    for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-      const lineNo = opts.skipHeaders ? rowIndex + 1 : rowIndex + 2;
-      processImportRow(pmRoot, headers, dataRows[rowIndex], lineNo, opts, keyIndex, result);
-    }
+    processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
     return result;
+  }
+
+  const commitTransaction = opts.commitTransaction;
+  if (!commitTransaction) {
+    throw new CommandError(
+      "--atomic requires the host-injected commitWorkspaceTransaction SDK primitive. Upgrade the pm CLI and invoke pm-csv through the pm host.",
+      EXIT_CODE.USAGE,
+    );
   }
 
   // Fingerprint the exact parsed content (raw headers + all data rows) so that
@@ -1761,7 +1814,7 @@ async function importCSVAtomic(
     const row = dataRows[rowIndex];
     // Compute the field accessor once and reuse for both `parsed` and the
     // --key value (previously rowFields() was called twice per row).
-    const { get, parsed } = rowFields(headers, row);
+    const { get, parsed } = rowFields(resolvedHeaders.headers, row);
 
     if (!parsed.title) {
       console.error(`Row ${lineNo}: skipping — 'title' is empty`);
@@ -1773,7 +1826,7 @@ async function importCSVAtomic(
       result.filtered++;
       continue;
     }
-    const keyValue = opts.keyField ? (get(opts.keyField) ?? "") : "";
+    const keyValue = opts.keyField ? get(opts.keyField) : "";
     const normalizedKey = keyValue ? normalizeKeyValue(keyValue) : "";
     // In-batch duplicate-key guard: an earlier planned CREATE in this run
     // already claimed this key. The first item does not exist yet at apply
@@ -1800,8 +1853,8 @@ async function importCSVAtomic(
   //     compensate() closes the created id.
   //   - update (--key match): apply() updates the pre-existing item and stamps
   //     both markers; compensate() is a no-op (an arbitrary update cannot be
-  //     safely reverted without capturing prior state, and the spec scopes
-  //     all-or-nothing compensation to creates).
+  //     safely reverted without capturing prior state; best-effort
+  //     compensation is therefore scoped to creates).
   //
   // Resume/compensation matching is per-row-precise via the per-row marker
   // (csv-txrow:<transactionId>#<rowIndex>), so duplicate titles or duplicate
@@ -1841,7 +1894,6 @@ async function importCSVAtomic(
         opts.source,
         ownershipTags,
       );
-      if (!newId) throw new Error(`pm create returned no id for row ${row.lineNo}`);
       appliedId = newId;
       return newId;
     };
@@ -1860,19 +1912,17 @@ async function importCSVAtomic(
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
 
-  const commitTransaction =
-    opts.commitTransaction ??
-    (await resolveCommitWorkspaceTransaction(pmRoot));
-
   let committed: WorkspaceTransactionCommitResult;
   try {
     committed = await commitTransaction({ transactionId, author, steps });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Every applied create has been compensated by the coordinator; no
-    // committed items from this import remain in the tracker.
+    const msg = errorMessage(err);
+    // The coordinator invokes compensations in reverse order, but this package
+    // cannot prove a clean tracker: create cleanup deliberately tolerates an
+    // unavailable status lookup or failed close so the remaining sweep can
+    // continue, and update steps intentionally preserve pre-existing items.
     throw new CommandError(
-      `Atomic CSV import failed and was rolled back — every applied create was compensated (closed); the tracker has no committed items from this import. Transaction id: ${transactionId}. Underlying error: ${msg}`,
+      `Atomic CSV import failed. The transaction coordinator attempted reverse-order compensation, but pm-csv cannot claim a clean tracker: created items are closed on a best-effort basis, and pre-existing item updates are intentionally not reverted. Mutations from transaction ${transactionId} may remain; inspect and reconcile that transaction before retrying. Underlying error: ${msg}`,
       EXIT_CODE.GENERIC_FAILURE,
     );
   }
@@ -1895,91 +1945,13 @@ async function importCSVAtomic(
 }
 
 /**
- * Cached SDK commit coordinator. Resolved once per process via a dynamic
- * `import("@unbrained/pm-cli/sdk")` so repeated --atomic calls don't re-import.
- * `null` means a previous attempt failed and the failure is not retried within
- * this process (each CLI invocation is a fresh process, so this is safe).
- */
-let cachedCommitWorkspaceTransaction:
-  | ((options: {
-      pmRoot: string;
-      transactionId: string;
-      author: string;
-      steps: readonly WorkspaceTransactionStep[];
-      lockTtlSeconds?: number;
-      lockWaitMs?: number;
-    }) => Promise<WorkspaceTransactionCommitResult>)
-  | null
-  | undefined;
-
-/**
- * Dynamically resolve the SDK commit coordinator bound to a tracker root, for
- * the importer path (which has no host-injected `ctx.sdk`). Falls back to a
- * dynamic `import("@unbrained/pm-cli/sdk")` so a standalone-installed extension
- * still works when the SDK package is resolvable. The resolved function is
- * cached at module scope so repeated --atomic calls don't re-import. If the
- * import fails or `commitWorkspaceTransaction` is not exported, a clear,
- * actionable CommandError is thrown.
- */
-async function resolveCommitWorkspaceTransaction(
-  pmRoot: string,
-): Promise<(opts: {
-  transactionId: string;
-  author: string;
-  steps: readonly WorkspaceTransactionStep[];
-  lockTtlSeconds?: number;
-  lockWaitMs?: number;
-}) => Promise<WorkspaceTransactionCommitResult>> {
-  if (cachedCommitWorkspaceTransaction === null) {
-    throw new CommandError(
-      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but it could not be resolved (a prior attempt in this process failed). Ensure @unbrained/pm-cli is installed and up to date.",
-      EXIT_CODE.USAGE,
-    );
-  }
-  if (cachedCommitWorkspaceTransaction) {
-    const cached = cachedCommitWorkspaceTransaction;
-    return (opts) => cached({ pmRoot, ...opts });
-  }
-  let mod: typeof import("@unbrained/pm-cli/sdk");
-  try {
-    mod = await import("@unbrained/pm-cli/sdk");
-  } catch (err: unknown) {
-    cachedCommitWorkspaceTransaction = null;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new CommandError(
-      `--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the SDK could not be imported: ${msg}. Install or upgrade @unbrained/pm-cli.`,
-      EXIT_CODE.USAGE,
-    );
-  }
-  const commit = mod.commitWorkspaceTransaction;
-  if (typeof commit !== "function") {
-    cachedCommitWorkspaceTransaction = null;
-    throw new CommandError(
-      "--atomic requires @unbrained/pm-cli>=2026.7.19 with the commitWorkspaceTransaction SDK primitive, but the installed SDK does not export it as a function. Upgrade @unbrained/pm-cli to >=2026.7.19.",
-      EXIT_CODE.USAGE,
-    );
-  }
-  cachedCommitWorkspaceTransaction = commit;
-  return (opts) => commit({ pmRoot, ...opts });
-}
-
-/**
  * Streaming import: reads the file via a readable stream so large CSV files
  * are never fully loaded into memory. The header row (or positional
  * {@link IMPORT_COLUMNS} when `--skip-headers` is set) is resolved from the
  * first row, then every subsequent row is processed and upserted immediately.
  */
 async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
-  const result: ImportResult = {
-    imported: 0,
-    updated: 0,
-    skipped: 0,
-    filtered: 0,
-    autoMappings: [],
-    errors: [],
-    previews: [],
-    fieldMapWarnings: [],
-  };
+  const result = createImportResult();
 
   let headers: string[] = [];
   let headerResolved = opts.skipHeaders ?? false;
@@ -1987,18 +1959,16 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
 
   if (headerResolved) {
     // --skip-headers: no header row in the file; use positional column order.
-    headers = [...IMPORT_COLUMNS];
-    result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
-    const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
-    headers = applyFieldMap(headers, mapResolution.fieldMap);
-    result.autoMappings = mapResolution.autoMappings;
-    assertImportHeaders(headers, opts);
+    const resolvedHeaders = resolveImportHeaders([...IMPORT_COLUMNS], opts);
+    headers = resolvedHeaders.headers;
+    result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+    result.autoMappings = resolvedHeaders.autoMappings;
   }
 
   // Load only after the input header has been validated so malformed input
   // reports its CSV error before any workspace lookup is attempted.
   let keyIndex = new Map<string, string>();
-  if (headerResolved && opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
+  if (headerResolved && opts.keyField) keyIndex = loadKeyIndex(pmRoot);
 
   await streamCSVFile(filePath, opts.delimiter, opts.encoding ?? "utf-8", (row: string[]) => {
     logicalRowIndex++;
@@ -2006,14 +1976,12 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
     if (!row.some((f) => f.trim() !== "")) return;
 
     if (!headerResolved) {
-      headers = row.map((h) => h.trim().toLowerCase());
-      result.fieldMapWarnings = computeFieldMapWarnings(headers, opts.fieldMap);
-      const mapResolution = resolveImportFieldMap(headers, opts.fieldMap, opts.autoMap ?? false);
-      headers = applyFieldMap(headers, mapResolution.fieldMap);
-      result.autoMappings = mapResolution.autoMappings;
-      assertImportHeaders(headers, opts);
+      const resolvedHeaders = resolveImportHeaders(row.map((header) => header.trim().toLowerCase()), opts);
+      headers = resolvedHeaders.headers;
+      result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
+      result.autoMappings = resolvedHeaders.autoMappings;
       headerResolved = true;
-      if (opts.keyField && !opts.dryRun) keyIndex = loadKeyIndex(pmRoot);
+      if (opts.keyField) keyIndex = loadKeyIndex(pmRoot);
       return;
     }
 
@@ -2035,6 +2003,15 @@ function appendRelationalArgs(args: string[], p: ParsedRow): void {
   if (p.sprint) args.push("--sprint", p.sprint);
   if (p.release) args.push("--release", p.release);
   if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
+}
+
+/** Append item fields shared by create and update mutation commands. */
+function appendMutableItemArgs(args: string[], p: ParsedRow, preserveEmptyBody: boolean): void {
+  if (preserveEmptyBody ? p.body !== undefined : Boolean(p.body)) args.push("--body", p.body ?? "");
+  if (p.priority !== undefined) args.push("--priority", String(p.priority));
+  if (p.type) args.push("--type", p.type);
+  if (p.deadline) args.push("--deadline", p.deadline);
+  appendRelationalArgs(args, p);
 }
 
 /**
@@ -2075,14 +2052,14 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
  *      open item is left behind in this one unrecoverable case.
  *   2. `pm close` failed after the item was persisted as open. The orphan is
  *      compensated (closed) via {@link compensateCreate} with `--validate-close
- *      off`, so a failed row is all-or-nothing and a retry re-imports it. If
+ *      off`, so a verified cleanup leaves no open orphan and a retry re-imports
+ *      it. If
  *      compensation also fails, the thrown error carries the created id and
  *      states the item was left open, so the partial state is actionable and a
  *      retry can reconcile it.
  *
- * For a `closed` row, an empty id is therefore a hard error, not a silent
- * return; the empty-string return only happens for non-closed rows whose
- * `pm create` reported no id.
+ * An id-less successful receipt is therefore a hard error for every status,
+ * never a silent successful import.
  */
 function upsertCreate(
   pmRoot: string,
@@ -2106,11 +2083,7 @@ function upsertCreate(
   // after the create, never via `pm create --status closed`.
   const createStatus = p.status === "closed" ? "open" : p.status;
   const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
-  if (p.body) args.push("--body", p.body);
-  if (p.priority !== undefined) args.push("--priority", String(p.priority));
-  if (p.type) args.push("--type", p.type);
-  if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendMutableItemArgs(args, p, false);
   if (tags.length > 0) args.push("--tags", tags.join(","));
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
@@ -2184,16 +2157,12 @@ function upsertCreate(
     );
   }
   if (r.status !== 0) throw new Error(r.stderr?.trim() || "pm create failed");
+  if (!id) {
+    throw new Error(
+      `pm create succeeded for row (title '${p.title}', source status '${p.status}') but returned no id, so the source status cannot be applied and the created item cannot be identified or safely reconciled; it may have been left as an orphan — reconcile manually`,
+    );
+  }
   if (p.status === "closed") {
-    // (1) No id recovered: the close cannot be applied and the orphan cannot be
-    // compensated without its id. Hard failure — never a silent success — so
-    // the row is reported as failed, not imported. The created open orphan is
-    // unrecoverable from here; the error names the title for manual reconcile.
-    if (!id) {
-      throw new Error(
-        `pm create succeeded for closed row (title '${p.title}') but returned no id, so the terminal 'closed' status cannot be applied and the created open item cannot be compensated; it is left as an unrecoverable open orphan — reconcile manually`,
-      );
-    }
     const cr = spawnSync(
       "pm",
       ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
@@ -2206,8 +2175,8 @@ function upsertCreate(
     // way, and the id is already known so nothing is stranded.
     if (cr.status !== 0) {
       // (2) The close failed but the item is already persisted as open.
-      // Compensate (close) the orphan so a failed row is all-or-nothing and a
-      // retry without --key-field cannot duplicate an undiscoverable open item.
+      // Compensate (close) the orphan so a verified cleanup leaves no open item
+      // that a retry without --key-field could duplicate.
       // Compensation bypasses closure-validation governance (it is a rollback,
       // not a user closure) so a strict tracker cannot block the cleanup.
       compensateCreate(
@@ -2234,7 +2203,7 @@ function upsertCreate(
         );
       }
       throw new Error(
-        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed) so the failed row is all-or-nothing. ${closeErr}`,
+        `pm close failed for closed row (title '${p.title}', id ${id}); the created open item was compensated (verified closed), so no open orphan remains. ${closeErr}`,
       );
     }
   }
@@ -2268,11 +2237,7 @@ function upsertUpdate(
   extraTags?: string[],
 ): void {
   const args = ["--path", pmRoot, "update", id, "--title", p.title];
-  if (p.body !== undefined) args.push("--body", p.body);
-  if (p.priority !== undefined) args.push("--priority", String(p.priority));
-  if (p.type) args.push("--type", p.type);
-  if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendMutableItemArgs(args, p, true);
   // Preserve the csv-key tag (additive) and refresh the user tags.
   const addTags = [...p.tags];
   if (source) addTags.push(`${SOURCE_TAG_PREFIX}${encodeKeyTagValue(source)}`);
@@ -2515,6 +2480,76 @@ function assertStrictImportReady(filePath: string, opts: CsvValidateOptions): Cs
   return report;
 }
 
+/** Parsed import flags shared by the command and importer capability. */
+interface CsvImportInvocation {
+  options: CsvImportOptions;
+  strict: boolean;
+}
+
+/** Parse one host option record into the canonical CSV import contract. */
+function parseCsvImportInvocation(
+  rawOptions: Record<string, unknown>,
+  dryRun: boolean,
+): CsvImportInvocation {
+  return {
+    strict: readBoolOption(rawOptions, "strict"),
+    options: {
+      delimiter: resolveDelimiter(rawOptions["delimiter"] as string | undefined),
+      dryRun,
+      fieldMap: parseFieldMap(rawOptions["map"] as string | string[] | undefined),
+      autoMap: readBoolOption(rawOptions, "auto-map", "autoMap"),
+      keyField: ((rawOptions["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined,
+      encoding: resolveEncoding(rawOptions["encoding"] as string | undefined),
+      source: ((rawOptions["source"] as string | undefined) ?? "").trim() || undefined,
+      filter: parseImportFilter(
+        rawOptions["status"] as string | undefined,
+        rawOptions["type"] as string | undefined,
+        rawOptions["priority"] as string | undefined,
+      ),
+      skipHeaders: readBoolOption(rawOptions, "skip-headers", "skipHeaders"),
+      stream: readBoolOption(rawOptions, "stream"),
+      atomic: readBoolOption(rawOptions, "atomic"),
+    },
+  };
+}
+
+/** Validate strict input, then execute one fully parsed import invocation. */
+function executeCsvImport(
+  pmRoot: string,
+  filePath: string,
+  invocation: CsvImportInvocation,
+  commitTransaction: CsvImportOptions["commitTransaction"],
+  atomicAuthor: string | undefined,
+): Promise<ImportResult> {
+  if (invocation.strict) {
+    assertStrictImportReady(filePath, {
+      delimiter: invocation.options.delimiter,
+      fieldMap: invocation.options.fieldMap,
+      encoding: invocation.options.encoding,
+      autoMap: invocation.options.autoMap,
+      skipHeaders: invocation.options.skipHeaders,
+    });
+  }
+  return importCSV(pmRoot, filePath, {
+    ...invocation.options,
+    commitTransaction,
+    atomicAuthor,
+  });
+}
+
+/** Log an import's selected engine and execute it through the shared host path. */
+function executeLoggedCsvImport(
+  label: string,
+  pmRoot: string,
+  filePath: string,
+  invocation: CsvImportInvocation,
+  commitTransaction: CsvImportOptions["commitTransaction"],
+  atomicAuthor: string | undefined,
+): Promise<ImportResult> {
+  console.error(`${label} ${filePath}${invocation.options.stream ? " (streaming)" : ""}${invocation.options.atomic ? " (atomic)" : ""}`);
+  return executeCsvImport(pmRoot, filePath, invocation, commitTransaction, atomicAuthor);
+}
+
 // ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
@@ -2547,6 +2582,14 @@ interface CsvExportOptions {
   crlf?: boolean;
   /** Excel-friendly output: forces CRLF and prepends a UTF-8 BOM. */
   excel?: boolean;
+}
+
+/** Fully prepared export data shared by command and exporter presentation. */
+interface PreparedCsvExport {
+  outputPath: string | undefined;
+  csvText: string;
+  count: number;
+  eol: "\n" | "\r\n";
 }
 
 /**
@@ -2686,7 +2729,9 @@ function resolveExportColumns(
 
   const columns = [...EXPORT_COLUMNS] as string[];
   for (const f of discovered) {
-    if (!columns.includes(f.key)) columns.push(f.key);
+    // Discovery excludes built-ins and de-duplicates by key, so every result is
+    // additive by construction.
+    columns.push(f.key);
   }
   return { columns, columnSource };
 }
@@ -2694,10 +2739,10 @@ function resolveExportColumns(
 /**
  * Read every item from a tracker and render the CSV export body.
  *
- * Shells out to `pm list-all --json --include-body` with an explicit
+ * Shells out to canonical `pm list --all --json --include-body` with an explicit
  * `maxBuffer`, because a stdout overrun kills the child with a null status and
  * an EMPTY stderr — which would otherwise surface as an unexplained
- * "pm list-all failed" rather than as the size problem it is.
+ * "pm list --all failed" rather than as the size problem it is.
  *
  * Status and type filters are applied after the read, not pushed into the
  * query. Each item's `csv_source` is then derived from its internal source tag
@@ -2724,31 +2769,30 @@ function buildCsvExport(
   spawn: PmSpawn = spawnPm,
 ): { csvText: string; count: number; eol: "\n" | "\r\n" } {
   const result = spawn(
-    ["--path", pmRoot, "list-all", "--json", "--include-body"],
+    completeListArgs(pmRoot),
     { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
   );
   // A stdout overrun kills the child with status null and EMPTY stderr, so name
-  // the real cause instead of reporting an unexplained "pm list-all failed".
+  // the real cause instead of reporting an unexplained "pm list --all failed".
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     throw new CommandError(
       code === "ENOBUFS"
-        ? `pm list-all output exceeded the ${pmListMaxBuffer()} byte read buffer; narrow the export (--status/--type) or raise the PM_LIST_MAX_BUFFER env var.`
-        : `pm list-all failed: ${result.error.message}`,
+        ? `pm list --all output exceeded the ${pmListMaxBuffer()} byte read buffer; narrow the export (--status/--type) or raise the PM_LIST_MAX_BUFFER env var.`
+        : `pm list --all failed: ${result.error.message}`,
     );
   }
   if (result.status !== 0) {
-    throw new CommandError(result.stderr || "pm list-all failed");
+    throw new CommandError(result.stderr || "pm list --all failed");
   }
 
-  let parsed: ListAllEnvelope;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout) as ListAllEnvelope;
+    parsed = JSON.parse(result.stdout) as unknown;
   } catch (err) {
-    throw new CommandError(`Could not parse \`pm list-all --json\` output: ${err instanceof Error ? err.message : String(err)}`);
+    throw new CommandError(`Could not parse \`pm list --all --json\` output: ${err instanceof Error ? err.message : String(err)}`);
   }
-  assertListAllComplete(parsed);
-  let items: PmItem[] = parsed.items ?? [];
+  let items = assertListAllComplete(parsed);
   if (opts.statusFilter) items = items.filter((i) => i.status === opts.statusFilter);
   if (opts.typeFilter) items = items.filter((i) => i.type === opts.typeFilter);
 
@@ -2792,17 +2836,34 @@ function buildCsvExport(
   };
 }
 
-/**
- * Local stand-in for the SDK's `defineExtension` identity helper.
- *
- * Declared here rather than imported so this package keeps a type-only
- * dependency on `@unbrained/pm-cli` and adds no runtime module edge. The
- * generic constraint is the SDK's own, so the extension object is contract-
- * checked against {@link ExtensionModule} exactly as the imported helper would.
- */
-const defineExtension = <TModule extends ExtensionModule>(module: TModule): TModule => module;
+/** Parse export flags and render the tracker through the shared export core. */
+function prepareCsvExport(
+  pmRoot: string,
+  rawOptions: Record<string, unknown>,
+): PreparedCsvExport {
+  const delimiter = resolveDelimiter(rawOptions["delimiter"] as string | undefined);
+  const discover = readBoolOption(rawOptions, "all-fields", "allFields", "discover-fields", "discoverFields");
+  const { columns, columnSource } = resolveExportColumns(
+    pmRoot,
+    rawOptions["columns"] as string | undefined,
+    discover,
+  );
+  return {
+    outputPath: rawOptions["output"] as string | undefined,
+    ...buildCsvExport(pmRoot, {
+      statusFilter: rawOptions["status"] as string | undefined,
+      typeFilter: rawOptions["type"] as string | undefined,
+      delimiter,
+      columns,
+      columnSource,
+      noHeader: readNoHeaderOption(rawOptions),
+      crlf: readBoolOption(rawOptions, "crlf"),
+      excel: readBoolOption(rawOptions, "excel"),
+    }),
+  };
+}
 
-export default defineExtension({
+export default {
   name: "pm-csv",
   version: "2026.8.16",
 
@@ -2810,29 +2871,13 @@ export default defineExtension({
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
-    // Guarded: only call when the running SDK exposes registerItemFields, so
-    // older hosts that lack the schema capability degrade to a no-op (and the
-    // manifest still declares "schema" because we genuinely implement it).
-    //
-    // NOTE: pm 2026.5.31 accepts the field into the schema registry but exposes
-    // no `pm create --csv_source` setter for extension-registered scalar fields,
-    // so the importer persists the provenance label as a `csv-source:` tag
-    // (stripped from exports and surfaced back via the csv_source export column).
+    // The declared pm host floor guarantees this SDK surface. Registration is
+    // deliberately fail-closed: silently omitting provenance would make a
+    // successfully activated package weaker than its manifest contract.
     // -----------------------------------------------------------------------
-    if (typeof api.registerItemFields === "function") {
-      try {
-        api.registerItemFields([
-          { name: "csv_source", type: "string", optional: true },
-        ]);
-      } catch (err: unknown) {
-        // Never let a schema-registration hiccup break command registration.
-        console.error(
-          `pm-csv: csv_source field not registered — ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    }
+    api.registerItemFields([
+      { name: "csv_source", type: "string", optional: true },
+    ]);
 
     // -----------------------------------------------------------------------
     // Command: pm csv import <file>
@@ -2865,7 +2910,7 @@ export default defineExtension({
         "pm csv import items.csv --dry-run",
         "pm csv import headerless.csv --skip-headers   # no header row, positional columns",
         "pm csv import big.csv --stream   # stream large files without loading into memory",
-        "pm csv import tasks.csv --atomic # all-or-nothing import (pm-cli >= 2026.7.19)",
+        "pm csv import tasks.csv --atomic # writer-locked, crash-recoverable import",
       ],
       flags: [
         { long: "--delimiter", value_name: "char", description: "Field delimiter, or alias tab|comma|semicolon|pipe (default: ,)" },
@@ -2881,7 +2926,7 @@ export default defineExtension({
         { long: "--dry-run", description: "Preview without writing" },
         { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order (title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by)" },
         { long: "--stream", description: "Stream the file row-by-row instead of loading it fully into memory (recommended for large CSV files)" },
-        { long: "--atomic", description: "Import all creates atomically under one workspace writer-locked, crash-recoverable transaction (pm-cli >= 2026.7.19). On failure every applied create is compensated (closed); interrupted runs resume. Incompatible with --stream" },
+        { long: "--atomic", description: "Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing item updates are intentionally not reverted. Inspect and reconcile any marked orphan before retrying. Incompatible with --stream" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;
@@ -2892,55 +2937,25 @@ export default defineExtension({
           );
         }
 
-        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
         const dryRun = readBoolOption(ctx.options, "dry-run", "dryRun");
-        const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
-        const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
-        const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
-        const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
-        const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
-        const strict = readBoolOption(ctx.options, "strict");
-        const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
-        const stream = readBoolOption(ctx.options, "stream");
-        const atomic = readBoolOption(ctx.options, "atomic");
-        const filter = parseImportFilter(
-          ctx.options["status"] as string | undefined,
-          ctx.options["type"] as string | undefined,
-          ctx.options["priority"] as string | undefined,
-        );
+        const invocation = parseCsvImportInvocation(ctx.options, dryRun);
         const absolutePath = resolve(filePath);
-
-        console.error(`Reading CSV from: ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
         let res: ImportResult;
         try {
-          if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
-          res = await importCSV(
+          res = await executeLoggedCsvImport(
+            "Reading CSV from:",
             ctx.pm_root,
             absolutePath,
-            {
-              delimiter,
-              dryRun,
-              fieldMap,
-              autoMap,
-              keyField,
-              encoding,
-              source,
-              filter,
-              skipHeaders,
-              stream,
-              atomic,
-              // Prefer the host-injected SDK coordinator (bound to the
-              // tracker root) so a standalone-installed extension never relies
-              // on package resolution; the atomic path falls back to a dynamic
-              // import when ctx.sdk is absent.
-              commitTransaction: ctx.sdk?.commitWorkspaceTransaction,
-              atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
-            },
+            invocation,
+            // Use the host-bound coordinator so a copied extension never
+            // resolves a second CLI/SDK through its own module tree.
+            ctx.sdk?.commitWorkspaceTransaction,
+            (ctx.global?.author as string | undefined) ?? undefined,
           );
         } catch (err: unknown) {
           if (err instanceof CommandError) throw err;
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = errorMessage(err);
           const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
           throw new CommandError(`Failed to import: ${msg}`, exitCode);
         }
@@ -3031,8 +3046,7 @@ export default defineExtension({
         try {
           report = validateCSV(absolutePath, { delimiter, fieldMap, autoMap, encoding, skipHeaders });
         } catch (err: unknown) {
-          if (err instanceof CommandError) throw err;
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = errorMessage(err);
           const exitCode = /ENOENT|no such file/i.test(msg) ? EXIT_CODE.NOT_FOUND : EXIT_CODE.GENERIC_FAILURE;
           throw new CommandError(`Failed to validate: ${msg}`, exitCode);
         }
@@ -3101,29 +3115,8 @@ export default defineExtension({
         { long: "--excel", description: "Excel-friendly output: CRLF line endings + a UTF-8 BOM prefix" },
       ],
       async run(ctx) {
-        const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-        const outputPath = ctx.options["output"] as string | undefined;
-        const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
-        const { columns, columnSource } = resolveExportColumns(
-          ctx.pm_root,
-          ctx.options["columns"] as string | undefined,
-          discover,
-        );
-        const noHeader = readNoHeaderOption(ctx.options);
-        const crlf = readBoolOption(ctx.options, "crlf");
-        const excel = readBoolOption(ctx.options, "excel");
-
         console.error("Fetching pm items…");
-        const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
-          statusFilter: ctx.options["status"] as string | undefined,
-          typeFilter: ctx.options["type"] as string | undefined,
-          delimiter,
-          columns,
-          columnSource,
-          noHeader,
-          crlf,
-          excel,
-        });
+        const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
 
         if (count === 0) {
           console.error("No items found.");
@@ -3150,28 +3143,7 @@ export default defineExtension({
     // Mirrors the importer so CSV is a first-class import/export pair.
     // -----------------------------------------------------------------------
     api.registerExporter("csv-export", async (ctx) => {
-      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-      const outputPath = ctx.options["output"] as string | undefined;
-      const discover = readBoolOption(ctx.options, "all-fields", "allFields", "discover-fields", "discoverFields");
-      const { columns, columnSource } = resolveExportColumns(
-        ctx.pm_root,
-        ctx.options["columns"] as string | undefined,
-        discover,
-      );
-      const noHeader = readNoHeaderOption(ctx.options);
-      const crlf = readBoolOption(ctx.options, "crlf");
-      const excel = readBoolOption(ctx.options, "excel");
-
-      const { csvText, count, eol } = buildCsvExport(ctx.pm_root, {
-        statusFilter: ctx.options["status"] as string | undefined,
-        typeFilter: ctx.options["type"] as string | undefined,
-        delimiter,
-        columns,
-        columnSource,
-        noHeader,
-        crlf,
-        excel,
-      });
+      const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
 
       if (outputPath) {
         const absolutePath = resolve(outputPath);
@@ -3194,48 +3166,21 @@ export default defineExtension({
         return;
       }
 
-      const delimiter = resolveDelimiter(ctx.options["delimiter"] as string | undefined);
-      const fieldMap = parseFieldMap(ctx.options["map"] as string | string[] | undefined);
-      const autoMap = readBoolOption(ctx.options, "auto-map", "autoMap");
-      const keyField = ((ctx.options["key"] as string | undefined) ?? "").trim().toLowerCase() || undefined;
-      const encoding = resolveEncoding(ctx.options["encoding"] as string | undefined);
-      const source = ((ctx.options["source"] as string | undefined) ?? "").trim() || undefined;
-      const strict = readBoolOption(ctx.options, "strict");
-      const skipHeaders = readBoolOption(ctx.options, "skip-headers", "skipHeaders");
-      const stream = readBoolOption(ctx.options, "stream");
-      const atomic = readBoolOption(ctx.options, "atomic");
-      const filter = parseImportFilter(
-        ctx.options["status"] as string | undefined,
-        ctx.options["type"] as string | undefined,
-        ctx.options["priority"] as string | undefined,
-      );
+      const invocation = parseCsvImportInvocation(ctx.options, false);
       const absolutePath = resolve(filePath);
-
-      console.error(`csv-import: reading ${absolutePath}${stream ? " (streaming)" : ""}${atomic ? " (atomic)" : ""}`);
 
       let res: ImportResult;
       try {
-        if (strict) assertStrictImportReady(absolutePath, { delimiter, fieldMap, encoding, autoMap, skipHeaders });
-        res = await importCSV(
+        res = await executeLoggedCsvImport(
+          "csv-import: reading",
           ctx.pm_root,
           absolutePath,
-          {
-            delimiter,
-            dryRun: false,
-            fieldMap,
-            autoMap,
-            keyField,
-            encoding,
-            source,
-            filter,
-            skipHeaders,
-            stream,
-            atomic,
-            atomicAuthor: (ctx.global?.author as string | undefined) ?? undefined,
-          },
+          invocation,
+          ctx.sdk?.commitWorkspaceTransaction,
+          (ctx.global?.author as string | undefined) ?? undefined,
         );
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         console.error(`csv-import: failed — ${msg}`);
         return;
       }
@@ -3249,7 +3194,7 @@ export default defineExtension({
       );
     });
   },
-});
+} satisfies ExtensionModule & { readonly name: string; readonly version: string };
 
 // ---------------------------------------------------------------------------
 // Named exports — pure helpers exposed for unit testing (no side effects).
@@ -3268,10 +3213,12 @@ export {
   stringifyTags,
   encodeKeyTagValue,
   decodeKeyTagValue,
+  errorMessage,
   normalizeKeyValue,
   selectExportColumns,
   resolveEncoding,
   validateParsedCSV,
+  validateCSV,
   strictValidationIssues,
   parseImportFilter,
   rowMatchesFilter,
@@ -3296,10 +3243,11 @@ export {
 // with synthetic results.
 // ---------------------------------------------------------------------------
 export { loadAppliedByTransaction, itemStatus, compensateCreate };
-// list-all completeness surface: the shared refusal gate plus the two internal
+// Complete-list surface: the shared refusal gate plus the two internal
 // readers whose silently-partial behavior the regression tests pin. Exported
 // ONLY for those tests; production callers keep using the command paths.
 export { loadKeyIndex, buildCsvExport };
-export type { CsvExportOptions };
+export { importCSV };
+export type { CsvExportOptions, CsvImportOptions };
 // `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };

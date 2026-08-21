@@ -1,0 +1,48 @@
+id: pm-csv-t4cc
+title: Adopt the canonical certified complete-list reader
+description: "Migrate every pm-csv whole-tracker subprocess from the deprecated list-all alias to canonical list --all and certify the complete corpus through the public pm SDK before upsert, resume, or export consumes rows."
+type: Issue
+status: closed
+priority: 1
+tags[5]: agents,cli-ux,completeness,pm-sdk,tdd
+created_at: "2026-08-21T07:27:49.254Z"
+updated_at: "2026-08-21T08:03:20.583Z"
+closed_at: "2026-08-21T07:58:07.764Z"
+completed_at: "2026-08-21T07:58:07.764Z"
+claim_principal: codex
+author: codex
+estimated_minutes: 360
+acceptance_criteria: "All three runtime readers invoke pm list --all with JSON, strict-read, no-truncate, full projection, and both unbounded output controls; the public SDK inspectCompleteListResult and certifyCompleteListResult own shared validation while narrow supplemental checks reject the verified pm-cli issue 1078 gaps; malformed, bounded, omitted, unreadable, contradictory, duplicate-ID, and bare-array outputs fail closed before any mutation or export; exact argv and red-first behavior tests pass; the raw manifest is SDK-compatible at its minimum and development hosts; a mandatory packed npm/npx, Bun/bunx, and minimum-host matrix exercises the real extension; release, coverage, docstring, audit, pack, changelog, privacy, CI, and review gates are recorded honestly; PR remains unmerged and unpublished while the independent history blocker is open"
+reporter: codex
+severity: high
+environment: Installed pm CLI and SDK 2026.8.21 on the existing PR 73 feature branch
+repro_steps: "Run rg for list-all in index.ts and inspect loadKeyIndex, loadAppliedByTransaction, and buildCsvExport; each production subprocess still sends the deprecated alias and the package hand-maintains only part of the complete-list receipt contract."
+resolution: "Replaced all three deprecated runtime aliases with one canonical strict full unbounded argv, certified every result with public SDK primitives plus the issue 1078 receipt supplement, raised and proved the 2026.8.20 floor, added mandatory current npm and Bun plus minimum npm packed acceptance, and resolved the review-discovered release-workflow gap through the existing pm-csv-zmcb item."
+expected_result: "Every whole-tracker read uses the canonical command and the current public SDK contract with explicit unbounded full output, producing no alias diagnostic and refusing every unverifiable corpus."
+actual_result: "Exact head 2490bad3ac96297cb8b3c4fe82b332f26fa69e34 passes the complete local release gate and all GitHub CI. CodeRabbit reports no remaining finding after one accepted P1; Greptile reviewed 47 files with zero comments. The packed matrix proves strict CSV import and complete export on npm/npx and Bun/bunx at 2026.8.21 plus npm/npx at 2026.8.20. Coverage is exact 3414/3414 lines, 746/746 branches, and 125/125 functions; 173 tests and 66 documented declarations pass. PR 73 remains unmerged and unpublished behind issue 72."
+affected_version: pm-csv 2026.8.16 source on PR 73
+component: whole-tracker readers
+customer_impact: "A deprecated or insufficiently certified reader can pollute stderr, miss rows during upsert/resume/export, duplicate imported work, or publish an incomplete CSV as success."
+notes[2]{created_at,author,text}:
+  "2026-08-21T07:58:07.211Z",codex,"Exact implementation head 2490bad3ac96297cb8b3c4fe82b332f26fa69e34 passed Node 22, Node 26, Semgrep, DeepScan, Hound, and Greptile with 47 files reviewed and zero comments. CodeRabbit found one release-workflow P1, verified the fix on the exact review-fix head, and reported no remaining findings. Sourcery skipped the oversized PR, Cubic is over monthly quota, and Gemini stayed silent; none is counted as approval. The full local release gate passes. GitHub issue 72 and pm-csv-uaq1 still prohibit merge and publication."
+  "2026-08-21T08:03:20.563Z",codex,Final-head CodeRabbit review correctly found that the word deprecated in this item title caused pm-changelog to classify the package fix under Deprecated. The source PM title now describes the delivered canonical-reader adoption without implying removal of a pm-csv public API.
+files[9]{path,scope,note}:
+  index.ts,project,Canonical SDK-certified whole-tracker reader
+  manifest.json,project,Minimum compatible host contract
+  package-lock.json,project,Reproducible pm CLI SDK development dependency
+  package.json,project,Exact development host and mandatory acceptance gate
+  scripts/accept-packed.ts,project,Fresh npm Bun and minimum-host extension acceptance
+  test/atomic.test.ts,project,Canonical real-tracker test helper
+  test/edge-contracts.test.ts,project,Full-envelope reader seam coverage
+  test/list-all-completeness.test.ts,project,Red-first receipt and exact argv coverage
+  test/packaging.test.ts,project,Minimum and development SDK manifest contract
+tests[2]{command,path,scope,timeout_seconds}:
+  "npm run release:check",.,project,900
+  "npm run accept:packed",scripts/accept-packed.ts,project,300
+docs[4]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli-companion/blob/010e922423f6581c27296e92a7a1855c8d721003/.agents/pm/issues/pm-cli-website-cbyb.toon",global,Companion canonical-command migration ledger
+  "https://github.com/unbraind/pm-cli/issues/1078",global,Public SDK complete-list certification gaps
+  CHANGELOG.md,project,Generated unreleased change record
+  README.md,project,Canonical reader and packed acceptance contract
+close_reason: Canonical SDK-certified whole-tracker readers implemented and exact-head gates reviewed; independent history privacy blocker remains.
+body: ""
