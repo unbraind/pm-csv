@@ -38,6 +38,9 @@ const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 /** Authoring surface containing the SDK option and registered flag descriptions. */
 const extensionSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
 
+/** Daily release workflow whose direct pm-changelog calls must remain unbounded. */
+const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+
 /** The host CLI package whose placement in the manifest this suite governs. */
 const HOST_CLI = "@unbrained/pm-cli";
 
@@ -223,6 +226,24 @@ test("whole-tracker changelog scripts explicitly disable every pm output bound",
       script,
       /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
       `${name} must disable pm's row limit before reading the complete tracker`,
+    );
+  }
+
+  const workflowInvocations = releaseWorkflow
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("npx pm-changelog "));
+  assert.equal(workflowInvocations.length, 3, "the release workflow must expose all three direct pm-changelog reads to this gate");
+  for (const invocation of workflowInvocations) {
+    assert.match(
+      invocation,
+      /--pm-arg=--output-budget\s+--pm-arg=unbounded/u,
+      "every release-workflow pm-changelog read must disable the token budget",
+    );
+    assert.match(
+      invocation,
+      /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
+      "every release-workflow pm-changelog read must disable the row limit",
     );
   }
 });
