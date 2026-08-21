@@ -2,11 +2,13 @@ id: pm-csv-zmcb
 title: Changelog scripts consume bounded tracker output and erase release history
 description: "On pm CLI 2026.8.20, npm run changelog:check invokes pm-changelog without universal output controls. The spawned list-all read is budgeted, so the generated replacement omits most historical release sections and proposes a destructive CHANGELOG rewrite. Pass explicit unbounded output budget and output limit controls to every changelog and release-notes read, and regression-test both scripts."
 type: Issue
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-08-20T18:47:31.143Z"
-updated_at: "2026-08-21T07:53:38.065Z"
+updated_at: "2026-08-21T07:58:08.748Z"
+closed_at: "2026-08-21T07:58:08.732Z"
+completed_at: "2026-08-21T07:58:08.732Z"
 claim_principal: "harness:codex"
 author: "harness:codex"
 estimated_minutes: 60
@@ -14,15 +16,19 @@ acceptance_criteria: "changelog:full and release:notes pass --output-budget unbo
 severity: high
 environment: pm CLI 2026.8.20 and pm-changelog resolved from the current package lock
 repro_steps: "Run npm run changelog:check and inspect the proposed replacement diff"
-actual_result: "The package scripts were already unbounded, but exact-head CodeRabbit review found three direct npx pm-changelog invocations in the daily release workflow that bypassed them. A red-first packaging test enumerated all three and failed. Every workflow invocation now forwards output-budget unbounded and output-limit unbounded; the focused regression passes. The full release gate passed typecheck, build, lint, zero clones, docstrings, 173 tests at exact 100/100/100 coverage, audit, pack, and packed current/minimum acceptance before correctly detecting that CHANGELOG.md needed regeneration after this item was reopened."
+resolution: "Kept both package scripts unbounded and added both output-budget and output-limit unbounded pm arguments to all three direct pm-changelog invocations in the daily release workflow, guarded by an exact invocation-count regression."
+expected_result: Generated changelog and release notes preserve every historical release section in local and daily-release execution.
+actual_result: The focused packaging test and full release gate pass; CodeRabbit verified all three workflow calls on exact head 2490bad3ac96297cb8b3c4fe82b332f26fa69e34 and reported no remaining finding.
 component: changelog
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-08-20T18:47:53.615Z","harness:codex","author=harness:codex,created_at=now,text=TDD red evidence: after adding a package script-contract test, npm run build:test passed and node --test test/packaging.test.ts failed because changelog:full lacks --pm-arg=--output-budget --pm-arg=unbounded. The test checks both changelog:full and release:notes and both universal output bounds."
   "2026-08-20T19:24:52.250Z",codex,"GREEN: changelog:full and release:notes now pass both universal unbounded controls; changelog:check preserves the complete release history."
+  "2026-08-21T07:58:08.295Z",codex,"CodeRabbit exact-head review found the three daily-release workflow invocations still bounded despite the package scripts being correct. The red-first workflow enumeration failed, all three calls gained both unbounded controls, the full release gate passed, and CodeRabbit verified the accepted P1 with no remaining findings at 2490bad3ac96297cb8b3c4fe82b332f26fa69e34."
 files[3]{path,scope,note}:
   .github/workflows/release.yml,project,Daily release whole-tracker changelog and release-note reads
   package.json,project,Whole-tracker changelog command contracts
   test/packaging.test.ts,project,Changelog script completeness regression
 tests[1]{command,path,scope,timeout_seconds,pm_context_mode}:
   node --test test/packaging.test.ts,test/packaging.test.ts,project,60,tracker
+close_reason: Package scripts and every daily-release workflow changelog read are explicitly unbounded and regression-tested.
 body: ""
