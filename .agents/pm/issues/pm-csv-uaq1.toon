@@ -6,7 +6,7 @@ status: blocked
 priority: 0
 tags[2]: "gh:unbraind/pm-csv#72","github_author:unbraind"
 created_at: "2026-08-20T19:28:52.262Z"
-updated_at: "2026-08-20T19:42:31.827Z"
+updated_at: "2026-08-21T23:14:03.860Z"
 author: codex
 estimated_minutes: 480
 acceptance_criteria: "Maintainer approves the destructive history-rewrite and identity mapping plan; Every reachable ref is rewritten or retired so the filename-only host-path scan returns zero; Commit authors use the approved public noreply identity throughout rewritten history; Secret scanning, PM history verification, clone acceptance, tags, open PRs, and downstream coordination are revalidated after the rewrite; No npm release is published before the rewritten remote and local canonical checkout agree"
@@ -17,8 +17,10 @@ repro_steps: Enumerate git rev-list --all; scan blobs by filename for absolute h
 expected_result: "All reachable public history contains no private host paths, personal email identities, secrets, or keys, with a documented canonical identity mapping."
 actual_result: 283 host-path blob hits remain and 106 commits use a personal email; zero high-confidence secret token/private-key hits.
 component: repository-history
-notes[1]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-08-20T19:42:31.810Z",codex,"pm-github 2026.8.18 exported this tracker item to GitHub issue #72. The exporter did not persist provenance into the source item,so the SDK-registered GitHub fields and gh provenance tag were linked explicitly; a follow-up dry-run must prove update rather than duplicate-create behavior."
+  "2026-08-21T23:13:57.262Z","harness:ox-alpha","PR #73 merged as 0947dc6 on main: host contracts hardened, exact quality gates green, all review threads resolved with bot confirmations. Post-merge CI success."
+  "2026-08-21T23:14:03.843Z","harness:ox-alpha","PR #73 merged as 0947dc6 on main: host contracts hardened, exact quality gates green, all review threads resolved with bot confirmations. Post-merge CI success."
 github_author: unbraind
 github_created_at: "2026-08-20T19:42:05Z"
 github_number: 72

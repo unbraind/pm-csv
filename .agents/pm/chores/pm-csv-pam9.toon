@@ -1,0 +1,23 @@
+id: pm-csv-pam9
+title: Enable GitHub CodeQL code scanning
+description: "Add .github/workflows/codeql.yml (javascript-typescript, build-mode none, weekly staggered schedule). GET code-scanning/alerts returned 404 no-analysis-found, so the Security tab could not distinguish clean from never-ran. Advisory check only, not added to branch protection."
+type: Chore
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-08-22T17:24:33.745Z"
+updated_at: "2026-08-22T17:24:52.105Z"
+author: "harness:ox-alpha"
+notes[1]{created_at,author,text}:
+  "2026-08-22T17:24:49.405Z","harness:ox-alpha","Verified 2026-08-22: gh api repos/unbraind/pm-csv/code-scanning/alerts -> 404 'no analysis found'. Workflow pins github/codeql-action v4 (fleet major-tag convention), permissions limited to security-events:write/actions:read/contents:read."
+files[1]{path,scope,note}:
+  .github/workflows/codeql.yml,project,CodeQL scanning workflow - javascript-typescript build-mode none weekly staggered cron
+tests[2]:
+  - command: gh run list -R unbraind/pm-csv --branch ci/enable-codeql-scanning
+    scope: project
+    note: CodeQL workflow run succeeds on the PR branch
+  - command: gh api repos/unbraind/pm-csv/code-scanning/alerts
+    scope: project
+    assert_stdout_regex[1]: rule_id|most_recent_instance|analysis_key
+    note: code-scanning alerts endpoint returns an analysis instead of 404 no-analysis-found
+body: ""
