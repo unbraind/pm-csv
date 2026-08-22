@@ -1,0 +1,24 @@
+id: pm-csv-pam9
+title: Enable GitHub CodeQL code scanning
+description: "Add .github/workflows/codeql.yml (javascript-typescript, build-mode none, weekly staggered schedule). GET code-scanning/alerts returned 404 no-analysis-found, so the Security tab could not distinguish clean from never-ran. Advisory check only, not added to branch protection."
+type: Chore
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-08-22T17:24:33.745Z"
+updated_at: "2026-08-22T17:59:08.764Z"
+author: "harness:ox-alpha"
+notes[1]{created_at,author,text}:
+  "2026-08-22T17:24:49.405Z","harness:ox-alpha","Verified 2026-08-22: gh api repos/unbraind/pm-csv/code-scanning/alerts -> 404 'no analysis found'. Workflow pins github/codeql-action v4 (fleet major-tag convention), permissions limited to security-events:write/actions:read/contents:read."
+files[1]{path,scope,note}:
+  .github/workflows/codeql.yml,project,CodeQL scanning workflow - javascript-typescript build-mode none weekly staggered cron
+tests[2]:
+  - command: "gh run list -R unbraind/pm-csv --workflow codeql.yml --branch ci/enable-codeql-scanning --limit 1 --json conclusion --jq .[0].conclusion"
+    scope: project
+    assert_stdout_regex[1]: ^success$
+    note: "The CodeQL workflow must have a COMPLETED SUCCESSFUL run on this branch. Asserting on the conclusion rather than on the presence of a run: gh run list prints a failed run too, so an unasserted invocation passes while the scan is broken."
+  - command: "gh api repos/unbraind/pm-csv/code-scanning/analyses --jq '[.[]|select(.tool.name==\"CodeQL\")]|length'"
+    scope: project
+    assert_stdout_regex[1]: "^[1-9][0-9]*$"
+    note: "At least one CodeQL analysis must exist. Deliberately queries /analyses, not /alerts: an empty /alerts array is ambiguous between analysed-and-clean and never-analysed, and that ambiguity is the exact defect this change removes. /analyses answers did-a-scan-run directly, so a clean repo passes and an unscanned one fails."
+body: ""
