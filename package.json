@@ -69,7 +69,7 @@
     "jiti": "^2.7.0",
     "jscpd": "^5.0.16",
     "pm-changelog": "^2026.8.6",
-    "pm-ops": "2026.8.10",
+    "pm-ops": "2026.8.17",
     "typescript": "^7.0.2"
   },
   "keywords": [
