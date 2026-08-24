@@ -6,7 +6,7 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-08-22T19:09:15.600Z"
-updated_at: "2026-08-24T16:18:58.073Z"
+updated_at: "2026-08-24T16:28:57.858Z"
 closed_at: "2026-08-24T16:18:58.037Z"
 completed_at: "2026-08-24T16:18:58.037Z"
 claim_principal: codex
@@ -21,11 +21,12 @@ actual_result: The executable verifier and all five focused alert scenarios pass
 comments[2]{created_at,author,text}:
   "2026-08-24T10:04:24.083Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
   "2026-08-24T10:06:35.512Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
-notes[4]{created_at,author,text}:
+notes[5]{created_at,author,text}:
   "2026-08-22T19:09:46.657Z",ox-alpha,"Gate proof (untracked clone-local extension state moved aside to reproduce fresh CI clone): drivers removed + health --strict-exit --require-merge-drivers RC=1; after pm merge install RC=0; plain strict-exit stays 0. npm test 173 pass 0 fail; npm run release:check RC=0."
   "2026-08-24T15:25:44.293Z","harness:codex",Cross-package review of merged pm-brief PR 79 proved the original alert design must distinguish a failed gh issue list from a successful empty lookup. The new tracked script skips mutation on lookup uncertainty and five focused tests pass. Earlier repeated changelog-date comments on this item were mis-scoped branch carryover; this note corrects their relationship without rewriting append-only history.
   "2026-08-24T15:33:06.962Z","harness:codex","Final local gate on pm CLI and SDK 2026.8.24: 178 tests passed; two configured source files measured exact 100.00 lines,100.00 branches,and 100.00 functions; lint and duplication gates passed with zero clones; 66 declarations documented; production audit found zero vulnerabilities; pack contained nine files; npm current,Bun current,and npm minimum-host acceptance passed; changelog was current. ShellCheck was unavailable on this host and is not claimed."
   "2026-08-24T16:18:36.075Z",codex,"author=harness:codex,created_at=now,text=Exact-head review found that the parsed workflow verifier was not executed by the normal release gate and that failed-lookup proof did not explicitly cover label mutation. The fleet fix replaces the undeclared PyYAML verifier with a Node ESM parsed-YAML verifier backed by exact yaml 2.9.0, wires it into release:check, and asserts zero label creation after lookup failure."
+  "2026-08-24T16:28:57.835Z","harness:codex","Final exact-head review found release:check was not invoked by normal pull-request CI. Added an explicit verify:release-workflow step immediately after npm ci and made the parsed verifier self-check that CI contains the exact command. Package-local executable verification passes."
 files[4]{path,scope,note}:
   .github/workflows/ci.yml,project,installs merge drivers before strict health
   .github/workflows/release.yml,project,wires the least-privileged failure alert job

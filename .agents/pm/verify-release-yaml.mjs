@@ -37,4 +37,12 @@ assert.ok(
 const script = readFileSync("scripts/alert-on-release-failure.sh", "utf8");
 assert.ok(script.includes("release-failure"), "dedup marker label missing from alert script");
 
+const ciWorkflow = parse(readFileSync(".github/workflows/ci.yml", "utf8"));
+assert.ok(
+  Object.values(ciWorkflow.jobs).some((job) =>
+    job.steps?.some((step) => step.run === "npm run verify:release-workflow"),
+  ),
+  "pull-request CI must execute the parsed release-workflow verifier",
+);
+
 console.log("release.yml alert job verified");

@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify release workflow contract
+        run: npm run verify:release-workflow
+
       - name: Verify tracked pm project health
         shell: bash
         run: |
