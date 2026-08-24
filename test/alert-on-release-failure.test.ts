@@ -129,6 +129,7 @@ test("does not create a duplicate when the dedup lookup itself fails", () => {
     assert.equal(run.status, 0);
     assert.equal(countCalls(run.calls, "issue create"), 0);
     assert.equal(countCalls(run.calls, "issue comment"), 0);
+    assert.equal(countCalls(run.calls, "label create"), 0);
     assert.match(`${run.stdout}\n${run.stderr}`, /::warning::.*duplicate/);
   } finally {
     run.cleanup();
