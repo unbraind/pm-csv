@@ -590,3 +590,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ steps.decide.outputs.tag }}" --title "${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}" --notes-file RELEASE_NOTES.md --verify-tag
+
+  # A failed scheduled release otherwise produces no tracker-visible signal.
+  # Keep alerting isolated, least-privileged, deduplicated, and non-blocking.
+  alert-on-release-failure:
+    needs: release
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout alert script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Open or update the release-failure tracking issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/alert-on-release-failure.sh

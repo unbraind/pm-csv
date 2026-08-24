@@ -1,0 +1,38 @@
+id: pm-csv-76gz
+title: Alert on daily release failure and require merge drivers in CI
+description: "Release failure alerting uses one checked-in fail-closed script: a successful empty lookup may create the stable release-failure issue, an existing issue receives a comment, and a failed lookup skips mutation to prevent duplicates. The workflow checks out the script with pinned actions/checkout v7 and no persisted credentials under contents:read plus issues:write. CI separately installs pm merge drivers before requiring them in strict health."
+type: Chore
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-22T19:09:15.600Z"
+updated_at: "2026-08-24T15:33:08.259Z"
+closed_at: "2026-08-24T15:33:08.242Z"
+completed_at: "2026-08-24T15:33:08.242Z"
+claim_principal: ox-alpha
+author: ox-alpha
+estimated_minutes: 180
+acceptance_criteria: The workflow executes a tracked script checked out with a commit-pinned action and persist-credentials disabled; A successful empty lookup creates one stable release-failure issue and an existing issue receives a comment; A failed lookup performs no issue mutation and exits zero with a warning; The full package gate passes on exact-pinned pm CLI and SDK 2026.8.24 with exact configured coverage and packed host acceptance
+risk: low
+confidence: 100
+resolution: "Implemented release-failure alerting as a tracked script that refuses mutation on failed dedup lookup, with pinned credential-free checkout and package-local proof."
+expected_result: "Daily release failures create or update one tracking issue without duplicates, while alert API failures never mask the release failure."
+actual_result: "Five focused alert tests and the 178-test package gate pass on pm CLI and SDK 2026.8.24 at exact configured coverage, including npm and Bun packed acceptance."
+comments[2]{created_at,author,text}:
+  "2026-08-24T10:04:24.083Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
+  "2026-08-24T10:06:35.512Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
+notes[3]{created_at,author,text}:
+  "2026-08-22T19:09:46.657Z",ox-alpha,"Gate proof (untracked clone-local extension state moved aside to reproduce fresh CI clone): drivers removed + health --strict-exit --require-merge-drivers RC=1; after pm merge install RC=0; plain strict-exit stays 0. npm test 173 pass 0 fail; npm run release:check RC=0."
+  "2026-08-24T15:25:44.293Z","harness:codex",Cross-package review of merged pm-brief PR 79 proved the original alert design must distinguish a failed gh issue list from a successful empty lookup. The new tracked script skips mutation on lookup uncertainty and five focused tests pass. Earlier repeated changelog-date comments on this item were mis-scoped branch carryover; this note corrects their relationship without rewriting append-only history.
+  "2026-08-24T15:33:06.962Z","harness:codex","Final local gate on pm CLI and SDK 2026.8.24: 178 tests passed; two configured source files measured exact 100.00 lines,100.00 branches,and 100.00 functions; lint and duplication gates passed with zero clones; 66 declarations documented; production audit found zero vulnerabilities; pack contained nine files; npm current,Bun current,and npm minimum-host acceptance passed; changelog was current. ShellCheck was unavailable on this host and is not claimed."
+files[4]{path,scope,note}:
+  .github/workflows/ci.yml,project,installs merge drivers before strict health
+  .github/workflows/release.yml,project,wires the least-privileged failure alert job
+  scripts/alert-on-release-failure.sh,project,exact bytes executed by the alert job with failed-lookup duplicate prevention
+  test/alert-on-release-failure.test.ts,project,hermetic creation dedup mutation-failure lookup-failure and workflow-wiring tests
+tests[3]{command,path,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  python3 .agents/pm/verify-release-yaml.py,.github/workflows/release.yml,project,30,"harness:codex","2026-08-24T15:33:06.962Z",local_mutation,ci/alert-on-release-failure-and-require-merge-drivers
+  "npm run build:test && node --test test/alert-on-release-failure.test.ts",test/alert-on-release-failure.test.ts,project,30,"harness:codex","2026-08-24T15:33:06.962Z",local_mutation,ci/alert-on-release-failure-and-require-merge-drivers
+  ./node_modules/.bin/pm health --strict-exit --require-merge-drivers,.,project,120,"harness:codex","2026-08-24T15:33:06.962Z",local_mutation,ci/alert-on-release-failure-and-require-merge-drivers
+close_reason: "The fail-closed tracked alert script, hermetic regression tests, pinned checkout, latest-host gate, packed acceptance, and corrected PM evidence are complete."
+body: ""
