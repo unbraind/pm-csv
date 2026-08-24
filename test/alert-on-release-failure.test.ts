@@ -141,6 +141,7 @@ test("release workflow checks out and executes the tracked script", () => {
   assert.notEqual(jobStart, -1);
   const job = workflow.slice(jobStart);
   assert.match(job, /uses: actions\/checkout@/);
+  assert.match(job, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(job, /persist-credentials: false/);
   assert.match(job, /run: bash scripts\/alert-on-release-failure\.sh/);
 });
