@@ -6,7 +6,7 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-08-22T19:09:15.600Z"
-updated_at: "2026-08-24T16:28:57.858Z"
+updated_at: "2026-08-24T16:40:14.862Z"
 closed_at: "2026-08-24T16:18:58.037Z"
 completed_at: "2026-08-24T16:18:58.037Z"
 claim_principal: codex
@@ -33,15 +33,6 @@ files[4]{path,scope,note}:
   scripts/alert-on-release-failure.sh,project,exact bytes executed by the alert job with failed-lookup duplicate prevention
   test/alert-on-release-failure.test.ts,project,hermetic creation dedup mutation-failure lookup-failure and workflow-wiring tests
 tests[5]:
-  - command: python3 .agents/pm/verify-release-yaml.py
-    path: .github/workflows/release.yml
-    scope: project
-    timeout_seconds: 30
-    provenance:
-      author: "harness:codex"
-      created_at: "2026-08-24T15:33:06.962Z"
-      source_kind: local_mutation
-      source_ref: ci/alert-on-release-failure-and-require-merge-drivers
   - command: "npm run build:test && node --test test/alert-on-release-failure.test.ts"
     path: test/alert-on-release-failure.test.ts
     scope: project
@@ -76,5 +67,15 @@ tests[5]:
       created_at: "2026-08-24T16:03:40.675Z"
       source_kind: local_mutation
       source_ref: ci/alert-on-release-failure-and-require-merge-drivers
+  - command: "npm run verify:release-workflow"
+    path: .agents/pm/verify-release-yaml.mjs
+    scope: project
+    timeout_seconds: 30
+    provenance:
+      author: "harness:codex"
+      created_at: "2026-08-24T16:40:14.838Z"
+      source_kind: local_mutation
+      source_ref: ci/alert-on-release-failure-and-require-merge-drivers
+    note: Parses release and CI workflows; validates the complete alert contract and proves pull-request CI executes this verifier.
 close_reason: Executable parsed-workflow validation and zero-mutation regression proof implemented
 body: ""
