@@ -6,17 +6,17 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-08-22T19:09:15.600Z"
-updated_at: "2026-08-24T15:50:25.334Z"
-closed_at: "2026-08-24T15:50:25.293Z"
-completed_at: "2026-08-24T15:50:25.293Z"
+updated_at: "2026-08-24T16:03:40.772Z"
+closed_at: "2026-08-24T16:03:40.767Z"
+completed_at: "2026-08-24T16:03:40.767Z"
 author: ox-alpha
 estimated_minutes: 180
 acceptance_criteria: The workflow executes a tracked script checked out with a commit-pinned action and persist-credentials disabled; A successful empty lookup creates one stable release-failure issue and an existing issue receives a comment; A failed lookup performs no issue mutation and exits zero with a warning; The full package gate passes on exact-pinned pm CLI and SDK 2026.8.24 with exact configured coverage and packed host acceptance
 risk: low
 confidence: 100
-resolution: Added github.event.repository.default_branch to the pinned credential-free alert checkout and enforced it in the runtime wiring test and YAML verifier.
-expected_result: Divergent workflow_dispatch refs cannot make the alert job execute or depend on an untrusted or obsolete script copy.
-actual_result: "Five focused alert tests, the YAML verifier, all 178 package tests, exact two-source 100/100/100 coverage, lint with zero warnings, zero clones, 66 documented declarations, zero production vulnerabilities, and npm/Bun/current/minimum packed acceptance pass; only the intentionally stale changelog remained while this item was reopened."
+resolution: "Restricted alerts to scheduled failures, added repository-scoped non-canceling alert concurrency, and made both validators require the exact checkout SHA, default-branch ref, disabled credentials, and exact script command."
+expected_result: Expected manual-dispatch failures do not mutate Daily Release issues; concurrent scheduled failures cannot race issue creation; mutable or non-executing workflow wiring is rejected.
+actual_result: "All five focused alert scenarios and the parsed YAML verifier pass with the complete schedule, concurrency, immutable checkout, and exact-command contract."
 comments[2]{created_at,author,text}:
   "2026-08-24T10:04:24.083Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
   "2026-08-24T10:06:35.512Z","harness:claude-code","CodeRabbit was right that the linked test only covered the package.json invocation and never reached the direct pm-changelog commands in the release workflow. Added an executable check that does both halves. The static half enumerates every tracked file containing a generator invocation and asserts each file's flagged count is not below its site count, which fails when any single site loses the flag; verified by removing the flag from one of two release.yml sites and watching it report one of two and exit non-zero. The behavioural half runs the generator twice on the same probe version 2026.1.2, deliberately chosen so its calendar date cannot coincide with today, and asserts the heading is 2026.1.2 - 2026-01-02 with the flag and 2026.1.2 - 2026-08-24 without it, so the test states the defect rather than merely asserting the fix."
@@ -29,7 +29,7 @@ files[4]{path,scope,note}:
   .github/workflows/release.yml,project,wires the least-privileged failure alert job
   scripts/alert-on-release-failure.sh,project,exact bytes executed by the alert job with failed-lookup duplicate prevention
   test/alert-on-release-failure.test.ts,project,hermetic creation dedup mutation-failure lookup-failure and workflow-wiring tests
-tests[4]:
+tests[5]:
   - command: python3 .agents/pm/verify-release-yaml.py
     path: .github/workflows/release.yml
     scope: project
@@ -65,5 +65,13 @@ tests[4]:
       created_at: "2026-08-24T15:50:25.227Z"
       source_kind: local_mutation
       source_ref: ci/alert-on-release-failure-and-require-merge-drivers
-close_reason: The Greptile recurrence is fixed by a trusted default-branch checkout and enforced by both test layers.
+  - command: node --test test/alert-on-release-failure.test.ts
+    path: test/alert-on-release-failure.test.ts
+    scope: project
+    provenance:
+      author: "harness:codex"
+      created_at: "2026-08-24T16:03:40.675Z"
+      source_kind: local_mutation
+      source_ref: ci/alert-on-release-failure-and-require-merge-drivers
+close_reason: CodeRabbit fleet hardening is implemented and verified package-locally.
 body: ""

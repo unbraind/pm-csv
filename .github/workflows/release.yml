@@ -595,7 +595,10 @@ jobs:
   # Keep alerting isolated, least-privileged, deduplicated, and non-blocking.
   alert-on-release-failure:
     needs: release
-    if: failure()
+    if: failure() && github.event_name == 'schedule'
+    concurrency:
+      group: release-failure-alert-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
