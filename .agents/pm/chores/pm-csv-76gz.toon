@@ -27,12 +27,13 @@ notes[5]{created_at,author,text}:
   "2026-08-24T15:33:06.962Z","harness:codex","Final local gate on pm CLI and SDK 2026.8.24: 178 tests passed; two configured source files measured exact 100.00 lines,100.00 branches,and 100.00 functions; lint and duplication gates passed with zero clones; 66 declarations documented; production audit found zero vulnerabilities; pack contained nine files; npm current,Bun current,and npm minimum-host acceptance passed; changelog was current. ShellCheck was unavailable on this host and is not claimed."
   "2026-08-24T16:18:36.075Z",codex,"author=harness:codex,created_at=now,text=Exact-head review found that the parsed workflow verifier was not executed by the normal release gate and that failed-lookup proof did not explicitly cover label mutation. The fleet fix replaces the undeclared PyYAML verifier with a Node ESM parsed-YAML verifier backed by exact yaml 2.9.0, wires it into release:check, and asserts zero label creation after lookup failure."
   "2026-08-24T16:28:57.835Z","harness:codex","Final exact-head review found release:check was not invoked by normal pull-request CI. Added an explicit verify:release-workflow step immediately after npm ci and made the parsed verifier self-check that CI contains the exact command. Package-local executable verification passes."
-files[4]{path,scope,note}:
+files[5]{path,scope,note}:
   .github/workflows/ci.yml,project,installs merge drivers before strict health
   .github/workflows/release.yml,project,wires the least-privileged failure alert job
   scripts/alert-on-release-failure.sh,project,exact bytes executed by the alert job with failed-lookup duplicate prevention
   test/alert-on-release-failure.test.ts,project,hermetic creation dedup mutation-failure lookup-failure and workflow-wiring tests
-tests[5]:
+  scripts/verify-release-changelog-date.sh,project,"executable proof for the release workflow invocations, which the package.json changelog check never reaches"
+tests[6]:
   - command: "npm run build:test && node --test test/alert-on-release-failure.test.ts"
     path: test/alert-on-release-failure.test.ts
     scope: project
@@ -77,5 +78,10 @@ tests[5]:
       source_kind: local_mutation
       source_ref: ci/alert-on-release-failure-and-require-merge-drivers
     note: Parses release and CI workflows; validates the complete alert contract and proves pull-request CI executes this verifier.
+  - command: bash scripts/verify-release-changelog-date.sh
+    path: scripts/verify-release-changelog-date.sh
+    scope: project
+    provenance_invalid: true
+    note: "exercises the release workflow path that npm run changelog:check does not: asserts every generator invocation in every tracked file carries the flag, and shows the same probe version yielding its own calendar date with the flag and today's date without it"
 close_reason: Executable parsed-workflow validation and zero-mutation regression proof implemented
 body: ""
