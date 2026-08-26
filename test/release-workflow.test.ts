@@ -242,8 +242,20 @@ test("publication is proven possible before anything is mutated", () => {
   // main to a new version every night and published nothing. A preflight that
   // asks the registry for a credential up front converts that into a run that
   // fails immediately, having changed nothing.
+  const refCheck = stepIndex("Check release ref");
   const preflight = stepIndex("Verify npm will accept this workflow's OIDC identity");
   const bump = stepIndex("Update release version");
+
+  // The ref check must precede the preflight, not merely precede publication. A
+  // workflow_dispatch from a feature branch would otherwise mint an id-token and
+  // exchange it for a short-lived npm PUBLISH CREDENTIAL, and only then be
+  // refused - obtaining a credential the run is forbidden to use. Refusing on
+  // the ref is free; requesting a credential is not.
+  assert.ok(
+    refCheck < preflight,
+    "the release ref must be checked before any credential is requested"
+  );
+  assert.match(executable(stepSource("Check release ref")), /refs\/heads\/main/);
   const commit = stepIndex("Commit release files");
   const publish = stepIndex("Publish npm package");
 
