@@ -41,7 +41,23 @@ jobs:
       # would fall back to token auth. 11.5.1 is the first npm that can exchange
       # the workflow'''s OIDC id-token for a registry credential.
       - name: Use an npm that supports trusted publishing
-        run: npm install -g npm@^11.5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g npm@^11.5.1
+          # Fail closed on the EFFECTIVE version, not on having run the install.
+          # Installing is not the same as running: a swallowed install error, a
+          # cached shim, or a later step selecting another npm all leave 10.x
+          # active. npm 10 has no OIDC support and would fall back to token
+          # auth, reproducing the exact E404 this migration exists to remove -
+          # and it would look like trusted publishing itself had failed.
+          active="$(npm --version)"
+          required="11.5.1"
+          if [ "$(printf '%s\n%s\n' "$active" "$required" | sort -V | head -n 1)" != "$required" ]; then
+            echo "::error::npm $active cannot exchange an OIDC token; $required or newer is required."
+            exit 1
+          fi
+          echo "npm $active can exchange an OIDC token for a registry credential."
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2.2.0
