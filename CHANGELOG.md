@@ -20,6 +20,7 @@
 
 ### Other
 
+- Enable GitHub CodeQL code scanning ([pm-csv-pam9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-pam9.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-csv-76gz](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-76gz.toon))
 
 ## 2026.8.16 - 2026-08-16
