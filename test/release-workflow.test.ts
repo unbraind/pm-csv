@@ -182,7 +182,7 @@ test("no registry credential is configured, under any name or mechanism", () => 
   // `secrets.GITHUB_TOKEN` is legitimate (the gh CLI needs it), so this is
   // scoped rather than global.
   const publish = executable(stepSource("Publish npm package"));
-  assert.doesNotMatch(publish, /secrets\./);
+  assert.doesNotMatch(publish, /secrets\s*(?:\.|\[)/);
 });
 
 test("the empty credential that setup-node generates is removed before publishing", () => {
@@ -236,6 +236,14 @@ test("publication is proven possible before anything is mutated", () => {
 
   // The exchange response carries a publish credential. Capturing the status
   // separately from the body is what keeps it out of the log.
-  assert.match(step, /-o [^\s]*npm-oidc-exchange\.json/);
   assert.doesNotMatch(step, /echo\s+"?\$\{?id_token/);
+
+  // The 200 response body IS a short-lived publish credential. Every later step
+  // in this job runs as the same runner user, so leaving it on disk - and at a
+  // predictable path - hands that credential to build, changelog and
+  // release-check code that has no business holding it.
+  assert.match(step, /response="\$\(mktemp\)"/);
+  assert.match(step, /trap\s+'rm -f "\$\{response\}"'\s+EXIT/);
+  assert.doesNotMatch(step, /-o\s+\/tmp\/[^\s"]+/);
+  assert.match(step, /-o "\$\{response\}"/);
 });

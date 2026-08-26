@@ -135,9 +135,14 @@ jobs:
             echo "::error::GitHub would not mint an OIDC id-token. The release job needs 'id-token: write'."
             exit 1
           fi
-          # Only the status is captured. The response body carries a publish
-          # credential on success and is never echoed.
-          status="$(curl -sS -o /tmp/npm-oidc-exchange.json -w '%{http_code}' \
+          # The response body carries a short-lived PUBLISH CREDENTIAL on success.
+          # It is never echoed, and it must not outlive this step either: every
+          # later step in this job runs as the same runner user and could read it
+          # off disk. mktemp keeps it out of a predictable path and the EXIT trap
+          # removes it on success, on failure, and on early return alike.
+          response="$(mktemp)"
+          trap 'rm -f "${response}"' EXIT
+          status="$(curl -sS -o "${response}" -w '%{http_code}' \
             -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_name}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${id_token}")"
@@ -145,7 +150,7 @@ jobs:
             echo "npm accepted this workflow's identity for ${pkg_name}; publication can proceed."
             exit 0
           fi
-          reason="$(node -p "try{JSON.parse(require('node:fs').readFileSync('/tmp/npm-oidc-exchange.json','utf8')).message||''}catch(e){''}")"
+          reason="$(RESPONSE_FILE="${response}" node -p "try{JSON.parse(require('node:fs').readFileSync(process.env.RESPONSE_FILE,'utf8')).message||''}catch(e){''}")"
           echo "::error::npm refused this workflow's OIDC identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
           echo "::error::Nothing has been bumped, committed or tagged - this run stopped before mutating anything."
           echo "::error::Configure a trusted publisher on npmjs.com for ${pkg_name}: Settings -> Trusted Publisher -> GitHub Actions,"
