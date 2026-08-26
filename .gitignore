@@ -15,3 +15,7 @@ dist-test/
 .agents/pm/extensions/
 
 coverage/
+
+# SDK workspace-transaction journals are runtime state, not tracked data.
+# pm health fails closed on these (tracked_runtime_cache_files).
+.agents/pm/transactions/

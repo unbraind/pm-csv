@@ -37,6 +37,12 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
+      # node 22 ships npm 10.x, which has no trusted-publishing support at all and
+      # would fall back to token auth. 11.5.1 is the first npm that can exchange
+      # the workflow'''s OIDC id-token for a registry credential.
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@^11.5.1
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2.2.0
 
@@ -461,11 +467,17 @@ jobs:
             fi
           fi
 
+      # Authentication is npm trusted publishing (OIDC), not a long-lived token.
+      # The registry mints a short-lived credential from this workflow'''s id-token,
+      # so no NODE_AUTH_TOKEN is set here on purpose: a stored token is the thing
+      # that expired and silently stopped every fleet package publishing between
+      # 2026-08-17 and 2026-08-26 while main kept bumping the version. Trusted
+      # publishing must be configured for this package on npmjs.com against
+      # unbraind/pm-csv and this workflow filename, or publish fails closed.
       - name: Publish npm package
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         run: |
           set -euo pipefail
