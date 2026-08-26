@@ -18,6 +18,10 @@
 - Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
 - Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))
 
+### Other
+
+- Alert on daily release failure and require merge drivers in CI ([pm-csv-76gz](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-76gz.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
