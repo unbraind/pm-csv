@@ -51,6 +51,22 @@ function executable(source: string): string {
 }
 
 /**
+ * Strip comments and the credential-scrub step's own deletion expressions.
+ *
+ * The scrub names every credential it removes, so a naive search for those names
+ * matches the very code that deletes them. Removing `sed` deletion expressions
+ * leaves only places a credential could actually be *configured*.
+ *
+ * @param source - Workflow source to filter.
+ * @returns Source with comments and scrub deletion expressions removed.
+ */
+function withoutCredentialScrub(source: string): string {
+  return executable(source)
+    .replace(/^[ \t]*sed -i.*$/gm, "")
+    .replace(/^[ \t]*-e '\/[^']*\/d'.*$/gm, "");
+}
+
+/**
  * Extract the source of one workflow step, from its `- name:` line to the next.
  *
  * @param name - The exact `- name:` value of the step.
@@ -102,7 +118,7 @@ test("the release job effectively holds id-token: write, and no comment can stan
   // Matching /id-token: write/ against the whole file is satisfied by a comment
   // reading "# id-token: write", and by a permission on some other job. Neither
   // grants this job anything, and OIDC publication fails closed without it.
-  assert.match(effectiveReleasePermissions(), /(?:^|[{,\s])id-token:\s*write\b/m);
+  assert.match(effectiveReleasePermissions(), /(?:^|[{,\s])id-token:\s*write\s*(?:#[^\n]*)?$/m);
 });
 
 test("the npm upgrade cannot be skipped and fails closed on the version it actually gets", () => {
@@ -134,7 +150,10 @@ test("nothing between the upgrade and the publish step can put an older npm back
   assert.ok(upgrade < publish, "npm must be upgraded before the publish step runs");
 
   const between = executable(workflow.slice(upgrade, publish));
-  const installs = [...between.matchAll(/npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@\S+/g)];
+  const installs = [
+    ...between.matchAll(/npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@\S+/g),
+    ...between.matchAll(/npm\s+(?:-g|--global)\s+(?:install|i|add)\s+npm@\S+/g),
+  ];
   assert.equal(
     installs.length,
     1,
@@ -149,7 +168,7 @@ test("no registry credential is configured, under any name or mechanism", () => 
   // back as `secrets.PUBLISH_TOKEN` piped into an .npmrc `_authToken` line, or
   // through `npm login`, none of which mention NODE_AUTH_TOKEN. What matters is
   // that the publish step reaches the registry with no stored credential at all.
-  const source = executable(workflow);
+  const source = withoutCredentialScrub(workflow);
 
   // npm accepts a registry credential under several names, and rejecting only
   // the token spelling leaves the others open: `_auth` is basic auth,
@@ -163,16 +182,19 @@ test("no registry credential is configured, under any name or mechanism", () => 
     );
   }
 
-  assert.doesNotMatch(source, /npm\s+config\s+set\s+\/\//);
-  assert.doesNotMatch(source, /npm\s+login/);
-  assert.doesNotMatch(source, /always-auth/);
+  assert.doesNotMatch(source, /npm\s+(?:config\s+)?set\s+["']?\/\//i);
+  assert.doesNotMatch(source, /npm\s+login/i);
+  assert.doesNotMatch(source, /always-auth/i);
+  // `npm config set //registry.npmjs.org/:_authToken value` separates key and
+  // value with a space rather than `=`, which the key-plus-`=` checks miss.
+  assert.doesNotMatch(source, /:(?:_authToken|_auth|username|_password|certfile|keyfile)\s+\S/i);
 
   // The same credentials can arrive as environment overrides rather than as
   // .npmrc lines. NPM_CONFIG_USERCONFIG is the one legitimate member of that
   // family here - it is how the publish step finds the file it strips.
-  for (const [, name] of source.matchAll(/\b(NPM_CONFIG_[A-Z0-9_]+)\b/g)) {
+  for (const [, name] of source.matchAll(/\b(npm_config_[a-z0-9_]+|NPM_CONFIG_[A-Z0-9_]+)\b/gi)) {
     assert.equal(
-      name,
+      name.toUpperCase(),
       "NPM_CONFIG_USERCONFIG",
       `release workflow must not set ${name}, which can carry a registry credential`
     );
@@ -196,8 +218,16 @@ test("the empty credential that setup-node generates is removed before publishin
   const publish = stepSource("Publish npm package");
 
   assert.match(publish, /NPM_CONFIG_USERCONFIG/);
-  assert.match(publish, /_authToken/);
   assert.match(publish, /sed -i/);
+
+  // Deleting only the token spelling leaves basic auth, the legacy pair and the
+  // mTLS pair in place - each of which npm will use instead of the exchange.
+  for (const key of ["_authToken", "_auth", "username", "_password", "certfile", "keyfile"]) {
+    assert.ok(
+      publish.includes(key),
+      `the credential scrub must remove '${key}' from the npm userconfig`
+    );
+  }
   // The strip must happen before the publish command, not after it.
   assert.ok(
     publish.indexOf("_authToken") < publish.indexOf("npm publish"),
@@ -231,6 +261,18 @@ test("publication is proven possible before anything is mutated", () => {
   // %40unbrained%2Fpm-web, and sending it raw addresses a different path. The URL
   // must therefore be built from the ENCODED name, not from package.json's value.
   assert.match(step, /encodeURIComponent/);
+
+  // An unbounded curl in a release gate turns a hung registry into a hung job
+  // rather than a failed one, and the job holds an id-token while it hangs.
+  assert.equal(
+    (step.match(/curl\b/g) ?? []).length,
+    (step.match(/--max-time\b/g) ?? []).length,
+    "every curl in the preflight must be bounded with --max-time"
+  );
+
+  // A registry outage is not an identity refusal, and must not send a maintainer
+  // to reconfigure a trusted publisher that is already correct.
+  assert.match(step, /-ge 500/);
   assert.match(step, /exchange\/package\/\$\{pkg_path\}/);
   assert.doesNotMatch(step, /exchange\/package\/\$\{pkg_name\}/);
 

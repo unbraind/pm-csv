@@ -39,7 +39,7 @@ jobs:
 
       # node 22 ships npm 10.x, which has no trusted-publishing support at all and
       # would fall back to token auth. 11.5.1 is the first npm that can exchange
-      # the workflow'''s OIDC id-token for a registry credential.
+      # the workflow's OIDC id-token for a registry credential.
       - name: Use an npm that supports trusted publishing
         shell: bash
         run: |
@@ -135,7 +135,7 @@ jobs:
           # names encode to themselves, so this is not a no-op only for scoped
           # packages - it is simply correct for both.
           pkg_path="$(PKG="${pkg_name}" node -p "encodeURIComponent(process.env.PKG)")"
-          id_token="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          id_token="$(curl -sS --max-time 30 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value")"
           if [ -z "${id_token}" ] || [ "${id_token}" = "undefined" ]; then
             echo "::error::GitHub would not mint an OIDC id-token. The release job needs 'id-token: write'."
@@ -148,7 +148,7 @@ jobs:
           # removes it on success, on failure, and on early return alike.
           response="$(mktemp)"
           trap 'rm -f "${response}"' EXIT
-          status="$(curl -sS -o "${response}" -w '%{http_code}' \
+          status="$(curl -sS --max-time 30 -o "${response}" -w '%{http_code}' \
             -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_path}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${id_token}")"
@@ -161,6 +161,17 @@ jobs:
             exit 0
           fi
           reason="$(RESPONSE_FILE="${response}" node -p "try{JSON.parse(require('node:fs').readFileSync(process.env.RESPONSE_FILE,'utf8')).message||''}catch(e){''}")"
+          # 000 is curl's "no HTTP response" (timeout, DNS, connection refused)
+          # and 5xx is the registry failing on its own account. Neither says
+          # anything about this workflow's identity, and telling a maintainer to
+          # configure a trusted publisher they already configured would send them
+          # somewhere useless. Fail either way - a release must not proceed on an
+          # unverified identity - but say which failure it was.
+          if [ "${status}" = "000" ] || [ "${status}" -ge 500 ]; then
+            echo "::error::Could not reach npm to verify this workflow's identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
+            echo "::error::This is a registry or network failure, NOT a trusted-publisher problem. Nothing was bumped, committed or tagged; re-run when the registry is reachable."
+            exit 1
+          fi
           echo "::error::npm refused this workflow's OIDC identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
           echo "::error::Nothing has been bumped, committed or tagged - this run stopped before mutating anything."
           echo "::error::Configure a trusted publisher on npmjs.com for ${pkg_name}: Settings -> Trusted Publisher -> GitHub Actions,"
@@ -535,7 +546,7 @@ jobs:
           fi
 
       # Authentication is npm trusted publishing (OIDC), not a long-lived token.
-      # The registry mints a short-lived credential from this workflow'''s id-token,
+      # The registry mints a short-lived credential from this workflow's id-token,
       # so no NODE_AUTH_TOKEN is set here on purpose: a stored token is the thing
       # that expired and silently stopped every fleet package publishing between
       # 2026-08-17 and 2026-08-26 while main kept bumping the version. Trusted
@@ -557,7 +568,9 @@ jobs:
           # such line before publishing so the only credential path left is OIDC.
           userconfig="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$userconfig" ]; then
-            sed -i'' -e '/_authToken/d' "$userconfig"
+            sed -i'' -e '/_authToken/d' -e '/:_auth[[:space:]]*=/d' -e '/:username[[:space:]]*=/d' \
+              -e '/:_password[[:space:]]*=/d' -e '/:certfile[[:space:]]*=/d' -e '/:keyfile[[:space:]]*=/d' \
+              -e '/always-auth/d' "$userconfig"
           fi
           pkg_name="$(node -p "require('./package.json').name")"
           if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
