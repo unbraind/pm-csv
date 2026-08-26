@@ -113,7 +113,7 @@ test("nothing between the upgrade and the publish step can put an older npm back
   assert.ok(upgrade < publish, "npm must be upgraded before the publish step runs");
 
   const between = executable(workflow.slice(upgrade, publish));
-  const installs = [...between.matchAll(/npm\s+(?:install|i|add)\s+-g\s+npm@\S+/g)];
+  const installs = [...between.matchAll(/npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@\S+/g)];
   assert.equal(
     installs.length,
     1,
@@ -130,10 +130,32 @@ test("no registry credential is configured, under any name or mechanism", () => 
   // that the publish step reaches the registry with no stored credential at all.
   const source = executable(workflow);
 
-  assert.doesNotMatch(source, /_authToken\s*[=:]/);
+  // npm accepts a registry credential under several names, and rejecting only
+  // the token spelling leaves the others open: `_auth` is basic auth,
+  // `username`/`_password` is the legacy pair, and `certfile`/`keyfile` is mTLS.
+  // Any one of them restores a stored credential the OIDC migration removed.
+  for (const key of ["_authToken", "_auth", "username", "_password", "certfile", "keyfile"]) {
+    assert.doesNotMatch(
+      source,
+      new RegExp(`${key}\\s*[=:]`),
+      `release workflow must not configure the npm credential '${key}'`
+    );
+  }
+
   assert.doesNotMatch(source, /npm\s+config\s+set\s+\/\//);
   assert.doesNotMatch(source, /npm\s+login/);
   assert.doesNotMatch(source, /always-auth/);
+
+  // The same credentials can arrive as environment overrides rather than as
+  // .npmrc lines. NPM_CONFIG_USERCONFIG is the one legitimate member of that
+  // family here - it is how the publish step finds the file it strips.
+  for (const [, name] of source.matchAll(/\b(NPM_CONFIG_[A-Z0-9_]+)\b/g)) {
+    assert.equal(
+      name,
+      "NPM_CONFIG_USERCONFIG",
+      `release workflow must not set ${name}, which can carry a registry credential`
+    );
+  }
 
   // The publish step must carry no secret at all. Elsewhere in the job
   // `secrets.GITHUB_TOKEN` is legitimate (the gh CLI needs it), so this is
