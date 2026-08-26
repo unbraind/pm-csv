@@ -226,6 +226,20 @@ test("publication is proven possible before anything is mutated", () => {
   // It has to actually reach the registry: asserting only that an id-token was
   // minted would pass while npm still refuses the identity at publish time.
   assert.match(step, /oidc\/token\/exchange\/package\//);
+
+  // A scoped name is not path-safe: @unbrained/pm-web must reach the registry as
+  // %40unbrained%2Fpm-web, and sending it raw addresses a different path. The URL
+  // must therefore be built from the ENCODED name, not from package.json's value.
+  assert.match(step, /encodeURIComponent/);
+  assert.match(step, /exchange\/package\/\$\{pkg_path\}/);
+  assert.doesNotMatch(step, /exchange\/package\/\$\{pkg_name\}/);
+
+  // npm answers 201 on a successful exchange. Accepting only 200 fails a release
+  // whose trusted publisher is correctly configured - a preflight that blocks
+  // correct releases is worse than the outage it exists to prevent.
+  assert.doesNotMatch(step, /\[ "\$\{status\}" = "200" \]/);
+  assert.match(step, /-ge 200/);
+  assert.match(step, /-lt 300/);
   assert.match(step, /set -euo pipefail/);
   assert.match(step, /exit 1/);
   assert.doesNotMatch(step, /\|\|\s*true/);
@@ -233,6 +247,28 @@ test("publication is proven possible before anything is mutated", () => {
   // Fails closed: no `continue-on-error`, which would restore the silent drift
   // while leaving every assertion above satisfied.
   assert.doesNotMatch(step, /continue-on-error/);
+
+  // The step legitimately carries an `if:`, so "has no condition" is the wrong
+  // assertion - but that is exactly the hole `if: ${{ false }}` walks through,
+  // leaving the step present, ordered correctly, and never executed while the
+  // bump, commit and publish steps still run. Pin the EXACT condition, and pin
+  // it to the same one the mutating steps use.
+  const preflightCondition = /^ *if: steps\.decide\.outputs\.should_release == 'true'$/m;
+  assert.match(step, preflightCondition);
+  assert.equal(
+    (step.match(/^ *if:/gm) ?? []).length,
+    1,
+    "the preflight must carry exactly one condition, so none can shadow the release condition"
+  );
+  assert.match(executable(stepSource("Update release version")), preflightCondition);
+
+  // A second `trap ... EXIT` REPLACES the first, so appending one is enough to
+  // keep the credential file on disk while every assertion above still passes.
+  assert.equal(
+    (step.match(/\btrap\b/g) ?? []).length,
+    1,
+    "exactly one EXIT trap may be installed, or a later one silently replaces the cleanup"
+  );
 
   // The exchange response carries a publish credential. Capturing the status
   // separately from the body is what keeps it out of the log.

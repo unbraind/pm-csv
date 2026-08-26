@@ -129,6 +129,12 @@ jobs:
         run: |
           set -euo pipefail
           pkg_name="$(node -p "require('./package.json').name")"
+          # A scoped name contains characters that are not path-safe: the URL
+          # segment for @unbrained/pm-web is %40unbrained%2Fpm-web, and sending
+          # the raw name instead addresses a different path entirely. Unscoped
+          # names encode to themselves, so this is not a no-op only for scoped
+          # packages - it is simply correct for both.
+          pkg_path="$(PKG="${pkg_name}" node -p "encodeURIComponent(process.env.PKG)")"
           id_token="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value")"
           if [ -z "${id_token}" ] || [ "${id_token}" = "undefined" ]; then
@@ -143,10 +149,14 @@ jobs:
           response="$(mktemp)"
           trap 'rm -f "${response}"' EXIT
           status="$(curl -sS -o "${response}" -w '%{http_code}' \
-            -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_name}" \
+            -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_path}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${id_token}")"
-          if [ "${status}" = "200" ]; then
+          # npm answers 201 Created on a successful exchange and 200 in some
+          # paths. Accepting only one of them would fail a release whose trusted
+          # publisher IS configured - a preflight that blocks correct releases is
+          # worse than the outage it exists to prevent, so accept any 2xx.
+          if [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
             echo "npm accepted this workflow's identity for ${pkg_name}; publication can proceed."
             exit 0
           fi
