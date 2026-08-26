@@ -62,8 +62,12 @@ function executable(source: string): string {
  */
 function withoutCredentialScrub(source: string): string {
   return executable(source)
-    .replace(/^[ \t]*sed -i.*$/gm, "")
-    .replace(/^[ \t]*-e '\/[^']*\/d'.*$/gm, "");
+    // Only the deletion fragments, never a whole line: a line such as
+    // `sed -i'' -e '/_authToken/d' "$f"; printf '…_authToken=%s' "$S" >> "$f"`
+    // deletes a credential and then restores one, and dropping the line would
+    // hide the restore along with the deletion.
+    .replace(/-e\s+'\/[^']*\/d'/g, "")
+    .replace(/\bsed\s+-i(?:''|"")?/g, "");
 }
 
 /**
@@ -161,6 +165,11 @@ test("nothing between the upgrade and the publish step can put an older npm back
   );
   assert.doesNotMatch(between, /corepack\s+(?:prepare|use)\s+npm@/);
   assert.doesNotMatch(between, /uses:\s*actions\/setup-node/);
+  // Prepending a directory to GITHUB_PATH changes which npm later steps resolve
+  // without installing anything, so it defeats an install-time check entirely.
+  // The publish step re-verifies at runtime, but rejecting the write statically
+  // means the run fails at review time rather than at publication time.
+  assert.doesNotMatch(between, /GITHUB_PATH/);
 });
 
 test("no registry credential is configured, under any name or mechanism", () => {
@@ -215,7 +224,19 @@ test("the empty credential that setup-node generates is removed before publishin
   // which blocks the OIDC exchange and fails with the very registry 404 this
   // migration removes. Deleting the token env is therefore NOT sufficient on
   // its own; the generated line has to go too.
-  const publish = stepSource("Publish npm package");
+  // executable(), not raw source: this step's own comments mention _authToken
+  // and NODE_AUTH_TOKEN, so deleting the scrub while keeping the comment would
+  // leave every assertion below green against comment text.
+  const publish = executable(stepSource("Publish npm package"));
+
+  // Checking npm at install time does not bind at publish time: a later step can
+  // prepend a directory to GITHUB_PATH and change which npm resolves here.
+  assert.match(publish, /npm --version/);
+  assert.match(publish, /sort -V/);
+  assert.ok(
+    publish.indexOf("npm --version") < publish.indexOf("npm publish"),
+    "the effective npm must be re-verified before publication, not only at install time"
+  );
 
   assert.match(publish, /NPM_CONFIG_USERCONFIG/);
   assert.match(publish, /sed -i/);
@@ -255,6 +276,18 @@ test("publication is proven possible before anything is mutated", () => {
     refCheck < preflight,
     "the release ref must be checked before any credential is requested"
   );
+
+  // The step check is not sufficient on its own. `npm ci` runs the checked-out
+  // package's `prepare` hook, and it runs before any step-level refusal - with
+  // this job's `id-token: write` held. A workflow_dispatch from a feature ref
+  // would execute repository-controlled code with release privileges. The job
+  // itself has to be gated.
+  const jobHeader = workflow.slice(workflow.indexOf("jobs:\n  release:"), stepIndex("Checkout"));
+  assert.match(
+    executable(jobHeader),
+    /^ {4}if: github\.ref == 'refs\/heads\/main'$/m,
+    "jobs.release must be gated by ref, not only by a step"
+  );
   assert.match(executable(stepSource("Check release ref")), /refs\/heads\/main/);
   const commit = stepIndex("Commit release files");
   const publish = stepIndex("Publish npm package");
@@ -285,6 +318,25 @@ test("publication is proven possible before anything is mutated", () => {
   // A registry outage is not an identity refusal, and must not send a maintainer
   // to reconfigure a trusted publisher that is already correct.
   assert.match(step, /-ge 500/);
+
+  // Under `set -u` a bare ${ACTIONS_ID_TOKEN_*} aborts the step with "unbound
+  // variable" before the diagnosis can print, so the operator is told nothing.
+  // The whole purpose of this step is a legible failure.
+  assert.doesNotMatch(step, /\$\{ACTIONS_ID_TOKEN_REQUEST_(?:URL|TOKEN)\}/);
+  assert.match(step, /\$\{ACTIONS_ID_TOKEN_REQUEST_URL:-\}/);
+  assert.match(step, /\$\{ACTIONS_ID_TOKEN_REQUEST_TOKEN:-\}/);
+
+  // Under `set -e` an uncaptured non-zero curl aborts before the 000 branch can
+  // classify it, making every message below unreachable on exactly the failure
+  // they exist to describe. Each curl must run inside an `if !` capture.
+  const curls = (step.match(/curl\b/g) ?? []).length;
+  const captured = (step.match(/if ! \w+="\$\(curl\b/g) ?? []).length;
+  assert.equal(
+    captured,
+    curls,
+    `every curl must have its exit status captured for classification (${captured}/${curls})`
+  );
+  assert.match(step, /status="000"/);
   assert.match(step, /exchange\/package\/\$\{pkg_path\}/);
   assert.doesNotMatch(step, /exchange\/package\/\$\{pkg_name\}/);
 

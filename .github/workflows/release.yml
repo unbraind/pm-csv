@@ -20,6 +20,13 @@ concurrency:
 
 jobs:
   release:
+    # Gated at the JOB level, not only by the `Check release ref` step below.
+    # `npm ci` runs the checked-out package's `prepare` hook, and every step -
+    # including that one - runs with this job's `id-token: write`. A
+    # workflow_dispatch from a feature ref would therefore execute
+    # repository-controlled code with release privileges before any step-level
+    # refusal could fire. The step check stays as defence in depth.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       RELEASE_TIMEZONE: Europe/Vienna
@@ -116,6 +123,13 @@ jobs:
           echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
+      # authoritative workflow trigger ref: schedule -> refs/heads/main;
+      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
+      # feature branch -> refs/heads/<feature> (refused here). Checking the
+      # trigger ref (rather than git topology) reliably distinguishes a feature
+      # branch from main, which commit-topology checks cannot do (a feature
+      # branch off main is also a descendant of origin/main).
       # This runs FIRST, before the OIDC preflight, and that ordering is the
       # point: a workflow_dispatch from a feature branch would otherwise mint an
       # id-token and exchange it for a short-lived npm PUBLISH CREDENTIAL, and
@@ -156,8 +170,24 @@ jobs:
           # names encode to themselves, so this is not a no-op only for scoped
           # packages - it is simply correct for both.
           pkg_path="$(PKG="${pkg_name}" node -p "encodeURIComponent(process.env.PKG)")"
-          id_token="$(curl -sS --max-time 30 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value")"
+          # Read defensively: under `set -u` an unset ACTIONS_ID_TOKEN_* aborts the
+          # step with a raw shell error before the diagnosis below can print, so
+          # the operator sees "unbound variable" instead of "the job needs
+          # id-token: write". The whole point of this step is a legible failure.
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          if [ -z "${request_url}" ] || [ -z "${request_token}" ]; then
+            echo "::error::GitHub exposed no OIDC token endpoint to this job. The release job needs 'id-token: write'."
+            exit 1
+          fi
+          # `set -e` would abort on a non-zero curl before anything could be
+          # classified, so the exit status is captured instead of propagating.
+          if ! id_token_body="$(curl -sS --max-time 30 -H "Authorization: bearer ${request_token}" \
+            "${request_url}&audience=npm:registry.npmjs.org")"; then
+            echo "::error::Could not reach GitHub's OIDC token endpoint. Nothing was bumped, committed or tagged; re-run when it is reachable."
+            exit 1
+          fi
+          id_token="$(printf '%s' "${id_token_body}" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value" 2>/dev/null)" || id_token=""
           if [ -z "${id_token}" ] || [ "${id_token}" = "undefined" ]; then
             echo "::error::GitHub would not mint an OIDC id-token. The release job needs 'id-token: write'."
             exit 1
@@ -169,10 +199,17 @@ jobs:
           # removes it on success, on failure, and on early return alike.
           response="$(mktemp)"
           trap 'rm -f "${response}"' EXIT
-          status="$(curl -sS --max-time 30 -o "${response}" -w '%{http_code}' \
+          # A timeout, DNS failure or refused connection makes curl exit non-zero,
+          # and `set -e` would abort here - before the 000 classification below
+          # could tell a registry outage apart from an identity refusal. Capture
+          # the status instead, and treat "curl produced nothing" as 000.
+          if ! status="$(curl -sS --max-time 30 -o "${response}" -w '%{http_code}' \
             -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_path}" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${id_token}")"
+            -H "Authorization: Bearer ${id_token}")"; then
+            status="000"
+          fi
+          [ -n "${status}" ] || status="000"
           # npm answers 201 Created on a successful exchange and 200 in some
           # paths. Accepting only one of them would fail a release whose trusted
           # publisher IS configured - a preflight that blocks correct releases is
@@ -238,13 +275,6 @@ jobs:
             git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
           fi
 
-      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
-      # authoritative workflow trigger ref: schedule -> refs/heads/main;
-      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
-      # feature branch -> refs/heads/<feature> (refused here). Checking the
-      # trigger ref (rather than git topology) reliably distinguishes a feature
-      # branch from main, which commit-topology checks cannot do (a feature
-      # branch off main is also a descendant of origin/main).
       - name: Merge release metadata through protected PR
         if: steps.decide.outputs.should_release == 'true'
         id: release_pr
@@ -576,6 +606,16 @@ jobs:
             sed -i'' -e '/_authToken/d' -e '/:_auth[[:space:]]*=/d' -e '/:username[[:space:]]*=/d' \
               -e '/:_password[[:space:]]*=/d' -e '/:certfile[[:space:]]*=/d' -e '/:keyfile[[:space:]]*=/d' \
               -e '/always-auth/d' "$userconfig"
+          fi
+          # Re-verify HERE, not only at install time. A later step can prepend a
+          # directory to GITHUB_PATH and change which npm this step resolves, and
+          # npm 10 cannot exchange an OIDC token - it would fall back to token
+          # auth and reproduce the exact E404 this migration removes.
+          active_npm="$(npm --version)"
+          required_npm="11.5.1"
+          if [ "$(printf '%s\n%s\n' "$active_npm" "$required_npm" | sort -V | head -n 1)" != "$required_npm" ]; then
+            echo "::error::npm $active_npm resolved at publish time cannot exchange an OIDC token; $required_npm or newer is required."
+            exit 1
           fi
           pkg_name="$(node -p "require('./package.json').name")"
           if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
