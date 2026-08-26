@@ -67,12 +67,22 @@ function effectiveReleasePermissions(): string {
   const afterKey = jobsAt + "jobs:\n  release:".length;
   const rest = workflow.slice(afterKey);
   const nextJob = rest.search(/^ {2}[A-Za-z][\w-]*:/m);
-  const job = nextJob === -1 ? rest : rest.slice(0, nextJob);
+  const job = executable(nextJob === -1 ? rest : rest.slice(0, nextJob));
 
-  const jobBlock = /^ {4}permissions:\n((?: {6}\S[^\n]*\n)+)/m.exec(executable(job));
+  // `permissions: { id-token: write }` - a flow mapping is still an override.
+  const inline = /^ {4}permissions:[ \t]*(\{[^}]*\})[ \t]*$/m.exec(job);
+  if (inline) return inline[1];
+
+  // `permissions: read-all` and friends are overrides that grant no id-token.
+  const scalar = /^ {4}permissions:[ \t]*([A-Za-z][\w-]*)[ \t]*$/m.exec(job);
+  if (scalar) return scalar[1];
+
+  const jobBlock = /^ {4}permissions:\n((?: {6}\S[^\n]*\n)+)/m.exec(job);
   if (jobBlock) return jobBlock[1];
 
-  const topBlock = /^permissions:\n((?: {2}\S[^\n]*\n)+)/m.exec(executable(workflow.slice(0, jobsAt)));
+  const topBlock = /^permissions:\n((?: {2}\S[^\n]*\n)+)/m.exec(
+    executable(workflow.slice(0, jobsAt))
+  );
   assert.ok(topBlock, "release workflow should declare permissions the release job inherits");
   return topBlock[1];
 }
@@ -81,7 +91,7 @@ test("the release job effectively holds id-token: write, and no comment can stan
   // Matching /id-token: write/ against the whole file is satisfied by a comment
   // reading "# id-token: write", and by a permission on some other job. Neither
   // grants this job anything, and OIDC publication fails closed without it.
-  assert.match(effectiveReleasePermissions(), /^ *id-token: write$/m);
+  assert.match(effectiveReleasePermissions(), /(?:^|[{,\s])id-token:\s*write\b/m);
 });
 
 test("the npm upgrade cannot be skipped and fails closed on the version it actually gets", () => {
@@ -90,7 +100,7 @@ test("the npm upgrade cannot be skipped and fails closed on the version it actua
   // and npm 10 stays active while the assertion still passes. The workflow
   // checks the EFFECTIVE version and exits non-zero, and that is what is
   // asserted here.
-  const step = stepSource("Use an npm that supports trusted publishing");
+  const step = executable(stepSource("Use an npm that supports trusted publishing"));
 
   // Pinned exactly, not a caret range: a privileged publish job that resolves a
   // different npm on every run is not reproducible, and an unreviewed 11.x could
