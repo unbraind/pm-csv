@@ -3,11 +3,22 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
+/** The release workflow source, read once and asserted against as text. */
 const workflow = readFileSync(
   resolve(import.meta.dirname, "../.github/workflows/release.yml"),
   "utf-8"
 );
 
+/**
+ * Locate a named workflow step so tests can assert on ordering between steps.
+ *
+ * Offsets are taken against the raw source rather than a comment-stripped copy:
+ * removing text shifts every index after it, which would silently corrupt the
+ * ordering comparisons these offsets exist to support.
+ *
+ * @param name - The exact `- name:` value of the step.
+ * @returns The character offset of that step within the workflow source.
+ */
 function stepIndex(name: string): number {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = new RegExp(
