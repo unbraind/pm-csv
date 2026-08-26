@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g npm@^11.5.1
+          npm install -g npm@11.19.0
           # Fail closed on the EFFECTIVE version, not on having run the install.
           # Installing is not the same as running: a swallowed install error, a
           # cached shim, or a later step selecting another npm all leave 10.x
@@ -115,6 +115,42 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Publication is the only step that can fail for a reason outside this
+      # repository, and it runs LAST - after the version bump and the release
+      # commit have already landed on main. That ordering is what let a dead
+      # credential hide for ten days: every run advanced main to a new version,
+      # published nothing, and still reported the bump as progress. Asking the
+      # registry for a credential BEFORE anything is mutated turns that silent
+      # drift into an immediate, actionable failure.
+      - name: Verify npm will accept this workflow's OIDC identity
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_name="$(node -p "require('./package.json').name")"
+          id_token="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value")"
+          if [ -z "${id_token}" ] || [ "${id_token}" = "undefined" ]; then
+            echo "::error::GitHub would not mint an OIDC id-token. The release job needs 'id-token: write'."
+            exit 1
+          fi
+          # Only the status is captured. The response body carries a publish
+          # credential on success and is never echoed.
+          status="$(curl -sS -o /tmp/npm-oidc-exchange.json -w '%{http_code}' \
+            -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_name}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${id_token}")"
+          if [ "${status}" = "200" ]; then
+            echo "npm accepted this workflow's identity for ${pkg_name}; publication can proceed."
+            exit 0
+          fi
+          reason="$(node -p "try{JSON.parse(require('node:fs').readFileSync('/tmp/npm-oidc-exchange.json','utf8')).message||''}catch(e){''}")"
+          echo "::error::npm refused this workflow's OIDC identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
+          echo "::error::Nothing has been bumped, committed or tagged - this run stopped before mutating anything."
+          echo "::error::Configure a trusted publisher on npmjs.com for ${pkg_name}: Settings -> Trusted Publisher -> GitHub Actions,"
+          echo "::error::organization 'unbraind', repository '${GITHUB_REPOSITORY#*/}', workflow 'release.yml', no environment."
+          exit 1
 
       - name: Update release version
         if: steps.decide.outputs.should_release == 'true'
@@ -497,6 +533,17 @@ jobs:
           NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         run: |
           set -euo pipefail
+          # actions/setup-node's registry-url writes
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the npm
+          # userconfig. With no token in the environment that expands to an
+          # EMPTY credential, and npm treats a configured-but-empty token as
+          # legacy auth - which blocks the OIDC exchange outright and fails with
+          # the same registry 404 this migration exists to remove. Remove any
+          # such line before publishing so the only credential path left is OIDC.
+          userconfig="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          if [ -f "$userconfig" ]; then
+            sed -i'' -e '/_authToken/d' "$userconfig"
+          fi
           pkg_name="$(node -p "require('./package.json').name")"
           if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
             echo "::notice::${pkg_name}@${NPM_VERSION} already published; skipping publish step."

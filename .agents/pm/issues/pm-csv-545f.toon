@@ -1,0 +1,17 @@
+id: pm-csv-545f
+title: "A release run bumped and committed a new version every night while publishing was impossible, because the only externally-failable step runs last"
+description: "The release job orders the version bump and the release commit before the publish step. When the npm credential died on 2026-08-17 that ordering meant every nightly run advanced main to a fresh version, pushed no tag, published nothing, and still reported the bump as progress. The outage stayed invisible for ten days across sixteen packages. A probe against npm's OIDC exchange endpoint from a real workflow returned HTTP 404 with the message 'OIDC token exchange error - package not found', proving no trusted publisher is bound to the package, so publication cannot succeed until that is configured on npmjs.com."
+type: Issue
+status: in_progress
+priority: 0
+tags[4]: ci,npm,release,supply-chain
+created_at: "2026-08-26T21:04:43.585Z"
+updated_at: "2026-08-26T21:04:44.539Z"
+author: codex
+acceptance_criteria: "The release run fails before the version bump when npm will not accept the workflow's OIDC identity; the failure message names the package, organization, repository and workflow filename to configure; the preflight cannot be made advisory with continue-on-error; reverting the preflight, the exact npm pin, the setup-node credential strip, or introducing any secret into the publish step each fail at least one test"
+learnings[1]{created_at,author,text}:
+  "2026-08-26T21:04:44.517Z",codex,"Ordering, not the credential, is what made this a ten-day outage. The credential failure was ordinary; what made it invisible was that the only step which can fail for a reason outside the repository ran after the steps that mutate state. Any pipeline with that shape reports progress while achieving nothing, so the externally-failable check belongs first."
+files[2]{path,scope}:
+  .github/workflows/release.yml,project
+  test/release-workflow.test.ts,project
+body: ""
