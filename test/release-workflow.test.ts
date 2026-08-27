@@ -78,8 +78,16 @@ function withoutCredentialScrub(source: string): string {
  */
 function stepSource(name: string): string {
   const start = stepIndex(name);
+  // Derive the boundary from the indentation of the step actually matched.
+  // A fixed `^ {6}- name:` disagrees with stepIndex, which accepts any
+  // indentation: if the workflow were reindented, the search would return -1,
+  // stepSource would return the whole rest of the file, and every scoped
+  // assertion would silently widen instead of failing.
+  // stepIndex returns the offset of the line start, so the step's indentation is
+  // the run of spaces at that offset.
+  const indent = /^[ \t]*/.exec(workflow.slice(start))?.[0].length ?? 0;
   const rest = workflow.slice(start + 1);
-  const next = rest.search(/^ {6}- name:/m);
+  const next = rest.search(new RegExp(`^ {${indent}}- name:`, "m"));
   return next === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
 }
 

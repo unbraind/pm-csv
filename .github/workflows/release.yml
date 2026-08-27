@@ -219,7 +219,14 @@ jobs:
           # publisher IS configured - a preflight that blocks correct releases is
           # worse than the outage it exists to prevent, so accept any 2xx.
           if [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
-            echo "npm accepted this workflow's identity for ${pkg_name}; publication can proceed."
+            echo "npm accepted this workflow's identity for ${pkg_name}."
+            # The exchange proves the workflow is a recognised trusted publisher.
+            # It does NOT prove the binding permits publishing: a configuration
+            # created on or after 2026-05-20 selects allowed actions, and one
+            # scoped to staging alone exchanges successfully and then fails at
+            # `npm publish` - after this run has already mutated main. Say so,
+            # so a failure there is not read as a preflight that lied.
+            echo "Note: this verifies identity, not the allowed action. The trusted publisher must have 'npm publish' selected."
             exit 0
           fi
           reason="$(RESPONSE_FILE="${response}" node -p "try{JSON.parse(require('node:fs').readFileSync(process.env.RESPONSE_FILE,'utf8')).message||''}catch(e){''}")"
