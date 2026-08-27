@@ -153,7 +153,12 @@ test("nothing between the upgrade and the publish step can put an older npm back
   const publish = stepIndex("Publish npm package");
   assert.ok(upgrade < publish, "npm must be upgraded before the publish step runs");
 
-  const between = executable(workflow.slice(upgrade, publish));
+  // Through the END of the publish step, not merely up to its start: the
+  // runtime version gate is the publish step's first command, so an install
+  // placed after it and before `npm publish` would satisfy every check while
+  // still publishing with a downgraded npm.
+  const publishEnd = publish + stepSource("Publish npm package").length;
+  const between = executable(workflow.slice(upgrade, publishEnd));
   const installs = [
     ...between.matchAll(/npm\s+(?:install|i|add)\s+(?:-g|--global)\s+npm@\S+/g),
     ...between.matchAll(/npm\s+(?:-g|--global)\s+(?:install|i|add)\s+npm@\S+/g),
@@ -161,7 +166,7 @@ test("nothing between the upgrade and the publish step can put an older npm back
   assert.equal(
     installs.length,
     1,
-    `exactly one global npm install may precede publication, found ${installs.length}`
+    `exactly one global npm install may appear before publication completes, found ${installs.length}`
   );
   assert.doesNotMatch(between, /corepack\s+(?:prepare|use)\s+npm@/);
   assert.doesNotMatch(between, /uses:\s*actions\/setup-node/);
@@ -170,6 +175,34 @@ test("nothing between the upgrade and the publish step can put an older npm back
   // The publish step re-verifies at runtime, but rejecting the write statically
   // means the run fails at review time rather than at publication time.
   assert.doesNotMatch(between, /GITHUB_PATH/);
+});
+
+test("no run script in the release job interpolates workflow context", () => {
+  // Every step here executes with `id-token: write`. Expanding `${{ … }}` into a
+  // shell script splices attacker-influenceable text - `github.event.repository.name`
+  // is repository metadata - into a privileged command line. Values reach the
+  // shell through `env:` instead, where the runner quotes them.
+  // Only `run:` script bodies. An `env:` entry is exactly where interpolation
+  // belongs - the runner passes the value as an environment variable rather
+  // than splicing it into a command line - so flagging those would be noise.
+  const jobs = workflow.indexOf("jobs:\n  release:");
+  const offenders: string[] = [];
+  let inRunBlock = false;
+  for (const line of executable(workflow.slice(jobs)).split("\n")) {
+    if (/^ {8}run: \|/.test(line)) {
+      inRunBlock = true;
+      continue;
+    }
+    // A `run:` on one line is a script too, just not a block scalar.
+    if (/^ {8}run: /.test(line)) {
+      inRunBlock = false;
+      if (line.includes("${{")) offenders.push(line.trim());
+      continue;
+    }
+    if (/^ {0,8}\S/.test(line)) inRunBlock = false;
+    if (inRunBlock && line.includes("${{")) offenders.push(line.trim());
+  }
+  assert.deepEqual(offenders, [], `run scripts must not interpolate workflow context:\n  ${offenders.join("\n  ")}`);
 });
 
 test("no registry credential is configured, under any name or mechanism", () => {
@@ -243,9 +276,15 @@ test("the empty credential that setup-node generates is removed before publishin
 
   // Deleting only the token spelling leaves basic auth, the legacy pair and the
   // mTLS pair in place - each of which npm will use instead of the exchange.
-  for (const key of ["_authToken", "_auth", "username", "_password", "certfile", "keyfile"]) {
-    assert.ok(
-      publish.includes(key),
+  // Asserting `publish.includes("_auth")` is satisfied by the `_authToken`
+  // expression alone, so the loop passed while the basic-auth scrub could be
+  // deleted outright. Each key is asserted in the DELIMITED form the scrub
+  // actually uses, which no other key's expression can satisfy.
+  assert.match(publish, /-e '\/_authToken\/d'/);
+  for (const key of ["_auth", "username", "_password", "certfile", "keyfile"]) {
+    assert.match(
+      publish,
+      new RegExp(`-e '/:${key}\\[\\[:space:\\]\\]\\*=/d'`),
       `the credential scrub must remove '${key}' from the npm userconfig`
     );
   }
@@ -305,7 +344,11 @@ test("publication is proven possible before anything is mutated", () => {
   // A scoped name is not path-safe: @unbrained/pm-web must reach the registry as
   // %40unbrained%2Fpm-web, and sending it raw addresses a different path. The URL
   // must therefore be built from the ENCODED name, not from package.json's value.
-  assert.match(step, /encodeURIComponent/);
+  // npm's escapedName preserves the leading `@` and encodes only the separator,
+  // so @unbrained/pm-web must address @unbrained%2fpm-web. encodeURIComponent
+  // would percent-encode the `@` too and address a path npm does not know.
+  assert.match(step, /replace\('\/', '%2f'\)/);
+  assert.doesNotMatch(step, /encodeURIComponent/);
 
   // An unbounded curl in a release gate turns a hung registry into a hung job
   // rather than a failed one, and the job holds an id-token while it hangs.
@@ -318,6 +361,8 @@ test("publication is proven possible before anything is mutated", () => {
   // A registry outage is not an identity refusal, and must not send a maintainer
   // to reconfigure a trusted publisher that is already correct.
   assert.match(step, /-ge 500/);
+  // Rate limiting says nothing about whether a trusted publisher is bound.
+  assert.match(step, /"429"/);
 
   // Under `set -u` a bare ${ACTIONS_ID_TOKEN_*} aborts the step with "unbound
   // variable" before the diagnosis can print, so the operator is told nothing.

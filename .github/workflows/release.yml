@@ -169,7 +169,11 @@ jobs:
           # the raw name instead addresses a different path entirely. Unscoped
           # names encode to themselves, so this is not a no-op only for scoped
           # packages - it is simply correct for both.
-          pkg_path="$(PKG="${pkg_name}" node -p "encodeURIComponent(process.env.PKG)")"
+          # npm's escapedName contract is NOT encodeURIComponent: the registry
+          # preserves the leading `@` and encodes only the separator, so
+          # @unbrained/pm-web addresses @unbrained%2fpm-web. Percent-encoding the
+          # `@` as well produces a path the registry does not recognise.
+          pkg_path="$(PKG="${pkg_name}" node -p "process.env.PKG.replace('/', '%2f')")"
           # Read defensively: under `set -u` an unset ACTIONS_ID_TOKEN_* aborts the
           # step with a raw shell error before the diagnosis below can print, so
           # the operator sees "unbound variable" instead of "the job needs
@@ -225,7 +229,10 @@ jobs:
           # configure a trusted publisher they already configured would send them
           # somewhere useless. Fail either way - a release must not proceed on an
           # unverified identity - but say which failure it was.
-          if [ "${status}" = "000" ] || [ "${status}" -ge 500 ]; then
+          # 429 belongs here too: the registry is rate-limiting this caller, which
+          # says nothing about whether a trusted publisher is bound. Sending a
+          # maintainer to reconfigure a correct publisher is the wrong answer.
+          if [ "${status}" = "000" ] || [ "${status}" = "429" ] || [ "${status}" -ge 500 ]; then
             echo "::error::Could not reach npm to verify this workflow's identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
             echo "::error::This is a registry or network failure, NOT a trusted-publisher problem. Nothing was bumped, committed or tagged; re-run when the registry is reachable."
             exit 1
@@ -238,10 +245,12 @@ jobs:
 
       - name: Update release version
         if: steps.decide.outputs.should_release == 'true'
+        env:
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         shell: bash
         run: |
           set -euo pipefail
-          npm version "${{ steps.decide.outputs.npm_version }}" --no-git-tag-version --allow-same-version
+          npm version "${NPM_VERSION}" --no-git-tag-version --allow-same-version
           node -e "const fs=require('node:fs');const version=JSON.parse(fs.readFileSync('package.json','utf8')).version;for(const file of ['manifest.json']){if(!fs.existsSync(file))continue;const json=JSON.parse(fs.readFileSync(file,'utf8'));json.version=version;fs.writeFileSync(file,JSON.stringify(json,null,2)+'\n');}if(fs.existsSync('index.ts')){const source=fs.readFileSync('index.ts','utf8');const next=source.replace(/version:\s*[\"'][^\"']+[\"']/,'version: \"'+version+'\"');if(next!==source)fs.writeFileSync('index.ts',next);}"
           npm run build
 
@@ -260,6 +269,9 @@ jobs:
 
       - name: Commit release files
         if: steps.decide.outputs.should_release == 'true'
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -272,7 +284,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "Release files are already current; tagging existing commit."
           else
-            git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
+            git commit -m "Release ${REPO_NAME} ${RELEASE_TAG}"
           fi
 
       - name: Merge release metadata through protected PR
@@ -701,11 +713,13 @@ jobs:
 
       - name: Verify bun install of published package
         if: steps.decide.outputs.should_release == 'true'
+        env:
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         shell: bash
         run: |
           set -euo pipefail
           pkg_name="$(node -p "require('./package.json').name")"
-          pkg_version="${{ steps.decide.outputs.npm_version }}"
+          pkg_version="${NPM_VERSION}"
           mkdir -p /tmp/bun-verify
           cd /tmp/bun-verify
           rm -rf node_modules bun.lockb package.json
@@ -736,8 +750,10 @@ jobs:
       - name: Create GitHub release
         if: steps.decide.outputs.should_release == 'true'
         env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ steps.decide.outputs.tag }}" --title "${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}" --notes-file RELEASE_NOTES.md --verify-tag
+        run: gh release create "${RELEASE_TAG}" --title "${REPO_NAME} ${RELEASE_TAG}" --notes-file RELEASE_NOTES.md --verify-tag
 
   # A failed scheduled release otherwise produces no tracker-visible signal.
   # Keep alerting isolated, least-privileged, deduplicated, and non-blocking.
