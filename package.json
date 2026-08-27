@@ -43,7 +43,7 @@
     "pm:validate": "pm validate --json",
     "coverage": "npm run build && npm run build:test && node scripts/coverage-gate.ts",
     "docstring": "node scripts/docstring-gate.ts",
-    "verify:release-changelog-date": "bash scripts/verify-release-changelog-date.sh"
+    "verify:release-changelog-date": "node scripts/verify-release-changelog-date.ts"
   },
   "coverageGate": {
     "sources": [
