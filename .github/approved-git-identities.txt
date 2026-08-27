@@ -1,0 +1,33 @@
+# Approved commit author and committer identities for this repository.
+#
+# Two categories are approved:
+#
+# 1. Approved public authoring identities - addresses the maintainer has
+#    explicitly decided to keep as public authoring identities. These are NOT
+#    leaked personal data; they are intentional public identities already
+#    present in the public history of the unbraind/pm-* repositories.
+# 2. Service and noreply identities - automated bot and noreply addresses that
+#    carry no personal identity metadata.
+#
+# The gate in test/identity-audit.test.ts fails closed on any author or
+# committer email outside this list, and on any newly added absolute home path.
+#
+# It audits FORWARD ONLY, from the baseline in identity-baseline.txt. History
+# before that point is a maintainer decision recorded there, not an oversight:
+# rewriting it would orphan release tags and break published npm provenance.
+
+# Approved public authoring identity.
+stefan@preu.at
+
+# The maintainer's GitHub noreply addresses.
+unbraind@users.noreply.github.com
+1153461+unbraind@users.noreply.github.com
+
+# GitHub's committer for merges made through the web UI.
+noreply@github.com
+
+# The GitHub Actions bot, which authors the release commit.
+41898282+github-actions[bot]@users.noreply.github.com
+
+# Dependabot's public GitHub noreply address.
+49699333+dependabot[bot]@users.noreply.github.com
