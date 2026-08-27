@@ -136,13 +136,32 @@ test("a control change this branch proposes does not take effect on this branch"
   }
 });
 
-test("the identity baseline is a commit this checkout actually has", () => {
+test("the identity baseline is a commit this checkout has, and one the base ref already reached", () => {
   // A shallow clone would audit nothing and report success, which is worse than
   // failing: the gate would be decorative.
   assert.ok(baseline, `${CONTROL.baseline} must name a commit`);
   assert.doesNotThrow(
     () => git("cat-file", "-e", `${baseline}^{commit}`),
     `baseline ${baseline} is missing - the workflow must check out full history (fetch-depth: 0)`
+  );
+
+  // Existing is not enough. Both audits below run over `baseline..HEAD`, so a
+  // baseline pointing at one of THIS branch's own commits excludes every commit
+  // before it from the audit - the branch would be measured only against
+  // itself. Requiring the baseline to be an ancestor of the trusted base ref
+  // means it can only ever name history that was already merged, whether the
+  // controls came from the base ref or are being introduced by this branch.
+  let ancestor = true;
+  try {
+    git("merge-base", "--is-ancestor", baseline, baseRef());
+  } catch {
+    ancestor = false;
+  }
+  assert.equal(
+    ancestor,
+    true,
+    `baseline ${baseline} is not an ancestor of ${baseRef()} - a branch cannot move the baseline onto its own `
+      + "commits, because everything before it would then be excluded from the audit"
   );
 });
 
@@ -192,6 +211,13 @@ test("no commit since the baseline adds an absolute home path", () => {
     for (const line of git("show", "--unified=0", "--format=", sha).split("\n")) {
       if (!line.startsWith("+") || line.startsWith("+++")) continue;
       if (homePath.test(line)) offenders.push(`${sha.slice(0, 8)} ${line.slice(1).trim().slice(0, 100)}`);
+    }
+    // The commit MESSAGE too. `--format=` above suppresses it, so a path pasted
+    // into a message - a stack trace, a `cd` line, a reproduction command - was
+    // never examined, while being just as reachable in the object store as a
+    // path in a diff.
+    for (const line of git("log", "-1", "--format=%B", sha).split("\n")) {
+      if (homePath.test(line)) offenders.push(`${sha.slice(0, 8)} (message) ${line.trim().slice(0, 100)}`);
     }
   }
 
