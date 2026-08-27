@@ -239,6 +239,14 @@ test("no registry credential is configured, under any name or mechanism", () => 
   // value with a space rather than `=`, which the key-plus-`=` checks miss.
   assert.doesNotMatch(source, /:(?:_authToken|_auth|username|_password|certfile|keyfile)\s+\S/i);
 
+  // A GLOBAL credential needs no registry scope and no `=`:
+  // `npm config set _auth <value>` configures legacy authentication that npm
+  // honours, while every scoped and delimited check above passes.
+  assert.doesNotMatch(
+    source,
+    /npm\s+(?:config\s+)?set\s+["']?(?:\/\/\S*?[:/])?(?:_authToken|_auth|username|_password|certfile|keyfile|email)\b/i
+  );
+
   // The same credentials can arrive as environment overrides rather than as
   // .npmrc lines. NPM_CONFIG_USERCONFIG is the one legitimate member of that
   // family here - it is how the publish step finds the file it strips.
@@ -293,7 +301,14 @@ test("the empty credential that setup-node generates is removed before publishin
     assert.match(
       publish,
       new RegExp(`-e '/:${key}\\[\\[:space:\\]\\]\\*=/d'`),
-      `the credential scrub must remove '${key}' from the npm userconfig`
+      `the credential scrub must remove the registry-scoped '${key}'`
+    );
+    // npm honours an unscoped credential too, so removing only the scoped form
+    // leaves legacy authentication configured.
+    assert.match(
+      publish,
+      new RegExp(`-e '/\\^\\[\\[:space:\\]\\]\\*${key}\\[\\[:space:\\]\\]\\*=/d'`),
+      `the credential scrub must remove the global '${key}'`
     );
   }
   // The strip must happen before the publish command, not after it.

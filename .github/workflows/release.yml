@@ -622,8 +622,16 @@ jobs:
           # such line before publishing so the only credential path left is OIDC.
           userconfig="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$userconfig" ]; then
-            sed -i'' -e '/_authToken/d' -e '/:_auth[[:space:]]*=/d' -e '/:username[[:space:]]*=/d' \
-              -e '/:_password[[:space:]]*=/d' -e '/:certfile[[:space:]]*=/d' -e '/:keyfile[[:space:]]*=/d' \
+            # Both the registry-scoped forms (//registry/:_auth=...) and the
+            # GLOBAL forms (_auth=... at the start of a line). npm honours an
+            # unscoped credential too, so removing only the scoped ones leaves
+            # legacy authentication configured while every guard still passes.
+            sed -i'' -e '/_authToken/d' \
+              -e '/^[[:space:]]*_auth[[:space:]]*=/d' -e '/:_auth[[:space:]]*=/d' \
+              -e '/^[[:space:]]*username[[:space:]]*=/d' -e '/:username[[:space:]]*=/d' \
+              -e '/^[[:space:]]*_password[[:space:]]*=/d' -e '/:_password[[:space:]]*=/d' \
+              -e '/^[[:space:]]*certfile[[:space:]]*=/d' -e '/:certfile[[:space:]]*=/d' \
+              -e '/^[[:space:]]*keyfile[[:space:]]*=/d' -e '/:keyfile[[:space:]]*=/d' \
               -e '/always-auth/d' "$userconfig"
           fi
           # Re-verify HERE, not only at install time. A later step can prepend a
