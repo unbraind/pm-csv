@@ -61,6 +61,15 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check for duplicated code
+        run: npm run duplicates
+
       - name: Verify complete docstring coverage
         run: npm run docstring
 
@@ -72,6 +81,9 @@ jobs:
 
       - name: Verify npm package contents
         run: npm run pack:dry-run
+
+      - name: Accept the packed tarball under npm, bun and the minimum host
+        run: npm run accept:packed
 
       - name: Verify generated changelog
         run: npm run changelog:check
