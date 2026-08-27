@@ -2,12 +2,19 @@ id: pm-csv-pam9
 title: Enable GitHub CodeQL code scanning
 description: "Add .github/workflows/codeql.yml (javascript-typescript, build-mode none, weekly staggered schedule). GET code-scanning/alerts returned 404 no-analysis-found, so the Security tab could not distinguish clean from never-ran. Advisory check only, not added to branch protection."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-08-22T17:24:33.745Z"
-updated_at: "2026-08-22T17:59:08.764Z"
+updated_at: "2026-08-26T21:46:49.814Z"
+closed_at: "2026-08-26T21:46:35.420Z"
+completed_at: "2026-08-26T21:46:35.420Z"
 author: "harness:ox-alpha"
+resolution: CodeQL code scanning is enabled on unbraind/pm-csv and producing analyses
+expected_result: GitHub CodeQL code scanning runs on pushes and pull requests and reports findings
+actual_result: "codeql.yml is present on main and the code-scanning API reports a completed CodeQL analysis at 2026-08-26T21:35:19Z"
+comments[1]{created_at,author,text}:
+  "2026-08-26T21:46:34.737Z",claude,"Closing on evidence rather than assumption. CodeQL is enabled and running: .github/workflows/codeql.yml is present on main and the GitHub code-scanning API reports a completed CodeQL analysis at 2026-08-26T21:35:19Z. The item was left in_progress after its last tests_add event on 2026-08-22, which is why pm health reported a stale in_progress item for 99 hours while the underlying work had in fact shipped."
 notes[1]{created_at,author,text}:
   "2026-08-22T17:24:49.405Z","harness:ox-alpha","Verified 2026-08-22: gh api repos/unbraind/pm-csv/code-scanning/alerts -> 404 'no analysis found'. Workflow pins github/codeql-action v4 (fleet major-tag convention), permissions limited to security-events:write/actions:read/contents:read."
 files[1]{path,scope,note}:
@@ -21,4 +28,5 @@ tests[2]:
     scope: project
     assert_stdout_regex[1]: "^[1-9][0-9]*$"
     note: "At least one CodeQL analysis must exist. Deliberately queries /analyses, not /alerts: an empty /alerts array is ambiguous between analysed-and-clean and never-analysed, and that ambiguity is the exact defect this change removes. /analyses answers did-a-scan-run directly, so a clean repo passes and an unscanned one fails."
+close_reason: CodeQL code scanning is enabled and producing analyses; the item was complete but never transitioned.
 body: ""

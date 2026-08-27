@@ -1,0 +1,16 @@
+# The commit from which the identity and host-path gate applies.
+#
+# Everything reachable from this commit is frozen by maintainer decision taken
+# on 2026-08-27: the reachable history of this repository contains no keys,
+# tokens, private addresses or credentials - GitHub secret scanning is clean and
+# tracked files are clean - but it does contain a small number of machine-local
+# commit identities and, inside .agents/pm prose, absolute home paths.
+#
+# Rewriting that history would orphan release tags across the fleet, break the
+# provenance chain of already-published npm versions, and invalidate every
+# existing clone. The maintainer judged that cost to exceed the benefit of
+# removing a Linux username from old commit metadata.
+#
+# The decision is therefore to freeze the past and gate the future: no NEW
+# commit may carry an unapproved identity or add an absolute home path.
+f519a48843ca9e363475ee5852fb27fcd0157af1

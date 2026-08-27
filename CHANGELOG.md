@@ -18,8 +18,13 @@
 - Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
 - Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))
 
+### Security
+
+- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-csv-om24](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-om24.toon))
+
 ### Other
 
+- Enable GitHub CodeQL code scanning ([pm-csv-pam9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-pam9.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-csv-76gz](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-76gz.toon))
 
 ## 2026.8.16 - 2026-08-16

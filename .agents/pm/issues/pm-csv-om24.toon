@@ -1,0 +1,17 @@
+id: pm-csv-om24
+title: The identity gate deadlocks the one remediation its own failure message prescribes
+description: "Once the audit controls exist on the base ref, the anchoring test required the working tree to match them byte for byte, so any pull request that approves a new identity or moves the baseline fails the gate it is trying to update."
+type: Issue
+status: closed
+priority: 1
+tags[4]: ci,fleet-wide,identity-gate,security
+created_at: "2026-08-27T16:53:25.445Z"
+updated_at: "2026-08-27T16:53:27.359Z"
+closed_at: "2026-08-27T16:53:27.343Z"
+completed_at: "2026-08-27T16:53:27.343Z"
+claim_principal: claude-agent
+author: claude-agent
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli-companion/blob/main/.agents/pm/issues/pm-cli-website-54et.toon",project,Fleet hub item tracking this defect across all seventeen repositories
+close_reason: "Fixed: the anchoring test now asserts that a proposed control change is not yet in force, instead of forbidding the change outright. Both directions executed in a scratch repository."
+body: "## What was wrong\n\nThe identity gate anchors its two control files to the base ref so a pull request\ncannot approve itself. That part is right, and it stays. What was wrong is how\nthe anchoring was *asserted*: once a control existed on the base ref, the test\nrequired the working tree to be byte-identical to it.\n\nThat makes every control change unmergeable. Approving a new identity is done by\nediting `.github/approved-git-identities.txt`; moving the baseline is done by\nediting `.github/identity-baseline.txt`. The gate runs on the pull request that\nmakes either edit, sees a difference from the base ref, and fails it. The\nremediation the failure message names — \"add the address to\n`.github/approved-git-identities.txt`\" — was the one action the gate forbade.\n\nReproduced in a scratch repository rather than argued: a branch whose only change\nis adding a second approved identity fails the old assertion and passes the new one.\n\n## What replaced it\n\nThe security property is that the audit **evaluates** against the base ref's\ncontrols, not that the branch is forbidden from editing them. A branch may now\npropose a control change; it simply does not take effect on the branch proposing\nit. The test asserts exactly that: any value present in the working tree but not\non the base ref must not already be in force.\n\nThe assertion re-reads the base ref itself rather than trusting the reader's\noutput. Without that, a reader that regressed to preferring the working tree\nwould be compared against itself, find nothing proposed, and pass while\nvalidating nothing.\n\n## Proof it is not decorative\n\nBoth directions were executed, not reasoned about:\n\n- Old assertion + legitimate maintainer change → **fails** (the deadlock).\n- New assertion + legitimate maintainer change → **passes**.\n- New assertion + a reader regressed to the working tree, on a branch that adds\n  its own unapproved identity → **fails** (the self-approval bypass stays closed).\n\n## Credit\n\nFound by Greptile on the pm-context pull request, filed as P1 \"Control updates\nalways fail\". The defect was in the gate rather than in the code the gate\nmeasures, and it was identical in every repository that had adopted the gate —\nso it was fixed across all of them, not only where it was reported."

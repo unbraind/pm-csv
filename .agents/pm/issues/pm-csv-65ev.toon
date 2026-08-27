@@ -1,0 +1,27 @@
+id: pm-csv-65ev
+title: "The release job authenticated with a stored npm token that expired, so publishing stopped while every other gate stayed green"
+description: "The Publish npm package step read NODE_AUTH_TOKEN from the repository secret NPM_TOKEN. That credential began being rejected on 2026-08-17 UTC. From then until 2026-08-26 UTC every daily release run reached the publish step and failed with npm code E404 on PUT to the registry, which is how npm reports a rejected write credential rather than a missing package. Rotating the secret on 2026-08-22 UTC did not help, and the copy of the credential on the maintainer host answers 401 to npm whoami, so the token is dead rather than mis-stored. Because the version bump and the release commit both land before the publish step, main advanced to 2026.8.26 with no matching tag and no published artifact while npm still serves 2026.8.16. Sixteen of the eighteen published fleet packages are in the same state."
+type: Issue
+status: in_progress
+priority: 0
+tags[3]: npm,release,supply-chain
+created_at: "2026-08-26T19:45:05.437Z"
+updated_at: "2026-08-26T23:06:16.588Z"
+deadline: "2026-09-02T00:00:00.000Z"
+assignee: claude
+author: claude
+estimated_minutes: 90
+acceptance_criteria: No release workflow references NODE_AUTH_TOKEN NPM_TOKEN or secrets.NPM outside a comment; the publish job carries id-token write; npm is raised to at least 11.5.1 before the publish step because the npm bundled with node 22 cannot exchange an OIDC token; a test fails closed if a stored token is reintroduced or the npm upgrade is removed
+comments[1]{created_at,author,text}:
+  "2026-08-26T19:45:05.437Z",claude,"Guards verified as non-vacuous: reintroducing NODE_AUTH_TOKEN fails the OIDC test and deleting the npm upgrade step fails the npm-version test, while the unmodified tree passes both."
+notes[1]{created_at,author,text}:
+  "2026-08-26T19:45:05.437Z",claude,"Root cause was found by comparing npm view against the branch, not by reading CI. Every job except publish was green for ten days."
+learnings[1]{created_at,author,text}:
+  "2026-08-26T19:45:05.437Z",claude,"A release pipeline that bumps and commits the version before it publishes hides a credential outage indefinitely. Registry state, not workflow state, is the definition of released."
+files[1]{path,scope}:
+  .github/workflows/release.yml,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npx tsx --test test/release-workflow.test.ts,project,claude,"2026-08-26T19:45:05.437Z",local_mutation,ci/publish-by-oidc-trusted-publishing
+docs[1]{path,scope,note}:
+  "https://docs.npmjs.com/trusted-publishers",project,npm trusted publishing setup
+body: "Trusted publishing replaces the stored credential. The registry mints a short lived credential from the workflow OIDC identity, so there is no secret left to expire. Requires a one time configuration on npmjs.com binding this package to unbraind/pm-csv and the release.yml workflow."

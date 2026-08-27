@@ -20,6 +20,13 @@ concurrency:
 
 jobs:
   release:
+    # Gated at the JOB level, not only by the `Check release ref` step below.
+    # `npm ci` runs the checked-out package's `prepare` hook, and every step -
+    # including that one - runs with this job's `id-token: write`. A
+    # workflow_dispatch from a feature ref would therefore execute
+    # repository-controlled code with release privileges before any step-level
+    # refusal could fire. The step check stays as defence in depth.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       RELEASE_TIMEZONE: Europe/Vienna
@@ -36,6 +43,28 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: "https://registry.npmjs.org"
+
+      # node 22 ships npm 10.x, which has no trusted-publishing support at all and
+      # would fall back to token auth. 11.5.1 is the first npm that can exchange
+      # the workflow's OIDC id-token for a registry credential.
+      - name: Use an npm that supports trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.19.0
+          # Fail closed on the EFFECTIVE version, not on having run the install.
+          # Installing is not the same as running: a swallowed install error, a
+          # cached shim, or a later step selecting another npm all leave 10.x
+          # active. npm 10 has no OIDC support and would fall back to token
+          # auth, reproducing the exact E404 this migration exists to remove -
+          # and it would look like trusted publishing itself had failed.
+          active="$(npm --version)"
+          required="11.5.1"
+          if [ "$(printf '%s\n%s\n' "$active" "$required" | sort -V | head -n 1)" != "$required" ]; then
+            echo "::error::npm $active cannot exchange an OIDC token; $required or newer is required."
+            exit 1
+          fi
+          echo "npm $active can exchange an OIDC token for a registry credential."
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2.2.0
@@ -94,12 +123,141 @@ jobs:
           echo "npm_version=$npm_version" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Update release version
+      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
+      # authoritative workflow trigger ref: schedule -> refs/heads/main;
+      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
+      # feature branch -> refs/heads/<feature> (refused here). Checking the
+      # trigger ref (rather than git topology) reliably distinguishes a feature
+      # branch from main, which commit-topology checks cannot do (a feature
+      # branch off main is also a descendant of origin/main).
+      # This runs FIRST, before the OIDC preflight, and that ordering is the
+      # point: a workflow_dispatch from a feature branch would otherwise mint an
+      # id-token and exchange it for a short-lived npm PUBLISH CREDENTIAL, and
+      # only then be refused - requesting a credential the run is not allowed to
+      # use. Refusing on the ref costs nothing and must come first.
+      - name: Check release ref
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
+            exit 1
+          fi
+
+      # Persist validated release metadata through the repository's protected
+      # branch policy before publishing an immutable npm artifact. A stable
+      # branch name lets a failed run update/reuse its open release PR, while
+      # the exact remote SHA lease prevents overwriting another actor's work.
+      # Publication is the only step that can fail for a reason outside this
+      # repository, and it runs LAST - after the version bump and the release
+      # commit have already landed on main. That ordering is what let a dead
+      # credential hide for ten days: every run advanced main to a new version,
+      # published nothing, and still reported the bump as progress. Asking the
+      # registry for a credential BEFORE anything is mutated turns that silent
+      # drift into an immediate, actionable failure.
+      - name: Verify npm will accept this workflow's OIDC identity
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          npm version "${{ steps.decide.outputs.npm_version }}" --no-git-tag-version --allow-same-version
+          pkg_name="$(node -p "require('./package.json').name")"
+          # A scoped name contains characters that are not path-safe: the URL
+          # segment for @unbrained/pm-web is %40unbrained%2Fpm-web, and sending
+          # the raw name instead addresses a different path entirely. Unscoped
+          # names encode to themselves, so this is not a no-op only for scoped
+          # packages - it is simply correct for both.
+          # npm's escapedName contract is NOT encodeURIComponent: the registry
+          # preserves the leading `@` and encodes only the separator, so
+          # @unbrained/pm-web addresses @unbrained%2fpm-web. Percent-encoding the
+          # `@` as well produces a path the registry does not recognise.
+          pkg_path="$(PKG="${pkg_name}" node -p "process.env.PKG.replace('/', '%2f')")"
+          # Read defensively: under `set -u` an unset ACTIONS_ID_TOKEN_* aborts the
+          # step with a raw shell error before the diagnosis below can print, so
+          # the operator sees "unbound variable" instead of "the job needs
+          # id-token: write". The whole point of this step is a legible failure.
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          if [ -z "${request_url}" ] || [ -z "${request_token}" ]; then
+            echo "::error::GitHub exposed no OIDC token endpoint to this job. The release job needs 'id-token: write'."
+            exit 1
+          fi
+          # `set -e` would abort on a non-zero curl before anything could be
+          # classified, so the exit status is captured instead of propagating.
+          if ! id_token_body="$(curl -sS --max-time 30 -H "Authorization: bearer ${request_token}" \
+            "${request_url}&audience=npm:registry.npmjs.org")"; then
+            echo "::error::Could not reach GitHub's OIDC token endpoint. Nothing was bumped, committed or tagged; re-run when it is reachable."
+            exit 1
+          fi
+          id_token="$(printf '%s' "${id_token_body}" | node -p "JSON.parse(require('node:fs').readFileSync(0,'utf8')).value" 2>/dev/null)" || id_token=""
+          if [ -z "${id_token}" ] || [ "${id_token}" = "undefined" ]; then
+            echo "::error::GitHub would not mint an OIDC id-token. The release job needs 'id-token: write'."
+            exit 1
+          fi
+          # The response body carries a short-lived PUBLISH CREDENTIAL on success.
+          # It is never echoed, and it must not outlive this step either: every
+          # later step in this job runs as the same runner user and could read it
+          # off disk. mktemp keeps it out of a predictable path and the EXIT trap
+          # removes it on success, on failure, and on early return alike.
+          response="$(mktemp)"
+          trap 'rm -f "${response}"' EXIT
+          # A timeout, DNS failure or refused connection makes curl exit non-zero,
+          # and `set -e` would abort here - before the 000 classification below
+          # could tell a registry outage apart from an identity refusal. Capture
+          # the status instead, and treat "curl produced nothing" as 000.
+          if ! status="$(curl -sS --max-time 30 -o "${response}" -w '%{http_code}' \
+            -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg_path}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${id_token}")"; then
+            status="000"
+          fi
+          [ -n "${status}" ] || status="000"
+          # npm answers 201 Created on a successful exchange and 200 in some
+          # paths. Accepting only one of them would fail a release whose trusted
+          # publisher IS configured - a preflight that blocks correct releases is
+          # worse than the outage it exists to prevent, so accept any 2xx.
+          if [ "${status}" -ge 200 ] && [ "${status}" -lt 300 ]; then
+            echo "npm accepted this workflow's identity for ${pkg_name}."
+            # The exchange proves the workflow is a recognised trusted publisher.
+            # It does NOT prove the binding permits publishing: a configuration
+            # created on or after 2026-05-20 selects allowed actions, and one
+            # scoped to staging alone exchanges successfully and then fails at
+            # `npm publish` - after this run has already mutated main. Say so,
+            # so a failure there is not read as a preflight that lied.
+            echo "Note: this verifies identity, not the allowed action. The trusted publisher must have 'npm publish' selected."
+            exit 0
+          fi
+          reason="$(RESPONSE_FILE="${response}" node -p "try{JSON.parse(require('node:fs').readFileSync(process.env.RESPONSE_FILE,'utf8')).message||''}catch(e){''}")"
+          # 000 is curl's "no HTTP response" (timeout, DNS, connection refused)
+          # and 5xx is the registry failing on its own account. Neither says
+          # anything about this workflow's identity, and telling a maintainer to
+          # configure a trusted publisher they already configured would send them
+          # somewhere useless. Fail either way - a release must not proceed on an
+          # unverified identity - but say which failure it was.
+          # 429 belongs here too: the registry is rate-limiting this caller, which
+          # says nothing about whether a trusted publisher is bound. Sending a
+          # maintainer to reconfigure a correct publisher is the wrong answer.
+          if [ "${status}" = "000" ] || [ "${status}" = "429" ] || [ "${status}" -ge 500 ]; then
+            echo "::error::Could not reach npm to verify this workflow's identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
+            echo "::error::This is a registry or network failure, NOT a trusted-publisher problem. Nothing was bumped, committed or tagged; re-run when the registry is reachable."
+            exit 1
+          fi
+          echo "::error::npm refused this workflow's OIDC identity for ${pkg_name} (HTTP ${status}${reason:+: ${reason}})."
+          echo "::error::Nothing has been bumped, committed or tagged - this run stopped before mutating anything."
+          echo "::error::Configure a trusted publisher on npmjs.com for ${pkg_name}: Settings -> Trusted Publisher -> GitHub Actions,"
+          echo "::error::organization 'unbraind', repository '${GITHUB_REPOSITORY#*/}', workflow 'release.yml', no environment."
+          exit 1
+
+      - name: Update release version
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm version "${NPM_VERSION}" --no-git-tag-version --allow-same-version
           node -e "const fs=require('node:fs');const version=JSON.parse(fs.readFileSync('package.json','utf8')).version;for(const file of ['manifest.json']){if(!fs.existsSync(file))continue;const json=JSON.parse(fs.readFileSync(file,'utf8'));json.version=version;fs.writeFileSync(file,JSON.stringify(json,null,2)+'\n');}if(fs.existsSync('index.ts')){const source=fs.readFileSync('index.ts','utf8');const next=source.replace(/version:\s*[\"'][^\"']+[\"']/,'version: \"'+version+'\"');if(next!==source)fs.writeFileSync('index.ts',next);}"
           npm run build
 
@@ -118,6 +276,9 @@ jobs:
 
       - name: Commit release files
         if: steps.decide.outputs.should_release == 'true'
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -130,32 +291,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "Release files are already current; tagging existing commit."
           else
-            git commit -m "Release ${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}"
+            git commit -m "Release ${REPO_NAME} ${RELEASE_TAG}"
           fi
 
-      # Refuse non-main release runs BEFORE publishing. `github.ref` is the
-      # authoritative workflow trigger ref: schedule -> refs/heads/main;
-      # workflow_dispatch from main -> refs/heads/main; workflow_dispatch from a
-      # feature branch -> refs/heads/<feature> (refused here). Checking the
-      # trigger ref (rather than git topology) reliably distinguishes a feature
-      # branch from main, which commit-topology checks cannot do (a feature
-      # branch off main is also a descendant of origin/main).
-      - name: Check release ref
-        if: steps.decide.outputs.should_release == 'true'
-        shell: bash
-        env:
-          GITHUB_REF: ${{ github.ref }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Refusing to release from non-main ref ('$GITHUB_REF'). Run the release workflow from main."
-            exit 1
-          fi
-
-      # Persist validated release metadata through the repository's protected
-      # branch policy before publishing an immutable npm artifact. A stable
-      # branch name lets a failed run update/reuse its open release PR, while
-      # the exact remote SHA lease prevents overwriting another actor's work.
       - name: Merge release metadata through protected PR
         if: steps.decide.outputs.should_release == 'true'
         id: release_pr
@@ -461,14 +599,56 @@ jobs:
             fi
           fi
 
+      # Authentication is npm trusted publishing (OIDC), not a long-lived token.
+      # The registry mints a short-lived credential from this workflow's id-token,
+      # so no NODE_AUTH_TOKEN is set here on purpose: a stored token is the thing
+      # that expired and silently stopped every fleet package publishing between
+      # 2026-08-17 and 2026-08-26 while main kept bumping the version. Trusted
+      # publishing must be configured for this package on npmjs.com against
+      # unbraind/pm-csv and this workflow filename, or publish fails closed.
       - name: Publish npm package
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         run: |
           set -euo pipefail
+          # actions/setup-node's registry-url writes
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the npm
+          # userconfig. With no token in the environment that expands to an
+          # EMPTY credential, and npm treats a configured-but-empty token as
+          # legacy auth - which blocks the OIDC exchange outright and fails with
+          # the same registry 404 this migration exists to remove. Remove any
+          # such line before publishing so the only credential path left is OIDC.
+          # Both files npm reads for a registry credential. `--global` and
+          # `--location=global` write to the GLOBAL config, which the userconfig
+          # scrub never touches, so scrubbing only one leaves the other live.
+          globalconfig="$(npm config get globalconfig 2>/dev/null || true)"
+          for userconfig in "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" "${globalconfig}"; do
+          if [ -n "$userconfig" ] && [ -f "$userconfig" ]; then
+            # Both the registry-scoped forms (//registry/:_auth=...) and the
+            # GLOBAL forms (_auth=... at the start of a line). npm honours an
+            # unscoped credential too, so removing only the scoped ones leaves
+            # legacy authentication configured while every guard still passes.
+            sed -i'' -e '/_authToken/d' \
+              -e '/^[[:space:]]*_auth[[:space:]]*=/d' -e '/:_auth[[:space:]]*=/d' \
+              -e '/^[[:space:]]*username[[:space:]]*=/d' -e '/:username[[:space:]]*=/d' \
+              -e '/^[[:space:]]*_password[[:space:]]*=/d' -e '/:_password[[:space:]]*=/d' \
+              -e '/^[[:space:]]*certfile[[:space:]]*=/d' -e '/:certfile[[:space:]]*=/d' \
+              -e '/^[[:space:]]*keyfile[[:space:]]*=/d' -e '/:keyfile[[:space:]]*=/d' \
+              -e '/always-auth/d' "$userconfig"
+          fi
+          done
+          # Re-verify HERE, not only at install time. A later step can prepend a
+          # directory to GITHUB_PATH and change which npm this step resolves, and
+          # npm 10 cannot exchange an OIDC token - it would fall back to token
+          # auth and reproduce the exact E404 this migration removes.
+          active_npm="$(npm --version)"
+          required_npm="11.5.1"
+          if [ "$(printf '%s\n%s\n' "$active_npm" "$required_npm" | sort -V | head -n 1)" != "$required_npm" ]; then
+            echo "::error::npm $active_npm resolved at publish time cannot exchange an OIDC token; $required_npm or newer is required."
+            exit 1
+          fi
           pkg_name="$(node -p "require('./package.json').name")"
           if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
             echo "::notice::${pkg_name}@${NPM_VERSION} already published; skipping publish step."
@@ -553,11 +733,13 @@ jobs:
 
       - name: Verify bun install of published package
         if: steps.decide.outputs.should_release == 'true'
+        env:
+          NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
         shell: bash
         run: |
           set -euo pipefail
           pkg_name="$(node -p "require('./package.json').name")"
-          pkg_version="${{ steps.decide.outputs.npm_version }}"
+          pkg_version="${NPM_VERSION}"
           mkdir -p /tmp/bun-verify
           cd /tmp/bun-verify
           rm -rf node_modules bun.lockb package.json
@@ -588,8 +770,10 @@ jobs:
       - name: Create GitHub release
         if: steps.decide.outputs.should_release == 'true'
         env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ steps.decide.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ steps.decide.outputs.tag }}" --title "${{ github.event.repository.name }} ${{ steps.decide.outputs.tag }}" --notes-file RELEASE_NOTES.md --verify-tag
+        run: gh release create "${RELEASE_TAG}" --title "${REPO_NAME} ${RELEASE_TAG}" --notes-file RELEASE_NOTES.md --verify-tag
 
   # A failed scheduled release otherwise produces no tracker-visible signal.
   # Keep alerting isolated, least-privileged, deduplicated, and non-blocking.
