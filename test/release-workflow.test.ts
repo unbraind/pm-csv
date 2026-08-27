@@ -242,9 +242,13 @@ test("no registry credential is configured, under any name or mechanism", () => 
   // A GLOBAL credential needs no registry scope and no `=`:
   // `npm config set _auth <value>` configures legacy authentication that npm
   // honours, while every scoped and delimited check above passes.
+  // `(?:--\S+\s+)*` matters: `npm config set --global _auth <value>` and
+  // `--location=global` both put a flag between `set` and the key, and a
+  // global credential is written OUTSIDE the userconfig the publish step
+  // scrubs - so without this the guard passes and the scrub cannot reach it.
   assert.doesNotMatch(
     source,
-    /npm\s+(?:config\s+)?set\s+["']?(?:\/\/\S*?[:/])?(?:_authToken|_auth|username|_password|certfile|keyfile|email)\b/i
+    /npm\s+(?:config\s+)?set\s+(?:--\S+\s+)*["']?(?:\/\/\S*?[:/])?(?:_authToken|_auth|username|_password|certfile|keyfile|email)\b/i
   );
 
   // The same credentials can arrive as environment overrides rather than as
@@ -288,6 +292,9 @@ test("the empty credential that setup-node generates is removed before publishin
   );
 
   assert.match(publish, /NPM_CONFIG_USERCONFIG/);
+  // A credential written with --global or --location=global lands in npm's
+  // global config, which the userconfig scrub never touches.
+  assert.match(publish, /npm config get globalconfig/);
   assert.match(publish, /sed -i/);
 
   // Deleting only the token spelling leaves basic auth, the legacy pair and the
