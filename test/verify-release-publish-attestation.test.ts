@@ -345,7 +345,12 @@ test("a tracked path that cannot be opened is skipped rather than taking the gat
 
 test("evaluator recursion is bounded, so hostile nesting cannot hang the gate", () => {
   let text = UNATTESTED;
-  for (let depth = 0; depth < 12; depth += 1) text = `eval "${text.replace(/"/g, '\\"')}"`;
+  // Escape backslashes before quotes. Escaping only the quote leaves a literal
+  // backslash in the payload able to consume the escape that follows it, so the
+  // nesting this test builds would not be the nesting it asserts on.
+  for (let depth = 0; depth < 12; depth += 1) {
+    text = `eval "${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
   assert.deepEqual(tokenizeCommands(text, 9), [], "past the bound the walk stops rather than recursing");
   assert.ok(tokenizeCommands(`eval "${UNATTESTED}"`).length > 1, "within the bound the payload is still scanned");
 });

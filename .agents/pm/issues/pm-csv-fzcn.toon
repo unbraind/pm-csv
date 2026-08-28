@@ -6,16 +6,16 @@ status: closed
 priority: 1
 tags[3]: "area:release","area:supply-chain","type:defect"
 created_at: "2026-08-28T06:54:19.500Z"
-updated_at: "2026-08-28T06:54:20.446Z"
+updated_at: "2026-08-28T15:32:14.155Z"
 closed_at: "2026-08-28T06:54:20.424Z"
 completed_at: "2026-08-28T06:54:20.424Z"
 author: codex
 acceptance_criteria: The release step has no publish path that omits --provenance; three provenance attempts are made; a version that landed despite a reported error is reconciled instead of republished; exhausting the attempts fails the job rather than publishing unattested; the workflow YAML parses and every bash run script passes bash -n.
 comments[1]{created_at,author,text}:
   "2026-08-28T06:54:19.500Z",codex,"Non-vacuity proof:\nTest A (restore fallback): exit 1\nTest B (--provenance=false): exit 1\nTest C (clean tree): exit 0\n\nGate table:\nverify:release-publish-attestation: 0"
-files[1]{path,scope}:
-  ".github/workflows/release.yml,project,publish step refuses to downgrade attestation and reconciles a late-landing version",project
-tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  "node scripts/verify-release-publish-attestation.ts,project,120",project,codex,"2026-08-28T06:54:19.500Z",local_mutation,fix/refuse-unattested-publish-fallback
+files[1]{path,scope,note}:
+  .github/workflows/release.yml,project,publish step refuses to downgrade attestation and reconciles a late-landing version
+tests[1]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref},note}:
+  "npm run verify:release-publish-attestation",project,120,claude,"2026-08-28T15:32:14.079Z",local_mutation,fix/refuse-unattested-publish-fallback,the attestation gate this item fixed
 close_reason: fixed
 body: "The fallback was added while the registry was returning 404s, to get a release out. That trade is wrong for a supply-chain artifact: an unattested publish is not a degraded success, it is a different artifact. Failing the job leaves main holding the prepared version so the next run resumes the same release rather than inventing another one, which is exactly what the surrounding transaction was designed to do."
