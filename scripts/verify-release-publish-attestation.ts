@@ -184,6 +184,39 @@ export function stripQuotedSpans(command: string): string {
 }
 
 /**
+ * Expand a package manifest into the command lines its scripts would run.
+ *
+ * A manifest is JSON, so every script body is a *quoted* value -- and quoted
+ * spans are erased before a command is judged, because that is what stops the
+ * workflow's own advisory `echo` reading as an invocation. Passing the raw
+ * manifest through that step therefore erases the very commands it contains: a
+ * publish moved into an npm script would be invisible to this gate while being
+ * entirely real. Yielding the script bodies as bare lines restores them to the
+ * shape the scanner expects.
+ *
+ * A manifest that will not parse yields nothing rather than throwing, so a
+ * malformed sibling file cannot take the gate down; the manifest's own tooling
+ * reports that far better than a publish audit can.
+ *
+ * @param text - The manifest's contents.
+ * @returns One line per script body, newline joined.
+ */
+export function manifestCommandLines(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return "";
+  }
+  if (typeof parsed !== "object" || parsed === null) return "";
+  const scripts = (parsed as { scripts?: unknown }).scripts;
+  if (typeof scripts !== "object" || scripts === null) return "";
+  return Object.values(scripts as Record<string, unknown>)
+    .filter((value): value is string => typeof value === "string")
+    .join("\n");
+}
+
+/**
  * Find every publish invocation in one file's contents.
  *
  * Continuations are joined and shared arrays expanded first, for the same
@@ -197,7 +230,8 @@ export function stripQuotedSpans(command: string): string {
  * @returns The publish invocations found, in file order.
  */
 export function publishInvocationsIn(source: SourceFile): PublishInvocation[] {
-  const text = joinContinuations(source.text);
+  const raw = source.file.endsWith("package.json") ? manifestCommandLines(source.text) : source.text;
+  const text = joinContinuations(raw);
   const arrays = bashArrays(text);
   const found: PublishInvocation[] = [];
   for (const raw of text.split("\n")) {

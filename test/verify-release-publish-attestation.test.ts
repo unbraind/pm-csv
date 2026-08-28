@@ -20,6 +20,7 @@ import {
   ATTESTATION_FLAG,
   attestationEnabled,
   auditPublishAttestation,
+  manifestCommandLines,
   publishInvocationsIn,
   report,
   runIfMain,
@@ -130,6 +131,31 @@ test("a disabled attestation is not an attestation, in every spelling npm accept
 
 test("a flag that merely starts with the attestation spelling does not enable it", () => {
   assert.equal(attestationEnabled("npm publish --provenance-file x"), false);
+});
+
+test("a publish hidden in an npm script is found, because a manifest is JSON and its scripts are quoted", () => {
+  // CodeRabbit: quoted spans are erased before a command is judged, which is
+  // what stops the workflow's advisory echo reading as an invocation. Applied
+  // to a manifest that erases the script bodies themselves, so a publish moved
+  // into an npm script would be invisible while being entirely real.
+  const manifest = JSON.stringify({ scripts: { release: UNATTESTED, build: "tsc" } });
+  const result = auditPublishAttestation([{ file: "package.json", text: manifest }]);
+  assert.equal(result.failures.length, 1, "an unattested publish in a script must fail");
+  assert.match(result.failures[0]!, /does not enable --provenance/);
+  const attested = JSON.stringify({ scripts: { release: ATTESTED } });
+  assert.deepEqual(auditPublishAttestation([{ file: "package.json", text: attested }]).failures, []);
+});
+
+test("manifestCommandLines survives a manifest that is malformed, empty, or has no scripts", () => {
+  // A malformed sibling manifest must not take the gate down; its own tooling
+  // reports that far better than a publish audit can.
+  assert.equal(manifestCommandLines("{ not json"), "");
+  assert.equal(manifestCommandLines("null"), "");
+  assert.equal(manifestCommandLines("[]"), "");
+  assert.equal(manifestCommandLines("{}"), "");
+  assert.equal(manifestCommandLines(JSON.stringify({ scripts: null })), "");
+  assert.equal(manifestCommandLines(JSON.stringify({ scripts: "not-an-object" })), "");
+  assert.equal(manifestCommandLines(JSON.stringify({ scripts: { a: "x", b: 3, c: "y" } })), "x\ny");
 });
 
 test("finding no publish at all fails, because an empty scan and a clean tree look identical", () => {
