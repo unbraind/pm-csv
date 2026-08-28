@@ -1,0 +1,21 @@
+id: pm-csv-nb1m
+title: A failed provenance publish silently falls back to an unattested one
+description: "After three failed provenance publish attempts the release step called npm publish without --provenance and reported success. The only signal was a GitHub warning annotation. A transient registry failure therefore downgrades the package's supply-chain attestation permanently for that version, and consumers cannot tell an unattested publish caused by a 404 storm apart from one that never had provenance at all."
+type: Issue
+status: closed
+priority: 1
+tags[3]: "area:release","area:supply-chain","type:defect"
+created_at: "2026-08-28T06:39:10.948Z"
+updated_at: "2026-08-28T06:39:13.481Z"
+closed_at: "2026-08-28T06:39:13.467Z"
+completed_at: "2026-08-28T06:39:13.467Z"
+author: codex
+acceptance_criteria: The release step has no publish path that omits --provenance; three provenance attempts are made; a version that landed despite a reported error is reconciled instead of republished; exhausting the attempts fails the job rather than publishing unattested; the workflow YAML parses and every bash run script passes bash -n.
+comments[1]{created_at,author,text}:
+  "2026-08-28T06:39:10.948Z",codex,"Non-vacuity proof:\nTest A (restore fallback): exit 1 — FAIL - .github/workflows/release.yml: a publish invocation does not enable --provenance, so it would publish an unattested artifact: npm publish --access public --ignore-scripts\nverify-release-publish-attestation: 1 failure(s).\nTest B (--provenance=false): exit 1 — FAIL - .github/workflows/release.yml: a publish invocation does not enable --provenance, so it would publish an unattested artifact: npm publish --access public --provenance=false --ignore-scripts\nverify-release-publish-attestation: 1 failure(s).\nTest C (clean tree): exit 0 — ok - .github/workflows/release.yml: 1 publish invocation(s), each carrying --provenance\nverify-release-publish-attestation: every publish invocation is attested.\n\nGate table:\ntypecheck: 0, coverage: 100/100/100, verify:release-publish-attestation: 0"
+files[1]{path,scope}:
+  ".github/workflows/release.yml,project,publish step refuses to downgrade attestation and reconciles a late-landing version",project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "node scripts/verify-release-publish-attestation.ts,project,120",project,codex,"2026-08-28T06:39:10.948Z",local_mutation,fix/refuse-unattested-publish-fallback
+close_reason: fixed
+body: "The fallback was added while the registry was returning 404s, to get a release out. That trade is wrong for a supply-chain artifact: an unattested publish is not a degraded success, it is a different artifact. Failing the job leaves main holding the prepared version so the next run resumes the same release rather than inventing another one, which is exactly what the surrounding transaction was designed to do."

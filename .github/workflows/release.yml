@@ -657,10 +657,6 @@ jobs:
           publish_with_provenance() {
             npm publish --access public --provenance --ignore-scripts
           }
-          publish_without_provenance() {
-            echo "::warning::Falling back to publish WITHOUT --provenance after repeated 404 from npm registry."
-            npm publish --access public --ignore-scripts
-          }
           attempt=0
           max_attempts=3
           while (( attempt < max_attempts )); do
@@ -673,19 +669,38 @@ jobs:
               echo "::notice::Version landed despite reported error; treating as success."
               exit 0
             fi
-            echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
-            sleep 30
+            if (( attempt < max_attempts )); then
+              echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
+              sleep 30
+            fi
           done
-          echo "::warning::All ${max_attempts} provenance publish attempts failed; trying once without provenance."
-          if publish_without_provenance; then
-            echo "Published without provenance."
-            exit 0
-          fi
-          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-            echo "::notice::Version landed during fallback; treating as success."
-            exit 0
-          fi
-          echo "::error::Publish failed after retries and provenance fallback."
+          # npm can accept a publish and still report an error, and the registry
+          # needs a moment to propagate before `npm view` can see it. The retry
+          # loop gave that grace incidentally, through the sleep between
+          # attempts; the final attempt has no sleep after it, so a single
+          # immediate read here would race propagation and fail a release npm
+          # had already accepted -- skipping the tag and the GitHub release for a
+          # version that is on the registry, which is the "npm ahead of git"
+          # split the release ordering exists to prevent. Poll instead.
+          #
+          # 5 attempts, 30s apart, deliberately the same shape and numbers as the
+          # bun verification step below: it reads the same registry for the same
+          # version and already documents that propagation can take ~60s. A
+          # shorter window here would fail a release the very next step would
+          # then find. The cost is paid only on the path where npm has already
+          # reported an error, never on a successful publish.
+          reconcile_attempts=5
+          for reconcile_attempt in $(seq 1 "${reconcile_attempts}"); do
+            if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
+              echo "::notice::Version landed after the final reported error; treating as success."
+              exit 0
+            fi
+            if (( reconcile_attempt < reconcile_attempts )); then
+              echo "Not yet visible on the registry; re-reading in 30s (${reconcile_attempt}/${reconcile_attempts})..."
+              sleep 30
+            fi
+          done
+          echo "::error::Publish with provenance failed after ${max_attempts} attempts. Refusing to downgrade supply-chain attestations; retry the release transaction."
           exit 1
 
       # Tag the exact merged/verified main commit AFTER a successful publish.
