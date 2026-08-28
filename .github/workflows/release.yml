@@ -673,17 +673,29 @@ jobs:
           registry_has_version() {
             npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1
           }
-          # Refuses a coordinate that exists without an attestation instead of
-          # completing the release around it. Republishing cannot repair it --
-          # npm forbids overwriting a published version -- so this needs a human,
-          # and saying so is more useful than a green run over an artifact the
-          # release notes will misdescribe.
-          reconcile_or_refuse() {
-            registry_has_version || return 1
-            if registry_version_is_attested; then
-              return 0
+          # Answers one question and nothing else: is an attested copy of this
+          # exact version visible right now? It must never terminate the step
+          # itself -- attestation metadata can appear a moment after the version
+          # does, and that read can fail transiently, so an `exit` in here would
+          # turn a lag into a hard failure that skips the tag and leaves npm
+          # ahead of Git. The retry loop decides when to stop asking; the
+          # refusal below decides what an exhausted loop means.
+          reconciled_attested() {
+            registry_has_version && registry_version_is_attested
+          }
+          # Reached only once the loop has stopped asking. An occupied
+          # coordinate with no attestation is the case worth naming: this
+          # workflow only ever publishes with --provenance, so that artifact did
+          # not come from this job, and republishing cannot repair it because npm
+          # forbids overwriting a published version. It needs a human, and saying
+          # so is more useful than a green run over an artifact the release notes
+          # will misdescribe.
+          refuse_unattested_or_fail() {
+            if registry_has_version; then
+              echo "::error::${pkg_name}@${NPM_VERSION} exists on the registry WITHOUT a visible provenance attestation. This workflow only ever publishes with --provenance, so either that artifact did not come from this job, or its attestation never became visible. Refusing to tag and release around it; investigate before re-running."
+            else
+              echo "::error::Publish with provenance failed after ${max_attempts} attempts. Refusing to downgrade supply-chain attestations; retry the release transaction."
             fi
-            echo "::error::${pkg_name}@${NPM_VERSION} exists on the registry WITHOUT a provenance attestation. This workflow only ever publishes with --provenance, so that artifact did not come from this job. Refusing to tag and release around it; investigate before re-running."
             exit 1
           }
 
@@ -692,7 +704,7 @@ jobs:
           # already-published release (e.g. 2026.8.10, which landed on npm while
           # main was still at 2026.8.7) reconcile instead of failing with a 403
           # when the workflow catches up and re-runs the transaction.
-          if reconcile_or_refuse; then
+          if reconciled_attested; then
             echo "::notice::${pkg_name}@${NPM_VERSION} already published and attested; skipping publish step."
             exit 0
           fi
@@ -707,7 +719,7 @@ jobs:
               echo "Published with provenance on attempt ${attempt}."
               exit 0
             fi
-            if reconcile_or_refuse; then
+            if reconciled_attested; then
               echo "::notice::Version landed attested despite the reported error; treating as success."
               exit 0
             fi
@@ -734,7 +746,7 @@ jobs:
           # reported an error, never on a successful publish.
           reconcile_attempts=5
           for reconcile_attempt in $(seq 1 "${reconcile_attempts}"); do
-            if reconcile_or_refuse; then
+            if reconciled_attested; then
               echo "::notice::Version landed attested after the final reported error; treating as success."
               exit 0
             fi
@@ -743,8 +755,7 @@ jobs:
               sleep 30
             fi
           done
-          echo "::error::Publish with provenance failed after ${max_attempts} attempts. Refusing to downgrade supply-chain attestations; retry the release transaction."
-          exit 1
+          refuse_unattested_or_fail
 
       # Tag the exact merged/verified main commit AFTER a successful publish.
       # main was already advanced by the protected release PR above, so this step
