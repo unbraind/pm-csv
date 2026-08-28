@@ -24,9 +24,12 @@ import { resolve } from "node:path";
 import {
   bashArrays,
   commandArguments,
+  commandCandidates,
   commandName,
   expandArrays,
+  expandScalars,
   joinContinuations,
+  shellScalars,
   type ShellCommand,
   type SourceFile,
   tokenizeCommands,
@@ -91,13 +94,23 @@ export function manifestCommandLines(text: string): string {
   if (typeof parsed !== "object" || parsed === null) return "";
   const scripts = (parsed as { scripts?: unknown }).scripts;
   if (typeof scripts !== "object" || scripts === null) return "";
+  // Each script is its own command list, so one cannot continue into the next.
+  // A body ending in a backslash would otherwise be joined to the following
+  // script by continuation collapsing, and a script beginning `--provenance`
+  // would lend its flag to the unattested publish that ended the script before
+  // it -- turning two commands into one attested-looking command.
   return Object.values(scripts as Record<string, unknown>)
     .filter((value): value is string => typeof value === "string")
+    .map((value) => value.replace(/\\+$/, ""))
     .join("\n");
 }
 
 /** Subcommands that run something else, so a later `publish` word is its argument. */
-const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x", "workspace"]);
+// npm's runner subcommands, which take a script or package name rather than
+// publishing. `workspace` is deliberately absent: it is not a subcommand at all
+// -- npm selects a workspace with the `-w`/`--workspace` FLAG -- and listing it
+// here only meant that a `publish` written after the word was never audited.
+const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]);
 
 /**
  * Decide whether one command is a direct `npm publish`.
@@ -193,20 +206,25 @@ export function publishInvocationsIn(source: SourceFile): PublishInvocation[] {
   const raw = source.file.endsWith("package.json") ? manifestCommandLines(source.text) : source.text;
   const text = joinContinuations(raw);
   const arrays = bashArrays(text);
+  const scalars = shellScalars(text);
   const expanded = text
     .split("\n")
-    .map((line) => expandArrays(line, arrays))
+    .map((line) => expandScalars(expandArrays(line, arrays), scalars))
     .join("\n");
   const found: PublishInvocation[] = [];
   for (const command of tokenizeCommands(expanded)) {
-    const program = commandName(command);
-    if (program === undefined) continue;
-    if (program === "npm") {
-      if (isPublishCommand(command)) found.push({ file: source.file, program, command });
-      continue;
-    }
-    if (FOREIGN_PUBLISHERS.has(program) && isPublishCommand(command)) {
-      found.push({ file: source.file, program, command });
+    // Every reading, not just the command's own: a wrapper option that takes a
+    // value (`sudo -u root npm publish`) moves the program past where naming it
+    // once would look. Missing a publish is a failed audit; offering one that no
+    // shell would run is noise an operator dismisses.
+    for (const candidate of commandCandidates(command)) {
+      const program = commandName(candidate);
+      if (program === undefined) continue;
+      if (program !== "npm" && !FOREIGN_PUBLISHERS.has(program)) continue;
+      if (!isPublishCommand(candidate)) continue;
+      // Not de-duplicated: two identical publish lines are two invocations, and
+      // collapsing them would report one of them as if the other did not exist.
+      found.push({ file: source.file, program, command: candidate });
     }
   }
   return found;
