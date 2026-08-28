@@ -650,8 +650,50 @@ jobs:
             exit 1
           fi
           pkg_name="$(node -p "require('./package.json').name")"
-          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-            echo "::notice::${pkg_name}@${NPM_VERSION} already published; skipping publish step."
+          # Reconciliation must check the ARTIFACT, not just the version string.
+          # `npm view <pkg>@<ver> version` proves only that something is
+          # published under that coordinate. It cannot distinguish the attested
+          # package this job just produced from an unattested one published
+          # earlier, or from another commit -- so a reconcile that accepts mere
+          # existence would tag and release the current SHA on the strength of
+          # an artifact nobody verified. That is the very substitution this
+          # workflow refuses to make on the publish path, so it must not make it
+          # on the recovery path either.
+          #
+          # Every publish this workflow performs carries `--provenance`, so a
+          # version of ours that landed necessarily has attestations. Their
+          # presence is therefore the discriminator: attested means "our publish
+          # got through", absent means "something else is sitting on this
+          # coordinate" and is refused rather than reconciled.
+          registry_version_is_attested() {
+            local attestations
+            attestations="$(npm view "${pkg_name}@${NPM_VERSION}" dist.attestations --json 2>/dev/null || true)"
+            [[ -n "${attestations}" && "${attestations}" != "null" && "${attestations}" != "{}" && "${attestations}" != "[]" ]]
+          }
+          registry_has_version() {
+            npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1
+          }
+          # Refuses a coordinate that exists without an attestation instead of
+          # completing the release around it. Republishing cannot repair it --
+          # npm forbids overwriting a published version -- so this needs a human,
+          # and saying so is more useful than a green run over an artifact the
+          # release notes will misdescribe.
+          reconcile_or_refuse() {
+            registry_has_version || return 1
+            if registry_version_is_attested; then
+              return 0
+            fi
+            echo "::error::${pkg_name}@${NPM_VERSION} exists on the registry WITHOUT a provenance attestation. This workflow only ever publishes with --provenance, so that artifact did not come from this job. Refusing to tag and release around it; investigate before re-running."
+            exit 1
+          }
+
+          # Idempotence guard: if this exact version is already published AND
+          # attested, treat the publish as done. This is what lets an
+          # already-published release (e.g. 2026.8.10, which landed on npm while
+          # main was still at 2026.8.7) reconcile instead of failing with a 403
+          # when the workflow catches up and re-runs the transaction.
+          if reconcile_or_refuse; then
+            echo "::notice::${pkg_name}@${NPM_VERSION} already published and attested; skipping publish step."
             exit 0
           fi
           publish_with_provenance() {
@@ -665,8 +707,8 @@ jobs:
               echo "Published with provenance on attempt ${attempt}."
               exit 0
             fi
-            if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-              echo "::notice::Version landed despite reported error; treating as success."
+            if reconcile_or_refuse; then
+              echo "::notice::Version landed attested despite the reported error; treating as success."
               exit 0
             fi
             if (( attempt < max_attempts )); then
@@ -683,16 +725,17 @@ jobs:
           # version that is on the registry, which is the "npm ahead of git"
           # split the release ordering exists to prevent. Poll instead.
           #
-          # 5 attempts, 30s apart, deliberately the same shape and numbers as the
-          # bun verification step below: it reads the same registry for the same
-          # version and already documents that propagation can take ~60s. A
-          # shorter window here would fail a release the very next step would
+          # 5 attempts, 30s apart. The bun verification step further down this
+          # file already retries the same registry on the same 30s schedule,
+          # because a version the registry has just accepted is not immediately
+          # visible; the npm read here needs the same grace for the same reason.
+          # A shorter window would fail a release that the very next step would
           # then find. The cost is paid only on the path where npm has already
           # reported an error, never on a successful publish.
           reconcile_attempts=5
           for reconcile_attempt in $(seq 1 "${reconcile_attempts}"); do
-            if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-              echo "::notice::Version landed after the final reported error; treating as success."
+            if reconcile_or_refuse; then
+              echo "::notice::Version landed attested after the final reported error; treating as success."
               exit 0
             fi
             if (( reconcile_attempt < reconcile_attempts )); then
