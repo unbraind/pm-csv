@@ -217,6 +217,33 @@ export function manifestCommandLines(text: string): string {
 }
 
 /**
+ * Decide whether one command runs `npm publish`.
+ *
+ * `publish` does not have to follow `npm` immediately. npm accepts its
+ * configuration flags anywhere on the line, so `npm --access public publish
+ * --ignore-scripts` is a real, unattested publish that a scan requiring the two
+ * words to be adjacent discards before ever looking at its flags -- and it
+ * discards it silently, leaving a conventional attested sibling elsewhere in the
+ * file to carry the audit to a pass.
+ *
+ * `npm run publish` is excluded: that runs a package script, and the script's
+ * own body is scanned separately from the manifest. Requiring `--provenance` on
+ * the runner rather than on the publish would report a defect that is not there.
+ *
+ * @param command - One logical command with quoted spans already blanked.
+ * @returns True when the command is an `npm publish` invocation.
+ */
+export function isPublishCommand(command: string): boolean {
+  const tokens = command.trim().split(/\s+/);
+  const npmAt = tokens.indexOf("npm");
+  if (npmAt === -1) return false;
+  const publishAt = tokens.indexOf("publish", npmAt + 1);
+  if (publishAt === -1) return false;
+  const preceding = tokens[publishAt - 1];
+  return preceding !== "run" && preceding !== "run-script";
+}
+
+/**
  * Find every publish invocation in one file's contents.
  *
  * Continuations are joined and shared arrays expanded first, for the same
@@ -236,10 +263,12 @@ export function publishInvocationsIn(source: SourceFile): PublishInvocation[] {
   const found: PublishInvocation[] = [];
   for (const raw of text.split("\n")) {
     if (/^\s*#/.test(raw)) continue;
-    if (!/npm\s+publish/.test(raw)) continue;
+    // A line-level prefilter has to be at least as permissive as the judgement
+    // below, or it discards the very commands that judgement exists to catch.
+    if (!/\bnpm\b/.test(raw) || !/\bpublish\b/.test(raw)) continue;
     for (const rawSegment of expandArrays(raw, arrays).split(/\s*(?:&&|\|\||;)\s*|\s\|\s/)) {
       const segment = stripQuotedSpans(stripComment(rawSegment));
-      if (!/(?:^|\s)npm\s+publish(?:\s|$)/.test(segment)) continue;
+      if (!isPublishCommand(segment)) continue;
       found.push({ file: source.file, command: segment });
     }
   }

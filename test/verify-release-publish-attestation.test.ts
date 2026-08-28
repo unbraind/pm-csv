@@ -20,6 +20,7 @@ import {
   ATTESTATION_FLAG,
   attestationEnabled,
   auditPublishAttestation,
+  isPublishCommand,
   manifestCommandLines,
   publishInvocationsIn,
   report,
@@ -156,6 +157,30 @@ test("manifestCommandLines survives a manifest that is malformed, empty, or has 
   assert.equal(manifestCommandLines(JSON.stringify({ scripts: null })), "");
   assert.equal(manifestCommandLines(JSON.stringify({ scripts: "not-an-object" })), "");
   assert.equal(manifestCommandLines(JSON.stringify({ scripts: { a: "x", b: 3, c: "y" } })), "x\ny");
+});
+
+test("a publish with configuration flags before the subcommand is still a publish", () => {
+  // Greptile: npm accepts its flags anywhere on the line, so requiring `publish`
+  // to follow `npm` immediately discards a real unattested publish silently --
+  // and an attested sibling elsewhere in the file then carries the audit to a
+  // pass.
+  const spread = "npm --access public publish --ignore-scripts";
+  assert.equal(isPublishCommand(spread), true);
+  const result = auditPublishAttestation([
+    { file: "release.yml", text: `          ${ATTESTED}\n          ${spread}` },
+  ]);
+  assert.equal(result.failures.length, 1, "the unattested sibling must be counted and failed");
+});
+
+test("npm run publish is a script runner, not a publish", () => {
+  // The script's own body is scanned from the manifest, so requiring the flag
+  // on the runner would report a defect that is not there.
+  assert.equal(isPublishCommand("npm run publish"), false);
+  assert.equal(isPublishCommand("npm run-script publish"), false);
+  assert.equal(isPublishCommand("npm publish"), true);
+  assert.equal(isPublishCommand("echo npm then publish later"), true);
+  assert.equal(isPublishCommand("npm ci"), false);
+  assert.equal(isPublishCommand("bun publish"), false);
 });
 
 test("finding no publish at all fails, because an empty scan and a clean tree look identical", () => {
