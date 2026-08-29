@@ -191,6 +191,11 @@ test("npm run publish is a script runner, not a publish", () => {
   assert.equal(isPublishCommand(onlyCommand("npm exec publish")), false, "exec runs a binary, it does not publish");
   assert.equal(isPublishCommand(onlyCommand("npm --access public publish")), true, "a flag value is not the subcommand");
   assert.equal(isPublishCommand(onlyCommand("npm --ignore-scripts publish")), true);
+  // A value-taking flag whose value happens to match a runner subcommand must
+  // not suppress the real publish subcommand that follows.
+  assert.equal(isPublishCommand(onlyCommand("npm --tag run publish")), true, "run is a dist-tag value here, not a subcommand");
+  assert.equal(isPublishCommand(onlyCommand("npm --tag=run publish")), true, "the = form carries its value inline");
+  assert.equal(isPublishCommand(onlyCommand("npm -w pkg publish")), true, "-w takes a workspace value");
 });
 
 test("finding no publish at all fails, because an empty scan and a clean tree look identical", () => {

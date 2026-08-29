@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand ([pm-csv-v9cs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v9cs.toon))
+- The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-csv-ab5t](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ab5t.toon))
+
 ## 2026.8.28 - 2026-08-28
 
 ### Added

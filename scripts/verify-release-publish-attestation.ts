@@ -59,6 +59,7 @@ const GENERATED_PREFIXES = ["dist/", "coverage/", "node_modules/", ".agents/pm/r
 /** Tracked paths that can execute a command, matched against the repository-relative path. */
 const EXECUTABLE_PATHS = [
   /^\.github\/workflows\/[^/]+\.ya?ml$/,
+  /(^|\/)action\.ya?ml$/,
   /(^|\/)package\.json$/,
   /\.(sh|bash|zsh|ksh)$/,
   /(^|\/)(Makefile|makefile|GNUmakefile)$/,
@@ -112,6 +113,24 @@ export function manifestCommandLines(text: string): string {
 // here only meant that a `publish` written after the word was never audited.
 const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]);
 
+/** npm configuration flags that consume the next argument as their value.
+ *
+ * When one of these appears before the subcommand, the following token is the
+ * flag's value, not a subcommand. Without skipping it, `npm --tag run publish`
+ * reads `run` as a runner subcommand and returns false before reaching
+ * `publish` -- a false negative that leaves an unattested artifact on the
+ * registry, which is the exact failure mode this gate exists to catch.
+ *
+ * The `=` form (`--tag=run`) carries its value inline and is not in this set
+ * because it is a single token.
+ */
+const VALUE_FLAGS = new Set([
+  "--access", "--tag", "--otp", "--registry", "--cache",
+  "--prefix", "--globalconfig", "--userconfig", "--location",
+  "--tmp", "--python", "--init-version", "--init-license",
+  "--workspace", "-w", "--workspaces", "--include-workspace-root",
+]);
+
 /**
  * Decide whether one command is a direct `npm publish`.
  *
@@ -120,13 +139,14 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  * a real publish that an adjacency test discards silently, leaving an attested
  * sibling elsewhere in the file to carry the audit to a pass.
  *
- * Reading the first non-flag word as the subcommand does not work either,
- * because npm has flags that take a separate value (`--access public`) and
- * flags that do not (`--ignore-scripts`), and telling them apart needs npm's
- * own option table. So the word is looked for anywhere in the arguments, and
- * only a preceding runner subcommand rules it out -- `npm run publish` runs a
- * package script whose body is scanned from the manifest, and requiring the
- * flag on the runner would report a defect that is not there.
+ * A flag that takes a separate value (listed in `VALUE_FLAGS`) causes the next
+ * token to be skipped, so `npm --tag run publish` is recognised as a publish
+ * rather than reading the tag value `run` as a runner subcommand. This closes
+ * the false-negative direction the prior design acknowledged but could not
+ * address without an option table; the set is limited to the flags npm
+ * documents as value-taking and is intentionally conservative -- a flag not
+ * listed here is treated as value-less, which can only produce a false
+ * positive, never a false negative.
  *
  * The residual imprecision is `npm --tag publish ...`, a dist-tag named after
  * the subcommand, which this reads as a publish. That direction is deliberate:
@@ -140,9 +160,15 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  * @returns True when the command publishes.
  */
 export function isPublishCommand(command: ShellCommand): boolean {
-  for (const token of commandArguments(command)) {
-    if (RUNNER_SUBCOMMANDS.has(token.value)) return false;
-    if (token.value === "publish") return true;
+  const args = commandArguments(command);
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]!.value;
+    if (VALUE_FLAGS.has(token)) {
+      index += 1; // skip the flag's value
+      continue;
+    }
+    if (RUNNER_SUBCOMMANDS.has(token)) return false;
+    if (token === "publish") return true;
   }
   return false;
 }

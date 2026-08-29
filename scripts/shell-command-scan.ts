@@ -533,7 +533,7 @@ export interface SourceFile {
  * @returns The same text with continuations joined.
  */
 export function joinContinuations(text: string): string {
-  return text.replace(/\\\r?\n\s*/g, " ");
+  return text.replace(/\\\r?\n[^\S\r\n]*/g, " ");
 }
 
 /**

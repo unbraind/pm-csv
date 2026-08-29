@@ -46,6 +46,12 @@ test("a backslash continuation makes one logical command out of several lines", 
   );
   // A backslash that does not end a line is an ordinary character.
   assert.equal(joinContinuations("printf 'a\\tb'\n"), "printf 'a\\tb'\n");
+  // A blank line after a continuation must NOT be swallowed: the two commands
+  // are separate and joining them would hide a publish from the audit.
+  assert.equal(
+    joinContinuations("foo \\\n\nnpm publish\n"),
+    "foo  \nnpm publish\n",
+  );
 });
 
 test("an array reference is replaced by the declaration's contents, quoted or bare", () => {
