@@ -343,14 +343,18 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
  * `> /dev/null npm publish` runs npm. A scan that reads words in order sees `>`
  * as the program and audits nothing. The forms accepted here are the ones a
  * workflow actually writes: the plain operators, a file-descriptor prefix
- * (`2>`, `2>>`), and the duplicating forms (`>&`, `2>&1`, `&>`).
+ * (`2>`, `2>>`), the duplicating forms (`>&`, `2>&1`, `&>`), and the read-write
+ * form `<>`. `<>` has to be named explicitly: it is not `<` followed by `>`, so
+ * without it the operator was read as a joined redirection that consumes no
+ * target, its target `/dev/null` became the command word, and the real
+ * `npm publish` after it was never audited.
  *
  * @param token - One command word.
  * @returns True when the word is a redirection operator.
  */
 function isRedirection(token: ShellToken): boolean {
   if (token.startsQuoted) return false;
-  return /^(?:[0-9]*(?:>>?|<<?<?)&?[0-9-]*|&>>?)$/.test(token.value);
+  return /^(?:[0-9]*(?:>>?|<>|<<?<?)&?[0-9-]*|&>>?)$/.test(token.value);
 }
 
 /**
@@ -552,7 +556,7 @@ export function bashArrays(text: string): Map<string, string> {
 
 /** A line opening with one assignment of a fully literal value, ending there or at a `;`. */
 const STANDALONE_ASSIGNMENT =
-  /^[ \t]*([A-Za-z_][A-Za-z0-9_]*)=(?:"((?:\\.|[^"\\$`])*)"|'([^']*)'|((?:\\.|[^\s;&|"'`$()\\])+))[ \t]*(?:;|$)/;
+  /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(?:"((?:\\.|[^"\\$`])*)"|'([^']*)'|((?:\\.|[^\s;&|"'`$()\\])+))[ \t]*(?:[;#]|\r?$)/;
 
 /**
  * Index scalar assignments so a command held in a variable can be audited.
@@ -584,7 +588,13 @@ const STANDALONE_ASSIGNMENT =
  *   value -- the mistake that let a scan analyse a different command from the
  *   one the shell runs.
  *
- * Escapes are honoured, so `NPM=npm\\ publish` is one word holding a command.
+ * `export NPM=npm`, a trailing `# comment` and a CRLF line ending are all still
+ * assignments: refusing them left `$NPM` unresolved, and an attested publish
+ * elsewhere in the file then satisfied the non-vacuity guard, so being too
+ * strict here passes an unattested publish just as being too loose does.
+ *
+ * Escapes are honoured outside single quotes, so `NPM=npm\\ publish` is one word
+ * holding a command while `CMD='"'"'a\\b'"'"' keeps its backslash as the shell does.
  * A value that still carries a substitution, backtick, quote or parenthesis
  * after unescaping is refused: inlining `pkg_name="$(node -p …)"` injects an
  * unbalanced parenthesis into an unrelated command, and the scan then reports
@@ -602,7 +612,10 @@ export function shellScalars(text: string): Map<string, string> {
     // Exactly one of the three value alternatives matches, so the last is the
     // only case left rather than a fallback that could be undefined.
     const raw = assignment[2] ?? assignment[3] ?? assignment[4]!;
-    const value = raw.replace(/\\(.)/g, "$1");
+    // Single quotes make a backslash literal, so only the other two forms are
+    // unescaped. Unescaping a single-quoted value turned `'npm publish
+    // \\--provenance'` into an attested-looking command the shell never runs.
+    const value = assignment[3] === undefined ? raw.replace(/\\(.)/g, "$1") : raw;
     if (/[$`"'()]/.test(value)) continue;
     scalars.set(assignment[1]!, value);
   }

@@ -831,6 +831,17 @@ test("a scalar is taken only from a line that is exactly one literal assignment"
     "an escape is honoured, so one word can still hold a command");
   assert.equal(shellScalars('NPM=npm; "$NPM" publish\n').get("NPM"), "npm",
     "a semicolon ends the assignment, and the shell keeps the binding after it");
+  assert.equal(shellScalars("export NPM=npm\n").get("NPM"), "npm",
+    "export still declares a persistent binding");
+  assert.equal(shellScalars("NPM=npm # explanation\n").get("NPM"), "npm",
+    "a trailing comment does not stop the line being an assignment");
+  assert.equal(shellScalars("NPM=npm\r\n").get("NPM"), "npm",
+    "a CRLF line ending does not hide the assignment");
+  // Refusing these left `$NPM` unresolved, and an attested publish elsewhere in
+  // the file then satisfied the non-vacuity guard -- so being too strict passes
+  // an unattested publish exactly as being too loose does.
+  assert.equal(shellScalars("CMD='npm publish \\--provenance'\n").get("CMD"), "npm publish \\--provenance",
+    "single quotes make a backslash literal, so the value is not unescaped");
   assert.equal(shellScalars("# a; FLAG=--provenance\n").get("FLAG"), undefined,
     "a semicolon inside a comment does not expose an assignment");
 
@@ -853,4 +864,20 @@ test("a scalar is taken only from a line that is exactly one literal assignment"
     assert.equal(result.failures.length, 1, `a publish flagged only by ${text[0]!.trim()} is unattested`);
     assert.match(result.failures[0]!, /does not enable --provenance/);
   }
+});
+test("a read-write redirection does not turn its target into the command", () => {
+  // `<>` is one operator, not `<` followed by `>`. Unnamed, it was read as a
+  // joined redirection that consumes no target, so `/dev/null` became the
+  // command word and the real publish after it was never audited -- while an
+  // attested publish elsewhere satisfied the non-vacuity guard, so the whole
+  // audit reported clean.
+  const result = auditPublishAttestation([{
+    file: "release.yml",
+    text: [
+      `          npm publish --access public ${ATTESTATION_FLAG}`,
+      "          <> /dev/null npm publish --access public",
+    ].join("\n"),
+  }]);
+  assert.equal(result.failures.length, 1, "the redirected publish must still be audited");
+  assert.match(result.failures[0]!, /does not enable --provenance/);
 });
