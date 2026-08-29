@@ -1,0 +1,16 @@
+id: pm-csv-v9cs
+title: "Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand"
+description: "Three review findings: (1) joinContinuations used \\s* which swallows blank lines and can merge two separate shell commands, hiding a publish from the audit. Fixed to [^\\S\\r\\n]* for horizontal-only whitespace. (2) EXECUTABLE_PATHS did not match action.yml/action.yaml composite action files, so publishes in those files were never audited. Added pattern. (3) isPublishCommand returned false on npm --tag run publish because run was read as a runner subcommand before publish was reached. Added VALUE_FLAGS set to skip flag values."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-29T03:49:37.260Z"
+updated_at: "2026-08-29T03:49:47.490Z"
+closed_at: "2026-08-29T03:49:47.444Z"
+completed_at: "2026-08-29T03:49:47.444Z"
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-29T03:49:41.584Z",pi-agent,"All three fixes implemented with regression tests. joinContinuations test added for blank-line separation, isPublishCommand tests added for --tag run publish and --tag=run publish forms."
+close_reason: All three fixes implemented with regression tests and passing gates.
+body: ""

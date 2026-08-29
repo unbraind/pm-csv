@@ -650,16 +650,66 @@ jobs:
             exit 1
           fi
           pkg_name="$(node -p "require('./package.json').name")"
-          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-            echo "::notice::${pkg_name}@${NPM_VERSION} already published; skipping publish step."
+          # Reconciliation must check the ARTIFACT, not just the version string.
+          # `npm view <pkg>@<ver> version` proves only that something is
+          # published under that coordinate. It cannot distinguish the attested
+          # package this job just produced from an unattested one published
+          # earlier, or from another commit -- so a reconcile that accepts mere
+          # existence would tag and release the current SHA on the strength of
+          # an artifact nobody verified. That is the very substitution this
+          # workflow refuses to make on the publish path, so it must not make it
+          # on the recovery path either.
+          #
+          # Every publish this workflow performs carries `--provenance`, so a
+          # version of ours that landed necessarily has attestations. Their
+          # presence is therefore the discriminator: attested means "our publish
+          # got through", absent means "something else is sitting on this
+          # coordinate" and is refused rather than reconciled.
+          registry_version_is_attested() {
+            local attestations
+            attestations="$(npm view "${pkg_name}@${NPM_VERSION}" dist.attestations --json 2>/dev/null || true)"
+            [[ -n "${attestations}" && "${attestations}" != "null" && "${attestations}" != "{}" && "${attestations}" != "[]" ]]
+          }
+          registry_has_version() {
+            npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1
+          }
+          # Answers one question and nothing else: is an attested copy of this
+          # exact version visible right now? It must never terminate the step
+          # itself -- attestation metadata can appear a moment after the version
+          # does, and that read can fail transiently, so an `exit` in here would
+          # turn a lag into a hard failure that skips the tag and leaves npm
+          # ahead of Git. The retry loop decides when to stop asking; the
+          # refusal below decides what an exhausted loop means.
+          reconciled_attested() {
+            registry_has_version && registry_version_is_attested
+          }
+          # Reached only once the loop has stopped asking. An occupied
+          # coordinate with no attestation is the case worth naming: this
+          # workflow only ever publishes with --provenance, so that artifact did
+          # not come from this job, and republishing cannot repair it because npm
+          # forbids overwriting a published version. It needs a human, and saying
+          # so is more useful than a green run over an artifact the release notes
+          # will misdescribe.
+          refuse_unattested_or_fail() {
+            if registry_has_version; then
+              echo "::error::${pkg_name}@${NPM_VERSION} exists on the registry WITHOUT a visible provenance attestation. This workflow only ever publishes with --provenance, so either that artifact did not come from this job, or its attestation never became visible. Refusing to tag and release around it; investigate before re-running."
+            else
+              echo "::error::Publish with provenance failed after ${max_attempts} attempts. Refusing to downgrade supply-chain attestations; retry the release transaction."
+            fi
+            exit 1
+          }
+
+          # Idempotence guard: if this exact version is already published AND
+          # attested, treat the publish as done. This is what lets an
+          # already-published release (e.g. 2026.8.10, which landed on npm while
+          # main was still at 2026.8.7) reconcile instead of failing with a 403
+          # when the workflow catches up and re-runs the transaction.
+          if reconciled_attested; then
+            echo "::notice::${pkg_name}@${NPM_VERSION} already published and attested; skipping publish step."
             exit 0
           fi
           publish_with_provenance() {
             npm publish --access public --provenance --ignore-scripts
-          }
-          publish_without_provenance() {
-            echo "::warning::Falling back to publish WITHOUT --provenance after repeated 404 from npm registry."
-            npm publish --access public --ignore-scripts
           }
           attempt=0
           max_attempts=3
@@ -669,24 +719,43 @@ jobs:
               echo "Published with provenance on attempt ${attempt}."
               exit 0
             fi
-            if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-              echo "::notice::Version landed despite reported error; treating as success."
+            if reconciled_attested; then
+              echo "::notice::Version landed attested despite the reported error; treating as success."
               exit 0
             fi
-            echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
-            sleep 30
+            if (( attempt < max_attempts )); then
+              echo "Publish attempt ${attempt}/${max_attempts} failed; sleeping 30s before retry..."
+              sleep 30
+            fi
           done
-          echo "::warning::All ${max_attempts} provenance publish attempts failed; trying once without provenance."
-          if publish_without_provenance; then
-            echo "Published without provenance."
-            exit 0
-          fi
-          if npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1; then
-            echo "::notice::Version landed during fallback; treating as success."
-            exit 0
-          fi
-          echo "::error::Publish failed after retries and provenance fallback."
-          exit 1
+          # npm can accept a publish and still report an error, and the registry
+          # needs a moment to propagate before `npm view` can see it. The retry
+          # loop gave that grace incidentally, through the sleep between
+          # attempts; the final attempt has no sleep after it, so a single
+          # immediate read here would race propagation and fail a release npm
+          # had already accepted -- skipping the tag and the GitHub release for a
+          # version that is on the registry, which is the "npm ahead of git"
+          # split the release ordering exists to prevent. Poll instead.
+          #
+          # 5 attempts, 30s apart. The bun verification step further down this
+          # file already retries the same registry on the same 30s schedule,
+          # because a version the registry has just accepted is not immediately
+          # visible; the npm read here needs the same grace for the same reason.
+          # A shorter window would fail a release that the very next step would
+          # then find. The cost is paid only on the path where npm has already
+          # reported an error, never on a successful publish.
+          reconcile_attempts=5
+          for reconcile_attempt in $(seq 1 "${reconcile_attempts}"); do
+            if reconciled_attested; then
+              echo "::notice::Version landed attested after the final reported error; treating as success."
+              exit 0
+            fi
+            if (( reconcile_attempt < reconcile_attempts )); then
+              echo "Not yet visible on the registry; re-reading in 30s (${reconcile_attempt}/${reconcile_attempts})..."
+              sleep 30
+            fi
+          done
+          refuse_unattested_or_fail
 
       # Tag the exact merged/verified main commit AFTER a successful publish.
       # main was already advanced by the protected release PR above, so this step

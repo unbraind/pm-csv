@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand ([pm-csv-v9cs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v9cs.toon))
+- The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-csv-ab5t](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ab5t.toon))
+
 ## 2026.8.28 - 2026-08-28
 
 ### Added
@@ -8,6 +15,7 @@
 
 ### Fixed
 
+- A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
 - Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
 - Adopt the canonical certified complete-list reader ([pm-csv-t4cc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-t4cc.toon))
 - Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))

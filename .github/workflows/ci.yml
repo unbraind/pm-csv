@@ -76,5 +76,8 @@ jobs:
       - name: Verify generated changelog
         run: npm run changelog:check
 
+      - name: Verify every publish invocation is attested
+        run: npm run verify:release-publish-attestation
+
       - name: Verify Bun can install the package graph
         run: bun install --no-save
