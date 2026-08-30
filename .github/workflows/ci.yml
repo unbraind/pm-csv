@@ -61,6 +61,15 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check for duplicated code
+        run: npm run duplicates
+
       - name: Verify complete docstring coverage
         run: npm run docstring
 
@@ -73,11 +82,17 @@ jobs:
       - name: Verify npm package contents
         run: npm run pack:dry-run
 
+      - name: Accept the packed tarball under npm, bun and the minimum host
+        run: npm run accept:packed
+
       - name: Verify generated changelog
         run: npm run changelog:check
 
       - name: Verify every publish invocation is attested
         run: npm run verify:release-publish-attestation
+
+      - name: Verify the changelog date is derived from the version
+        run: npm run verify:release-changelog-date
 
       - name: Verify Bun can install the package graph
         run: bun install --no-save

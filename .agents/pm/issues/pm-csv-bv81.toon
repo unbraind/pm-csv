@@ -1,0 +1,19 @@
+id: pm-csv-bv81
+title: "The changelog gate stamps an untagged version with the current date, so its verdict flips every midnight with no commit"
+description: "pm-changelog synthesises a pending release window for a version that has no matching git tag and stamps it with the current UTC date rather than anything derived from the input. The release workflow tags only after npm publish succeeds, and publish has been failing fleet wide since 2026-08-21, so this package currently carries an untagged version and is on that clock dependent path. The exposure is masked today only by a coincidence, because the package version and today's date are the same calendar day, and it fails on any later day with no commit having changed. Verified on pm-ops where the version date and today's date differ, which makes the comparison decisive: an untagged 2026.8.22 generates heading 2026.8.22 - 2026-08-24 without the flag and 2026.8.22 - 2026-08-22 with it. The remedy needs no new code because pm-changelog 2026.8.17 already ships --date-from-version, and zero of twenty packages passed it. Applied to every invocation of the generator in this package rather than only to the scripts whose names begin with changelog, because the release workflow invokes it directly and generation and check must not disagree. Site audit: package.json sites 2 flagged 2; .github/workflows/release.yml sites 3 flagged 3;"
+type: Issue
+status: open
+priority: 1
+tags[3]: changelog,gates,release
+created_at: "2026-08-24T09:40:49.254Z"
+updated_at: "2026-08-27T17:18:38.179Z"
+author: "harness:claude-code"
+comments[1]{created_at,author,text}:
+  "2026-08-27T17:18:37.550Z",claude-agent,"The verifier this issue added was a file the repository shipped and nothing executed. It was absent from release:check and from every CI step, in thirteen of the fifteen repositories that carry it, so a later edit could have removed --date-from-version from the workflow and both generation and --check would have agreed on a clock-derived date without anything failing. It is now a named script, the last step of release:check, and its own CI step. Reported by CodeRabbit on unbraind/pm-graph#70.\n\nThe verifier itself gained two fixes in the same pass, also from CodeRabbit. Its static section now balances flags per line rather than per file, which closes two hiding places at once: a single line carrying several invocations where only one is flagged, and an unflagged invocation hiding behind a mention of the flag on a line that invokes nothing. Its behavioural section no longer runs the unflagged control under || true, so a control that fails to produce a heading now fails the gate instead of printing a note while the script exits zero. Both were confirmed by executing the old script against the defect and watching it exit zero."
+files[3]{path,scope,note}:
+  .github/workflows/ci.yml,project,runs the changelog-date verifier as its own step
+  .github/workflows/release.yml,project,every pm-changelog invocation here now derives the no-tag release date from the calendar version
+  package.json,project,every pm-changelog invocation here now derives the no-tag release date from the calendar version
+tests[1]{command,path,scope,note}:
+  "npm run changelog:check",package.json,project,regenerates the changelog and compares it; without the flag the heading date is stamped from the clock and the comparison fails on any day after generation
+body: ""
