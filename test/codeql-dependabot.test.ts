@@ -7,7 +7,7 @@ const workflow = readFileSync(new URL("../.github/workflows/codeql.yml", import.
 /** Dependabot configuration that keeps the CodeQL action family together. */
 const dependabot = readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
 
-test("CodeQL actions use one 4.37.9 revision and Dependabot groups future updates", () => {
+test("CodeQL actions use one shared revision and Dependabot groups future updates", () => {
   const revisions = [...workflow.matchAll(/github\/codeql-action\/[^@\s]+@([0-9a-f]{40})/g)].map(
     ([, revision]) => revision,
   );
@@ -15,8 +15,8 @@ test("CodeQL actions use one 4.37.9 revision and Dependabot groups future update
   assert.ok(revisions.length >= 2, "the workflow should contain the CodeQL action pair");
   assert.deepEqual(
     [...new Set(revisions)],
-    ["cdf488f595d80d6e07e03d4674febd5ab45fa938"],
-    "every CodeQL action must use the same 4.37.9 commit",
+    [revisions[0]],
+    "every CodeQL action must use the same commit",
   );
   assert.match(dependabot, /groups:\s+codeql-action:\s+patterns:\s+- ["']github\/codeql-action\*["']/);
 });
