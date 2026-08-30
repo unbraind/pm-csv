@@ -20,6 +20,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { bashArrays, joinContinuations, type SourceFile } from "./shell-command-scan.ts";
+
+export { bashArrays, joinContinuations };
+export type { SourceFile };
 
 /** Every spelling that tells the generator which version it is rendering.
  *
@@ -39,46 +43,6 @@ export interface Invocation {
   file: string;
   /** The logical command, with continuations joined and arrays expanded. */
   command: string;
-}
-
-/** A tracked file's path and contents. */
-export interface SourceFile {
-  /** Repository-relative path. */
-  file: string;
-  /** File contents. */
-  text: string;
-}
-
-/**
- * Collapse shell and YAML line continuations so one logical command is one string.
- *
- * A backslash at end of line joins the next line; without this every multi-line
- * invocation looks like a set of fragments, none of which carries both the
- * version input and the date flag.
- *
- * @param text - Raw file contents.
- * @returns The same text with continuations joined.
- */
-export function joinContinuations(text: string): string {
-  return text.replace(/\\\r?\n\s*/g, " ");
-}
-
-/**
- * Index bash array assignments so a shared options array can be expanded.
- *
- * The release workflows declare `common=( ... )` once and pass `"${common[@]}"`
- * to each invocation, precisely so the invocations cannot drift. A scan that
- * reads only the invocation line therefore sees none of the shared flags.
- *
- * @param text - File contents with continuations already joined.
- * @returns Array name mapped to the flag text it holds.
- */
-export function bashArrays(text: string): Map<string, string> {
-  const arrays = new Map<string, string>();
-  for (const match of text.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=\(([\s\S]*?)\)/g)) {
-    arrays.set(match[1], match[2].replace(/\s+/g, " ").trim());
-  }
-  return arrays;
 }
 
 /**
@@ -189,16 +153,17 @@ export function auditInvocations(sources: SourceFile[]): VerifierResult {
   const failures: string[] = [];
   const counted = new Map<string, { total: number; unflagged: number }>();
   for (const invocation of invocations) {
-    const tally = counted.get(invocation.file) ?? { total: 0, unflagged: 0 };
-    tally.total += 1;
-    if (!invocation.command.includes(DATE_FLAG)) {
-      tally.unflagged += 1;
-      failures.push(
-        `${invocation.file}: a generator invocation carries a version input but not ${DATE_FLAG}: `
-        + invocation.command.trim().slice(0, 160),
-      );
-    }
-    counted.set(invocation.file, tally);
+    const previous = counted.get(invocation.file) ?? { total: 0, unflagged: 0 };
+    const hasDateFlag = invocation.command.includes(DATE_FLAG);
+    counted.set(invocation.file, {
+      total: previous.total + 1,
+      unflagged: previous.unflagged + (hasDateFlag ? 0 : 1),
+    });
+    if (hasDateFlag) continue;
+    failures.push(
+      `${invocation.file}: a generator invocation carries a version input but not ${DATE_FLAG}: `
+      + invocation.command.trim().slice(0, 160),
+    );
   }
   if (invocations.length === 0) {
     failures.push("no generator invocation was found in any tracked file - the scan is looking in the wrong place");
@@ -329,7 +294,8 @@ export function verify(root: string, today: string): VerifierResult {
   const sources = tracked.map((file) => ({ file, text: readFileSync(resolve(root, file), "utf-8") }));
   const statics = auditInvocations(sources);
 
-  const probe = "2026.1.2";
+  // Exercise the same-day follow-up shape emitted by the release workflow.
+  const probe = "2026.1.2-2";
   const { bin, lead } = resolveGenerator(root);
   // The generator refuses a truncated workspace read rather than silently
   // omitting entries, so the unbounded controls the real scripts pass are

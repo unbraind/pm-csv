@@ -1,0 +1,30 @@
+id: pm-csv-bnra
+title: Rebase the changelog date verifier onto the current release workflow
+description: "Rebase PR 80 onto current main while preserving version-derived changelog dates, current release protections, tracker history, and executable regression coverage."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-30T15:45:48.221Z"
+updated_at: "2026-08-30T16:07:29.744Z"
+closed_at: "2026-08-30T16:00:02.141Z"
+completed_at: "2026-08-30T16:00:02.141Z"
+author: pi-agent
+resolution: "Rebased PR 80 onto current main, preserved both release verifiers, upgraded the generator, exercised a suffixed release version, and reused the current shared shell scanner to retain the zero-duplication gate."
+expected_result: The rebased branch preserves current main release protections and proves changelog dates come from suffixed versions.
+actual_result: "Both release verifiers run in CI and release:check; the behavioral probe passes for 2026.1.2-2; both source and dependency reverts fail; test, lint, duplicate, docstring, and 100% coverage gates pass."
+files[9]{path,scope,note}:
+  .agents/pm/chores/pm-csv-76gz.toon,project,Preserve main current closed tracker record
+  .agents/pm/history/pm-csv-76gz.jsonl,project,Preserve append-only main history
+  .gitignore,project,Retain current transaction-journal ignore policy
+  .github/workflows/ci.yml,project,Run both release verifiers
+  package.json,project,Preserve current dependencies and release gates
+  CHANGELOG.md,project,Regenerate after closing the tracking item
+  scripts/verify-release-changelog-date.ts,project,Substantive verifier
+  test/verify-release-changelog-date.test.ts,project,Regression coverage
+  scripts/shell-command-scan.ts,project,Reuse current shared continuation and bash-array scanners
+tests[2]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  npm test,project,900,pi-agent,"2026-08-30T16:07:29.609Z",local_mutation,fix/stabilise-changelog-date-from-version
+  "npm run verify:release-changelog-date",project,120,pi-agent,"2026-08-30T16:07:29.609Z",local_mutation,fix/stabilise-changelog-date-from-version
+close_reason: "Verified rebase with full tests, release gates through changelog validation, and failing source/dependency regression reverts."
+body: ""
