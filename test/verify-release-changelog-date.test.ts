@@ -24,7 +24,6 @@ import {
   joinContinuations,
   generateHeading,
   isMainInvocation,
-  main,
   runIfMain,
   report,
   resolveGenerator,
