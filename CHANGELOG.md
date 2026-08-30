@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep CodeQL action updates synchronized in one pull request ([pm-csv-tbxy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-tbxy.toon))
+
 ## 2026.8.29 - 2026-08-29
 
 ### Fixed
