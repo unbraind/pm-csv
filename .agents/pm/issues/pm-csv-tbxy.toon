@@ -1,0 +1,26 @@
+id: pm-csv-tbxy
+title: Keep CodeQL action updates synchronized in one pull request
+description: Bump every CodeQL workflow action to 4.37.9 together and group future Dependabot updates so init and analyze cannot produce mutually blocking pull requests.
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-30T16:04:43.866Z"
+updated_at: "2026-08-30T16:21:44.517Z"
+closed_at: "2026-08-30T16:21:44.449Z"
+completed_at: "2026-08-30T16:21:44.449Z"
+claim_principal: pi-agent
+author: pi-agent
+resolution: Pinned all CodeQL actions to one 4.37.9 commit and grouped the action family in Dependabot.
+expected_result: CodeQL init and analyze share one revision and future bumps arrive in one pull request.
+actual_result: Both workflow references use cdf488f and the regression test plus all repository gates pass.
+comments[1]{created_at,author,text}:
+  "2026-08-30T16:17:29.591Z",pi-agent,"Updated init and analyze to the v4.37.9 commit cdf488f595d80d6e07e03d4674febd5ab45fa938 and added the github/codeql-action* Dependabot group. Verification passed: npm test (252 tests), npm run check, npm run docstring (95 declarations documented), and npm run coverage (100% lines, branches, and functions). Regression proof: after restoring both configuration files from origin/main, node --test test/codeql-dependabot.test.ts failed with exit 1 on the old db488d revision; restoring the changes made the test pass."
+files[3]{path,scope,note}:
+  .github/dependabot.yml,project,Groups future CodeQL action updates
+  .github/workflows/codeql.yml,project,Synchronizes every CodeQL action reference at 4.37.9
+  test/codeql-dependabot.test.ts,project,Regression coverage for synchronized pins and Dependabot grouping
+tests[1]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  npm test,project,600,pi-agent,"2026-08-30T16:17:28.379Z",local_mutation,ci/bump-codeql-action-as-one-unit
+close_reason: CodeQL actions now update atomically and the regression gate passes.
+body: ""
