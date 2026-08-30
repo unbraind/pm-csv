@@ -6,6 +6,7 @@
 
 - Keep CodeQL action updates synchronized in one pull request ([pm-csv-tbxy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-tbxy.toon))
 - Rebase the changelog date verifier onto the current release workflow ([pm-csv-bnra](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bnra.toon))
+- Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
 
 ## 2026.8.29 - 2026-08-29
 
