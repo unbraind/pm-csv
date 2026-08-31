@@ -1,0 +1,17 @@
+id: pm-csv-vc26
+title: Pin pm-changelog 2026.8.30 before the next release
+description: Upgrade pm-changelog so pre-tag and post-tag changelog generation stay byte-identical and tonight's release does not leave main failing changelog checks.
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-30T15:43:20.075Z"
+updated_at: "2026-08-30T15:43:22.696Z"
+closed_at: "2026-08-30T15:43:22.682Z"
+completed_at: "2026-08-30T15:43:22.682Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-30T15:43:22.066Z",pi-agent,"Updated pm-changelog from ^2026.8.6 to 2026.8.30 with npm install, ran npm ci successfully, and confirmed npm run changelog:check reports Changelog is up to date before regenerating. The pinned pm CLI does not expose pm start, so pm claim plus pm update --status in_progress was used as its supported equivalent."
+close_reason: Pinned pm-changelog 2026.8.30 and verified the existing changelog remained current before regeneration.
+body: ""
