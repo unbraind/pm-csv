@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Consume the canonical publish-attestation gate instead of carrying a copy of it ([pm-csv-orot](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-orot.toon))
+
 ## 2026.8.31 - 2026-08-31
 
 ### Fixed

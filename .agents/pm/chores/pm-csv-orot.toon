@@ -1,0 +1,17 @@
+id: pm-csv-orot
+title: Consume the canonical publish-attestation gate instead of carrying a copy of it
+description: "This repository carried its own copy of the publish-attestation gate: a 665 line shell scanner and a 450 line verifier, both duplicated from the same origin as every other package in the fleet. That gate decides whether an artefact may reach the registry, so a false pass is the failure that matters, and the canonical implementation has now had fifteen separate fail-open constructions found and closed in it, three of them introduced by the fix for an earlier one. A copy frozen at any point in that sequence still admits every construction closed after it, and nothing in this repository would have said so.\n\nThe scanner is deleted, the verifier becomes a thin launcher over the published pm-ops attestation export, and the changelog-date verifier now imports its shell helpers from the same package rather than from the local copy. The pm-ops pin moves to the release carrying those exports. Two thousand and twenty one lines go, ninety five arrive.\n\nThe suite changes shape deliberately. It no longer re-tests the shell model, because that suite belongs with the implementation where a fix reaches every consumer at once. What it asserts instead is that this repository is still a consumer: that no local scanner exists, that the gate imports the package rather than resolving any part of its shell model locally, and that the resolved gate still refuses an unattested publish and passes on this repository's own workflows. Identity rather than similarity, because a copy that behaves the same today is exactly what stops behaving the same the next time the canonical implementation is fixed."
+type: Chore
+status: closed
+priority: 2
+tags[3]: "area:gates","area:supply-chain",de-vendor
+created_at: "2026-09-02T21:22:58.872Z"
+updated_at: "2026-09-02T21:23:00.253Z"
+closed_at: "2026-09-02T21:23:00.240Z"
+completed_at: "2026-09-02T21:23:00.240Z"
+author: codex
+acceptance_criteria: No local shell scanner remains; the verifier imports the canonical export; a test fails if either is reintroduced; the gate still refuses an unattested publish and passes on this repository's workflows through the resolved package
+comments[1]{created_at,author,text}:
+  "2026-09-02T21:22:59.687Z",codex,"One thing the new convergence test caught before it shipped, worth recording because it is a trap for every other repository doing this.\n\nThe launcher was first written with a node shebang, copied from the docstring gate which has one. The auditor treats any file whose first two bytes are a shebang as executable shell, so the shebang pulled the launcher into the gate's own scan, and its prose - which necessarily names the command it is guarding - then read as an unattested publish invocation. The gate failed on itself.\n\nThe vendored predecessor had no shebang, which is why it never hit this. The launcher now has none either, and says why in a comment so the next person does not add one back."
+close_reason: "Scanner deleted, verifier reduced to a launcher over the published export, changelog-date verifier repointed, pm-ops pin moved to 2026.9.2. Net 2021 lines removed against 95 added. 219 tests passing and release:check green, with the gate verified to run from the resolved package and to pass on this repository's own workflows."
+body: ""
