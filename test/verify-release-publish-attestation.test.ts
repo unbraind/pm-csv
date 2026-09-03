@@ -17,9 +17,12 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { auditPublishAttestation, report, verify } from "pm-ops/attestation";
 
@@ -84,4 +87,46 @@ test("the launcher runs only as the process entry point", () => {
   // A real path that is not this module: isMainInvocation resolves the argv
   // entry, so a nonexistent one throws rather than answering the question.
   assert.equal(runIfMain(["node", resolve(root, "package.json")], import.meta.url, root), false);
+});
+
+test("the launcher runs the gate and sets a failing exit code on an unattested publish when it is the entry point", () => {
+  // The positive branch: argv[1] and moduleUrl both resolve to the launcher's
+  // own path, so isMainInvocation answers true and runIfMain executes the gate
+  // for real — writing to process.stdout and setting process.exitCode. Against
+  // a fixture with an unattested publish, the gate must set exit code 1 and
+  // return true. A regression that removes the `process.exitCode = code`
+  // assignment from the launcher, or that makes isMainInvocation return false
+  // for a real invocation, leaves the gate silently exiting 0 on an unattested
+  // publish — exactly the failure this test's own comment warns about.
+  const launcherPath = resolve(root, "scripts/verify-release-publish-attestation.ts");
+  const launcherUrl = pathToFileURL(launcherPath).href;
+
+  // A fixture repository with one unattested publish, tracked by git so
+  // verify(root) — which calls `git ls-files` — discovers it.
+  const fixture = mkdtempSync(resolve(tmpdir(), "pm-csv-attestation-fixture-"));
+  try {
+    mkdirSync(resolve(fixture, ".github/workflows"), { recursive: true });
+    writeFileSync(
+      resolve(fixture, ".github/workflows/release.yml"),
+      ["jobs:", "  release:", "    steps:", "      - run: |", "          npm publish --access public"].join("\n") + "\n",
+    );
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], { cwd: fixture });
+    execFileSync("git", ["add", ".github/workflows/release.yml"], { cwd: fixture });
+    execFileSync(
+      "git",
+      ["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "fixture"],
+      { cwd: fixture },
+    );
+
+    const savedExitCode = process.exitCode;
+    try {
+      const ran = runIfMain(["node", launcherPath], launcherUrl, fixture);
+      assert.equal(ran, true, "the launcher must run the gate when it is the entry point");
+      assert.equal(process.exitCode, 1, "an unattested publish must set a failing exit code");
+    } finally {
+      process.exitCode = savedExitCode;
+    }
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
