@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { bashArrays, joinContinuations, type SourceFile } from "./shell-command-scan.ts";
+import { bashArrays, joinContinuations, type SourceFile } from "pm-ops/shell-scan";
 
 export { bashArrays, joinContinuations };
 export type { SourceFile };

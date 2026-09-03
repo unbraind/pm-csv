@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add direct-execution test for the publish-attestation gate launcher ([pm-csv-osr2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-osr2.toon))
+
+### Other
+
+- Consume the canonical publish-attestation gate instead of carrying a copy of it ([pm-csv-orot](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-orot.toon))
+
 ## 2026.8.31 - 2026-08-31
 
 ### Fixed

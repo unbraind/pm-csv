@@ -1,0 +1,22 @@
+id: pm-csv-osr2
+title: Add direct-execution test for the publish-attestation gate launcher
+description: ""
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-09-03T17:20:22.464Z"
+updated_at: "2026-09-03T17:23:08.533Z"
+closed_at: "2026-09-03T17:23:08.517Z"
+completed_at: "2026-09-03T17:23:08.517Z"
+claim_principal: codex
+author: pi-agent
+resolution: "Added test 'the launcher runs the gate and sets a failing exit code on an unattested publish when it is the entry point' to test/verify-release-publish-attestation.test.ts. The test calls runIfMain with argv[1] and moduleUrl both set to the launcher's own path against a git-initialized fixture with an unattested publish, asserting return is true and process.exitCode is 1. Regression proven both ways: removing process.exitCode assignment fails with undefined !== 1; skipping the gate fails with false !== true. All 220 tests pass, coverage at 100%."
+comments[1]{created_at,author,text}:
+  "2026-09-03T17:21:05.539Z",codex,"PR #101 review threads (greptile P2 + cubic P2) both flagged that the direct-execution path of the attestation gate launcher was untested. The existing suite only exercised the not-main branch of runIfMain (returns false). Added a test that calls runIfMain with argv[1] and moduleUrl both set to the launcher's own path against a git-initialized fixture with an unattested publish, asserting return is true and process.exitCode is 1. Regression proven: removing process.exitCode = code from the launcher causes the test to fail with undefined !== 1; making runIfMain skip the gate causes false !== true."
+tests[1]{command,path,scope,provenance{author,created_at,source_kind,source_ref},note}:
+  npm test,test/verify-release-publish-attestation.test.ts,project,pi-agent,"2026-09-03T17:22:32.365Z",local_mutation,converge/consume-the-canonical-attestation-gate,the launcher runs the gate and sets a failing exit code on an unattested publish when it is the entry point
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-csv/pull/101",project,PR-101-review-threads
+close_reason: "Added test 'the launcher runs the gate and sets a failing exit code on an unattested publish when it is the entry point' to test/verify-release-publish-attestation.test.ts. The test calls runIfMain with argv[1] and moduleUrl both set to the launcher's own path against a git-initialized fixture with an unattested publish, asserting return is true and process.exitCode is 1. Regression proven both ways: removing process.exitCode assignment fails with undefined !== 1; skipping the gate fails with false !== true. All 220 tests pass, coverage at 100%."
+body: ""
