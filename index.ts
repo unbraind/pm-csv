@@ -2865,7 +2865,7 @@ function prepareCsvExport(
 
 export default {
   name: "pm-csv",
-  version: "2026.9.1",
+  version: "2026.9.4",
 
   activate(api: ExtensionApi) {
     // -----------------------------------------------------------------------
