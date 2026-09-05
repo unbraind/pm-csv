@@ -71,7 +71,7 @@
     "eslint": "^10.8.1",
     "jiti": "^2.7.0",
     "jscpd": "^5.0.16",
-    "pm-changelog": "2026.8.30",
+    "pm-changelog": "2026.9.2",
     "pm-ops": "2026.9.2",
     "typescript": "^7.0.2",
     "yaml": "2.9.0"
