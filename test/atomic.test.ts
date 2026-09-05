@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdtempSync, writeFileSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
+
+import { removeTreeResiliently } from "./support/remove-tree.ts";
 
 import { commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
@@ -102,7 +104,7 @@ function freshTracker(): string {
     encoding: "utf-8",
   });
   if (r.status !== 0) {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
     throw new Error(`pm init failed: ${r.stderr || r.stdout}`);
   }
   return root;
@@ -304,7 +306,7 @@ function installFakePm(): () => void {
     process.env.PATH = origPath;
     if (origRealPm === undefined) delete process.env.PM_CSV_REAL_PM;
     else process.env.PM_CSV_REAL_PM = origRealPm;
-    rmSync(bin, { recursive: true, force: true });
+    removeTreeResiliently(bin);
   };
 }
 
@@ -343,7 +345,7 @@ test("--atomic refuses an incompatible host that omits the transaction SDK", asy
         error.message.includes("host-injected commitWorkspaceTransaction SDK primitive"),
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -369,7 +371,7 @@ test("failed create compensation preserves transaction markers for reconciliatio
     assert.ok(item.tags?.includes(rowTag), "the row marker must remain on an open orphan");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -395,7 +397,7 @@ test("failed marker cleanup leaves a closed transaction-marked item for reconcil
     assert.ok(item.tags?.includes(rowTag), "a failed cleanup retains the row marker");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -421,7 +423,7 @@ test("a nonzero close conflict is not treated as proof that compensation closed 
     assert.ok(item.tags?.includes(rowTag), "the row marker survives the conflict");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -447,7 +449,7 @@ test("a nonzero close receipt cleans markers only after a status recheck proves 
     assert.ok(!item.tags?.includes(rowTag), "confirmed closure removes the row marker");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -466,7 +468,7 @@ test("--atomic happy path: N valid rows create N items with correct ImportResult
     assert.equal(items.length, 3, "exactly 3 items should exist");
     assert.ok(items.every((i) => i.status === "open"), "all created items should be open");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -514,7 +516,7 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
     );
     void result;
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -550,7 +552,7 @@ test("default (non-atomic) path unchanged: same failing input leaves earlier row
     );
     assert.ok(!items.some((i) => i.title === "Bad Row"), "the bad row was never created");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -575,7 +577,7 @@ test("--atomic resumability: re-running the same import does not duplicate (insp
     assert.equal(second.result.imported, 0, "resumed run imports 0 (nothing new)");
     assert.equal(listItems(root).length, 4, "no duplicate items after resume");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -617,7 +619,7 @@ test("--atomic resumability: partial application resumes without duplicating", a
     const titles = listItems(root).map((i) => i.title).sort();
     assert.deepEqual(titles, ["Partial 1", "Partial 2", "Partial 3", "Partial 4"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -631,7 +633,7 @@ test("--atomic combined with --stream fails fast with a clear usage error", asyn
     assert.equal(error.exitCode, 2, "usage error exit code");
     assert.match(error!.message, /--atomic cannot be combined with --stream/i);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 // ---------------------------------------------------------------------------
@@ -661,7 +663,7 @@ test("--atomic duplicate-title creates: two rows same title yield TWO items; res
     assert.equal(second.result.imported, 0, "resume imports 0 (both rows already applied)");
     assert.equal(listItems(root).length, 2, "still exactly 2 items after resume");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -690,7 +692,7 @@ test("--atomic duplicate-title partial resume: only row 0 tagged => resume creat
     assert.equal(resumed.result.imported, 1, "resume creates the missing row 1 (NOT skipped by title)");
     assert.equal(listItems(root).length, 2, "exactly 2 items after resume — row 1 not skipped, row 0 not duplicated");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -742,7 +744,7 @@ test("--atomic --key upsert mid-import failure: created rows compensated, pre-ex
     );
     assert.equal(openFromImport.length, 0, "no uncompensated created items remain");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -783,7 +785,7 @@ test("--atomic resume detection via per-row tag (not title or key): partial run 
     const titles = listItems(root).map((i) => i.title).sort();
     assert.deepEqual(titles, ["A", "B", "C", "D"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -806,7 +808,7 @@ test("--atomic in-batch duplicate-key guard: a repeated NEW key is skipped, not 
     assert.ok(items.some((i) => i.title === "First"), "the first row was created");
     assert.ok(!items.some((i) => i.title === "Second"), "the second row was not created");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -843,7 +845,7 @@ test("--atomic post-rollback retry re-imports the FULL batch (compensated rows a
     const open = listItems(root).filter((i) => i.status !== "closed");
     assert.equal(open.length, 4, "all 4 rows exist as open items after the retry");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -876,7 +878,7 @@ test("--atomic closed-status rows resume idempotently (marker presence, not stat
     assert.equal(second.result.imported, 0, "resumed run imports nothing new");
     assert.equal(listItems(root).length, 2, "no duplicate of the closed-status row");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -902,7 +904,7 @@ test("--atomic editing the file in place re-imports new content (transaction id 
     const titles = listItems(root).map((i) => i.title).sort();
     assert.deepEqual(titles, ["New C", "New D", "Old A", "Old B"], "the new rows are present, not silently dropped");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -954,7 +956,7 @@ test("non-atomic closed row whose pm close fails: the persisted open orphan is c
     assert.ok(good, "the open row was imported");
     assert.equal(good!.status, "open", "the open row remains open");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -988,7 +990,7 @@ test("non-atomic closed row whose create id cannot be recovered: hard failure, n
     assert.equal(items.length, 0, "no silent open orphan was recorded as imported");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1033,7 +1035,7 @@ test("non-atomic closed row: an unverifiable status is not treated as successful
     assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1066,7 +1068,7 @@ test("non-atomic closed row: when compensation also fails, the error carries the
     assert.equal(orphan!.status, "open", "the orphan is left open when compensation fails");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1153,7 +1155,7 @@ test("F2: create overrun never strands an un-identifiable orphan — the id is r
     assert.doesNotMatch(msg, /was closed/i, "the error never asserts the close succeeded when its status is null");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1191,7 +1193,7 @@ test("F2: create overrun whose recovery close SUCCEEDS reports the orphan was cl
     assert.equal(orphan!.status, "closed", "the orphan was closed by the recovery close");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1226,7 +1228,7 @@ test("F2: create overrun whose recovery close FAILS reports the orphan still ope
     assert.equal(orphan!.status, "open", "the orphan is left open because the recovery close failed");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1257,7 +1259,7 @@ test("F2: a create killed before it writes cannot strand an orphan — the title
     assert.equal(listItems(root).length, 0, "no item was created — nothing to strand");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1295,7 +1297,7 @@ test("F2: a null close status routes into compensation, never bypasses it", asyn
     assert.equal(orphan!.status, "open", "the orphan is left open because the close was killed");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1347,7 +1349,7 @@ test("F-B: an update killed mid-flight names the item, because the mutation may 
     assert.match(msg, /NOT a stdout buffer overrun/i, "a signal kill is not misreported as a buffer overrun");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1372,7 +1374,7 @@ test("F-B: an update that exits non-zero still names the item — a failed write
     assert.match(msg, /may already have been applied/i, "the error does not imply the item is untouched");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1397,7 +1399,7 @@ test("F-B: a terminal close killed after a successful update reports BOTH mutati
     assert.match(msg, /close may already have been applied/i, "the close's own uncertainty is stated");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -1421,6 +1423,6 @@ test("F-B: a terminal close that exits non-zero after a successful update also r
     assert.match(msg, /close may already have been applied/i, "the close's uncertainty is stated");
   } finally {
     restorePm();
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
