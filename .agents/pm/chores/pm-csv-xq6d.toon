@@ -1,0 +1,26 @@
+id: pm-csv-xq6d
+title: "Pin pm-cli 2026.9.5, pm-changelog 2026.9.2, and pm-ops 2026.9.5"
+description: "Converge the published toolchain so CI runs the current generators. pm-changelog 2026.9.2 no longer stamps the wall clock; this repo's changelog-date gate already asserts the unflagged heading differs from the flagged one, so the pin is the change."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-09-05T18:17:28.440Z"
+updated_at: "2026-09-05T18:41:06.986Z"
+closed_at: "2026-09-05T18:18:02.489Z"
+completed_at: "2026-09-05T18:18:02.489Z"
+claim_principal: pi-agent
+author: pi-agent
+resolution: "Exact-pin @unbrained/pm-cli 2026.9.5, pm-changelog 2026.9.2, and pm-ops 2026.9.5. Left the changelog-date verifier unchanged because it already requires the unflagged heading to differ from the flagged one."
+expected_result: "release:check and CI health --strict-exit pass against the current toolchain without weakening gates."
+actual_result: "release:check components passed; coverage 220/220; changelog-date gate reports a bare ## 2026.1.2-2 control heading; health --strict-exit is 0 without gitignored nested extensions."
+comments[2]{created_at,author,text}:
+  "2026-09-05T18:17:53.424Z",pi-agent,"Pinned exact devDependencies: @unbrained/pm-cli 2026.8.27 -> 2026.9.5, pm-changelog 2026.8.30 -> 2026.9.2, pm-ops 2026.9.2 -> 2026.9.5.\n\nNo change to scripts/verify-release-changelog-date.ts: origin/main already treats the unflagged run as a control that must differ from the flagged heading, not as a clock-derived string. Against 2026.9.2 the live gate printed:\n\nok - with the flag the heading is version-derived: ## 2026.1.2-2 - 2026-01-02\nok - the flag changes the heading: '## 2026.1.2-2 - 2026-01-02' with it, '## 2026.1.2-2' without (derived some other way)\n\nnpm run coverage: 220 pass / 0 fail. npm run changelog:check, verify:release-publish-attestation, verify:release-changelog-date, audit:prod, pack:dry-run, accept:packed all exited 0.\n\npm health --strict-exit exits 0 on a CI-shaped checkout (no gitignored .agents/pm/extensions/). Local copies of pm-csv 2026.8.16 and pm-github 2026.8.18 still resolve nested @unbrained/pm-cli 2026.8.21 and fail health; those paths are gitignored and are not part of this pin."
+  "2026-09-05T18:41:06.084Z",claude-orchestrator,"The pin was green locally and red in CI on Node 22 only, which was not a Node version difference. Reproduced the ENOBUFS receipt recovery directly on Node 22.23.1 and Node 26.5.0 and both retain the full 74 byte receipt and recover the id, and the test itself passed six of six locally on Node 26 and on Node 22. The failure is a race the test was asserting. Real pm writes its create receipt with the asynchronous process.stdout.write, so when spawnSync kills the child on ENOBUFS a queued chunk can still be discarded and no id is recoverable. The production code handles that correctly and reported it, which is why the assertion for a recovered id failed rather than the import misbehaving. The fake pm wrapper in this same file already documents this exact hazard and defeats it with writeSync, so the test now drives the create half through that wrapper while keeping the buffer cap in force for the recovery close, whose null status is guaranteed by the cap rather than by flush timing. Both halves are deterministic and every original assertion is unchanged, including that the recovery close overran and the orphan is reported still open."
+files[4]{path,scope}:
+  package.json,project
+  package-lock.json,project
+  CHANGELOG.md,project
+  test/atomic.test.ts,project
+close_reason: Pinned the published toolchain; changelog-date gate already matches the generator that no longer stamps the clock.
+body: ""
