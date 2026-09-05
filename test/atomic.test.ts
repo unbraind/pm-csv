@@ -1114,6 +1114,21 @@ test("F2: create overrun never strands an un-identifiable orphan — the id is r
   const root = freshTracker();
   const file = join(root, "one.csv");
   writeFileSync(file, "title,status\nOverrun Orphan,open\n");
+  // The CREATE half is driven through the fake-pm wrapper rather than by letting
+  // real pm race the buffer cap. Real pm writes its receipt with the ASYNC
+  // process.stdout.write, so when spawnSync kills the child on ENOBUFS a queued
+  // chunk can still be discarded and the id becomes unrecoverable -- the same
+  // hazard installFakePm() documents and defeats with writeSync. That made this
+  // test assert the wrong branch intermittently: it passed on an idle machine and
+  // failed on a loaded CI runner, where the kill lands before the flush.
+  //
+  // The wrapper delegates the create to real pm (so a real item and a real id
+  // exist), writeSync's the full receipt, then signals itself: status null with
+  // the receipt always captured. The cap stays in force for the RECOVERY close,
+  // whose null status is guaranteed by the cap itself rather than by flush
+  // timing, so both halves of this scenario are now deterministic.
+  writeFileSync(join(root, "fake-create-overrun"), "");
+  const restorePm = installFakePm();
   try {
     const { result, error } = await withCappedReadBufferAsync("16", () => runImport(root, file, {}));
     assert.ifError(error);
@@ -1137,6 +1152,7 @@ test("F2: create overrun never strands an un-identifiable orphan — the id is r
     assert.match(msg, /pm close overran/i, "the recovery close's own overrun cause is carried");
     assert.doesNotMatch(msg, /was closed/i, "the error never asserts the close succeeded when its status is null");
   } finally {
+    restorePm();
     rmSync(root, { recursive: true, force: true });
   }
 });
