@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+
+import { removeTreeResiliently } from "./support/remove-tree.ts";
 
 import {
   loadAppliedByTransaction,
@@ -47,7 +49,7 @@ function freshTracker(): string {
   const root = mkdtempSync(join(tmpdir(), "pm-csv-buf-"));
   const r = spawnSync("pm", ["init", "--defaults", "--path", root], { encoding: "utf-8" });
   if (r.status !== 0) {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
     throw new Error(`pm init failed: ${r.stderr || r.stdout}`);
   }
   return root;
@@ -123,7 +125,7 @@ test("itemStatus returns the real status for an item whose `pm get` output excee
     const status = itemStatus(root, id);
     assert.equal(status, "open", "the real status comes back past the old 1 MiB ceiling, not undefined");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -148,7 +150,7 @@ test("itemStatus surfaces a buffer overrun as a named error, never a silent 'ite
       );
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -163,7 +165,7 @@ test("itemStatus still returns undefined for a genuinely absent item (non-zero e
     const status = itemStatus(root, "pm-doesnotexist0000");
     assert.equal(status, undefined, "a genuinely absent item is undefined, not a thrown error");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -200,7 +202,7 @@ test("loadAppliedByTransaction surfaces a buffer overrun as a named error, never
       );
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -217,7 +219,7 @@ test("loadAppliedByTransaction returns the real applied rows under the default (
     assert.equal(byRowIndex.size, 2, "both applied rows are detected");
     assert.ok(byRowIndex.has(0) && byRowIndex.has(1), "the real row indexes (0 and 1) come back");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 
@@ -287,7 +289,7 @@ test("F1: compensation tolerates an overrun in its own status lookup (no-op, swe
     const g = spawnSync("pm", ["--path", root, "get", id, "--json"], { encoding: "utf-8" });
     assert.equal(JSON.parse(g.stdout).item.status, "open", "the item is left untouched (no-op)");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTreeResiliently(root);
   }
 });
 

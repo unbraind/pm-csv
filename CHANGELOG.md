@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Temp-tree cleanup races a spawnSync-killed child and fails with ENOTEMPTY on loaded runners ([pm-csv-yriu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-yriu.toon))
+
 ### Other
 
 - Pin pm-cli 2026.9.5, pm-changelog 2026.9.2, and pm-ops 2026.9.5 ([pm-csv-xq6d](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-xq6d.toon))
