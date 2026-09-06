@@ -1,0 +1,51 @@
+id: pm-csv-yriu
+title: Temp-tree cleanup races a spawnSync-killed child and fails with ENOTEMPTY on loaded runners
+description: "The CI test job failed on Node 22 with ENOTEMPTY rmdir on a pm-csv-atomic temp directory. Every assertion in the affected test passed; the failure came from the teardown. spawnSync kills a child that overruns maxBuffer but does not wait for it to exit, so the child keeps writing into the temp tree while rmSync walks it. A recursive forced rmSync raises ENOTEMPTY when an entry reappears between the walk and the rmdir, and force only suppresses ENOENT, never ENOTEMPTY. The result passes on an idle machine and fails on a loaded runner."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-09-05T20:20:17.350Z"
+updated_at: "2026-09-05T20:23:19.624Z"
+closed_at: "2026-09-05T20:23:09.122Z"
+completed_at: "2026-09-05T20:23:09.122Z"
+author: codex
+resolution: fixed
+expected_result: The teardown removes the temp tree and the test job passes on a loaded CI runner exactly as it does on an idle machine.
+actual_result: "rmSync raised ENOTEMPTY: directory not empty, rmdir /tmp/pm-csv-atomic-NNpTvi after every assertion in the test had already passed, failing the Node 22 test job."
+tests[3]:
+  - command: node --test test/remove-tree.test.ts
+    path: test/remove-tree.test.ts
+    scope: project
+    provenance:
+      author: codex
+      created_at: "2026-09-05T20:20:56.947Z"
+      source_kind: local_mutation
+      source_ref: main
+    assert_stdout_contains[1]: pass 4
+    note: "Drives the retry loop through the injected remover so first-attempt success, success-after-retries and an exhausted budget are all deterministic. The pass-4 assertion pins the count so a rename or a filtered-out test cannot report a vacuous green."
+  - command: node --test test/atomic.test.ts
+    path: test/atomic.test.ts
+    scope: project
+    provenance:
+      author: codex
+      created_at: "2026-09-05T20:20:56.947Z"
+      source_kind: local_mutation
+      source_ref: main
+    assert_stdout_contains[1]: fail 0
+    note: The consumer whose teardown raised ENOTEMPTY on a loaded CI runner; all 34 cleanups now go through the resilient helper.
+  - command: node --test test/buffer-regression.test.ts
+    path: test/buffer-regression.test.ts
+    scope: project
+    provenance:
+      author: codex
+      created_at: "2026-09-05T20:20:56.947Z"
+      source_kind: local_mutation
+      source_ref: main
+    assert_stdout_contains[1]: fail 0
+    note: The other file that caps maxBuffer and lets spawnSync kill a child; its 7 cleanups carry the same hazard.
+docs[2]{path,scope,note}:
+  test/remove-tree.test.ts,project,"Deterministic coverage of the retry loop through an injected remover, so no assertion depends on racing a real process"
+  test/support/remove-tree.ts,project,"The resilient removal helper: bounded retries with a synchronous backoff, rethrowing when the budget is spent so a genuinely stuck tree is reported rather than leaked"
+close_reason: "Teardown now goes through removeTreeResiliently, which retries a recursive removal that ENOTEMPTY-fails because a spawnSync-killed child is still writing into the tree, and rethrows once the budget is spent so a genuinely stuck tree is reported rather than silently leaked. Applied to all 34 cleanups in atomic.test.ts and all 7 in buffer-regression.test.ts, the two files that cap maxBuffer and let spawnSync kill a child. release:check passes end to end and the three linked tests run clean."
+body: ""
