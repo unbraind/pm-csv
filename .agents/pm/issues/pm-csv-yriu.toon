@@ -1,18 +1,26 @@
 id: pm-csv-yriu
-title: Temp-tree cleanup races a spawnSync-killed child and fails with ENOTEMPTY on loaded runners
-description: "The CI test job failed on Node 22 with ENOTEMPTY rmdir on a pm-csv-atomic temp directory. Every assertion in the affected test passed; the failure came from the teardown. spawnSync kills a child that overruns maxBuffer but does not wait for it to exit, so the child keeps writing into the temp tree while rmSync walks it. A recursive forced rmSync raises ENOTEMPTY when an entry reappears between the walk and the rmdir, and force only suppresses ENOENT, never ENOTEMPTY. The result passes on an idle machine and fails on a loaded runner."
+title: Test wrapper lets delegated writers outlive buffer-overrun teardown
+description: "The original ENOTEMPTY cleanup retry is shipped, but it does not establish writer lifetime. spawnSync waits for its direct child; when that child is the transparent test wrapper, a tiny outer output cap can kill the wrapper while its real pm descendant continues closing an item. Removing the temporary tracker can then race a history open and report an unintended CI fault through production observability. A real-process regression reproduces the surviving descendant. The corrected wrapper waits for real pm to exit before forwarding bounded captured output, and negative subprocess fixtures use an isolated global tracker with explicit observability opt-outs. The cleanup retry remains bounded for transient removal faults and its documentation now distinguishes child reaping from directory removal."
 type: Issue
 status: closed
 priority: 2
 tags: []
 created_at: "2026-09-05T20:20:17.350Z"
-updated_at: "2026-09-05T20:23:19.624Z"
-closed_at: "2026-09-05T20:23:09.122Z"
-completed_at: "2026-09-05T20:23:09.122Z"
+updated_at: "2026-09-06T18:14:09.188Z"
+closed_at: "2026-09-06T18:14:08.801Z"
+completed_at: "2026-09-06T18:14:08.801Z"
 author: codex
-resolution: fixed
-expected_result: The teardown removes the temp tree and the test job passes on a loaded CI runner exactly as it does on an idle machine.
-actual_result: "rmSync raised ENOTEMPTY: directory not empty, rmdir /tmp/pm-csv-atomic-NNpTvi after every assertion in the test had already passed, failing the Node 22 test job."
+resolution: "Capture delegated test-wrapper output until the real process exits, require real writer completion and reaping under an outer buffer overrun, and isolate global test state and observability."
+expected_result: A test output overrun cannot let its real writer continue into fixture cleanup or emit a production incident.
+actual_result: "Real-process regression is red before the fix and green after; Node 22.23.2 and Node 26.7.0 F2 acceptance passes, all 225 tests pass at exact 100 percent coverage, static gates and three linked plans pass."
+comments[3]{created_at,author,text}:
+  "2026-09-06T18:02:27.017Z",codex,"Release-unblocking investigation: the completed retrying-cleanup fix is present, but the transparent test wrapper still spawns real pm with inherited output. An outer 16-byte capture can terminate the wrapper while its descendant writes history. Reusing this canonical cleanup owner after a complete 96-item all-status census; no duplicate created. PM-CLI-3A has one CI Node 22 event at the F2 test boundary and no later recurrence. Exact fixture reproduction and lifetime prevention are required; this correlation is not yet definitive event attribution. Related release evidence: https://github.com/unbraind/pm-cli/issues/1209 and https://github.com/unbraind/pm-cli/blob/main/.agents/pm/issues/pm-3lhth4.toon ."
+  "2026-09-06T18:05:53.711Z",codex,"TDD evidence: the new real-process regression failed against the inherited-output wrapper because the delegated writer was still active when the outer 16-byte capture returned ENOBUFS. No filesystem errors or process results were mocked. The corrected wrapper captures its child output until exit before forwarding it, so the same regression can require the completion marker and ESRCH for the reaped PID. Negative fixtures now inherit a disposable global tracker and explicit Sentry/telemetry opt-outs before SDK imports."
+  "2026-09-06T18:14:08.371Z",codex,"Verification: the original real-process lifetime negative control failed; the corrected wrapper and exact F2 fixture pass on Node 26.7.0 and Node 22.23.2. All 225 tests pass with exact 100 percent source lines, branches and functions; typecheck, test typecheck, ESLint, duplicate gate, docstrings, production audit, package dry run and all three linked tests pass. The unmodified F2 scenario did not reproduce its historical ENOENT on this machine, so the historical event remains an attribution inference from matching runtime, timing and call path; the demonstrated descendant lifetime defect is independently fixed. No external error capture ran during these negative controls."
+files[3]{path,scope,note}:
+  test/atomic.test.ts,project,Reap delegated writers before exposing output and test real process completion
+  test/buffer-regression.test.ts,project,Isolate negative subprocess fixtures from production observability
+  test/support/isolated-environment.ts,project,Disposable global tracker and inherited observability opt-outs
 tests[3]:
   - command: node --test test/remove-tree.test.ts
     path: test/remove-tree.test.ts
@@ -47,5 +55,5 @@ tests[3]:
 docs[2]{path,scope,note}:
   test/remove-tree.test.ts,project,"Deterministic coverage of the retry loop through an injected remover, so no assertion depends on racing a real process"
   test/support/remove-tree.ts,project,"The resilient removal helper: bounded retries with a synchronous backoff, rethrowing when the budget is spent so a genuinely stuck tree is reported rather than leaked"
-close_reason: "Teardown now goes through removeTreeResiliently, which retries a recursive removal that ENOTEMPTY-fails because a spawnSync-killed child is still writing into the tree, and rethrows once the budget is spent so a genuinely stuck tree is reported rather than silently leaked. Applied to all 34 cleanups in atomic.test.ts and all 7 in buffer-regression.test.ts, the two files that cap maxBuffer and let spawnSync kill a child. release:check passes end to end and the three linked tests run clean."
+close_reason: Prevented the demonstrated delegated-writer teardown race and isolated negative-test observability.
 body: ""
