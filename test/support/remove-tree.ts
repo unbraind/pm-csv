@@ -1,21 +1,20 @@
 import { rmSync } from "node:fs";
 
 /**
- * Removes a directory tree that an abandoned child process may still be
- * writing into.
+ * Removes a directory tree with bounded retries for transient teardown faults.
  *
- * `spawnSync` kills a child that overruns `maxBuffer`, but it does not wait for
- * that child to die. The child therefore keeps writing into the temp tree for a
- * short window after the call returns. A plain
+ * `spawnSync` waits for its direct child, but a proxy child can leave its own
+ * writer behind when terminated. The test wrapper therefore captures output
+ * until its real writer exits, before exposing bytes to the outer buffer cap.
+ * This remover does not establish process termination. A plain
  * `rmSync(root, { recursive: true, force: true })` walks the tree and then
  * `rmdir`s each directory; when the dying child creates a new entry between the
  * walk and the `rmdir`, the removal fails with `ENOTEMPTY`. `force: true` does
  * not cover that — it suppresses `ENOENT` (already gone), not `ENOTEMPTY`
  * (something reappeared).
  *
- * The result is a cleanup that succeeds on an idle machine and fails on a
- * loaded CI runner, surfacing as a test whose assertions all passed. Retrying
- * the removal wins as soon as the child is reaped.
+ * Retrying can accommodate a transient filesystem failure on a loaded runner,
+ * but callers must establish writer completion before starting teardown.
  *
  * A retry budget is deliberate: exhausting it rethrows rather than swallowing
  * the error, so a tree held open by something that never exits is reported as

@@ -1,7 +1,9 @@
+import "./support/isolated-environment.ts";
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -291,7 +293,11 @@ function installFakePm(): () => void {
     "if (root && existsSync(root + '/fake-update-kill') && has('update')) {",
     "  process.kill(process.pid, 'SIGKILL');",
     "}",
-    "const r = spawnSync(realPm, args, { stdio: 'inherit' });",
+    // Do not expose output until the real process exits. Otherwise an outer
+    // capture overrun kills this wrapper while real pm is still writing history.
+    "const r = spawnSync(realPm, args, { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });",
+    "if (r.stdout) writeSync(1, r.stdout);",
+    "if (r.stderr) writeSync(2, r.stderr);",
     "process.exit(r.status == null ? 1 : r.status);",
     "",
   ].join("\n");
@@ -309,6 +315,38 @@ function installFakePm(): () => void {
     removeTreeResiliently(bin);
   };
 }
+
+test("the test wrapper reaps its writer before an outer output overrun permits cleanup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pm-csv-writer-lifetime-"));
+  const program = join(root, "writer.cjs");
+  const finished = join(root, "finished");
+  const writerPid = join(root, "writer-pid");
+  writeFileSync(program, [
+    "const { writeFileSync, writeSync } = require('node:fs');",
+    "writeFileSync(process.argv[2], String(process.pid));",
+    "writeSync(1, 'x'.repeat(4096));",
+    "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);",
+    "writeFileSync(process.argv[3], 'completed');",
+  ].join("\n"));
+  const restorePm = installFakePm();
+  process.env.PM_CSV_REAL_PM = process.execPath;
+  try {
+    const result = spawnSync("pm", [program, writerPid, finished], {
+      encoding: "utf8",
+      maxBuffer: 16,
+    });
+    assert.equal((result.error as NodeJS.ErrnoException | undefined)?.code, "ENOBUFS");
+    assert.equal(existsSync(finished), true, "the delegated writer must finish before teardown can start");
+    const pid = Number(readFileSync(writerPid, "utf8"));
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the delegated process must be reaped");
+  } finally {
+    restorePm();
+    // The negative control may leave its real writer alive; let it finish before
+    // removing its fixture so reproducing the bug cannot create another IO fault.
+    await new Promise((resolve) => { setTimeout(resolve, 350); });
+    removeTreeResiliently(root);
+  }
+});
 
 /** Toggle strict closure-validation on a tracker so `pm close --reason` fails. */
 function enableStrictCloseValidation(pmRoot: string): void {

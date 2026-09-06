@@ -1,10 +1,12 @@
 # Changelog
 
-## 2026.9.6 - 2026-09-06
+## Unreleased
 
 ### Fixed
 
-- Temp-tree cleanup races a spawnSync-killed child and fails with ENOTEMPTY on loaded runners ([pm-csv-yriu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-yriu.toon))
+- Test wrapper lets delegated writers outlive buffer-overrun teardown ([pm-csv-yriu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-yriu.toon))
+
+## 2026.9.6 - 2026-09-06
 
 ### Other
 
