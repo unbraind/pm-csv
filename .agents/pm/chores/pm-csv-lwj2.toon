@@ -6,13 +6,13 @@ status: in_progress
 priority: 2
 tags[3]: cli,compatibility,sdk
 created_at: "2026-09-07T20:34:50.641Z"
-updated_at: "2026-09-07T20:47:43.209Z"
+updated_at: "2026-09-07T21:03:15.330Z"
 assignee: codex-pm-ecosystem
 claim_principal: codex-pm-ecosystem
 author: codex-pm-ecosystem
 acceptance_criteria: Exact installed dependency versions are verified; package checks and real CLI acceptance pass without weakened gates; independent coverage and privacy limitations remain explicit
-comments[1]{created_at,author,text}:
-  "2026-09-07T20:47:41.946Z",codex-pm-ecosystem,"Validation on 2026-09-07: npm run release:check passed with installed PM CLI/SDK 2026.9.7. tests 226 pass 226 fail 0 skipped 0 all files          | 100.00 |   100.00 |  100.00 | . This certifies the existing gates; it does not certify unmeasured source files, an absent statement metric, historical privacy, or production integration with every external provider. Exact-head CI and review are pending."
+comments[1]{created_at,author,text,edited_at}:
+  "2026-09-07T20:47:41.946Z",codex-pm-ecosystem,"2026-09-07 UTC correction of the earlier validation summary: npm run release:check exited 0. Installed @unbrained/pm-cli=2026.9.7; installed pm-changelog=2026.9.6. Final top-level report: tests=226, pass=226, fail=0, skipped=0. Reported line/branch/function coverage: ℹ all files          | 100.00 |   100.00 |  100.00 | . Nested child-fixture summaries are not independent package totals. These metrics do not certify all-source statement coverage or clear independent history privacy, production, or exact-head reviewer gates.","2026-09-07T21:03:15.330Z"
 files[2]{path,scope}:
   package-lock.json,project
   package.json,project
