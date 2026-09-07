@@ -161,6 +161,11 @@ interface PublishShape {
 
 const ENTRY_PATH_FIXTURES: readonly PublishShape[] = [
   { name: "a plain unattested publish", publish: "npm publish --access public", failing: true },
+  // The subcommand need not be adjacent to `npm`: an option may precede it, and
+  // a diverted implementation matching only the literal pair `npm publish` would
+  // agree with the auditor on every other shape here.
+  { name: "an unattested publish whose subcommand is not adjacent to npm", publish: "npm --access public publish", failing: true },
+  { name: "an attested publish whose subcommand is not adjacent to npm", publish: "npm --access public publish --provenance", failing: false },
   { name: "an unresolved program that cannot be proven not to publish", publish: "$(echo npm) publish", failing: true },
   { name: "a foreign publisher", publish: "pnpm publish --access public", failing: true },
   { name: "an attested publish, which must produce no failure", publish: "npm publish --provenance --access public", failing: false },
