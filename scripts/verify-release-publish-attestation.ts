@@ -23,10 +23,11 @@
  * necessarily names the command it is guarding, then reads as an unattested
  * invocation. A shebang naming a non-shell interpreter does not: a shebang says
  * a file executes, it does not say it executes AS shell, so `#!/usr/bin/env node`
- * leaves this file unscanned. The suite reproduces six shebang cases rather
- * than asserting the rule - five interpreters and the absence of one - because
- * two earlier wordings of this paragraph each stated a rule the auditor does
- * not have. The vendored predecessor had no shebang for the same reason.
+ * leaves this file unscanned. The suite ASSERTS the outcome for six shebang
+ * cases - five interpreter forms and the absence of one - by running each
+ * through the auditor, rather than restating the rule here, because two
+ * earlier wordings of this paragraph each stated a rule the auditor does not
+ * have. The vendored predecessor had no shebang for the same reason.
  */
 
 import { resolve } from "node:path";

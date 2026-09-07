@@ -95,6 +95,15 @@ test("the launcher runs only as the process entry point", () => {
   // module is imported by a runner that rewrites argv, and it must answer false
   // rather than resolve `undefined` as a path.
   assert.equal(runIfMain(["node"], import.meta.url, root), false);
+  // An argv[1] that resolves to nothing must THROW, not answer false. If path
+  // resolution were changed to swallow the error, a broken direct invocation
+  // would exit 0 without ever running the release gate - a silent skip of the
+  // whole thing, which is worse than a loud failure.
+  assert.throws(
+    () => runIfMain(["node", resolve(root, "no", "such", "entry.ts")], import.meta.url, root),
+    /ENOENT/u,
+    "an unresolvable entry must fail loudly rather than quietly skip the gate",
+  );
 });
 
 /**
@@ -147,6 +156,22 @@ const ENTRY_PATH_FIXTURES: ReadonlyArray<{ name: string; publish: string; failin
     failing: true,
   },
   { name: "a publish that disables provenance explicitly", publish: "npm publish --provenance=false --access public", failing: true },
+  {
+    name: "an unattested publish inside a shell function, the production wrapper shape",
+    publish: "publish_release() {\n            npm publish --access public\n          }\n          publish_release",
+    failing: true,
+  },
+  {
+    name: "an attested publish inside a shell function",
+    publish: "publish_with_provenance() {\n            npm publish --provenance --access public\n          }\n          publish_with_provenance",
+    failing: false,
+  },
+  {
+    name: "a repository with no publish at all, which must fail closed",
+    publish: "echo nothing to do",
+    failing: true,
+    unnamed: true,
+  },
 ];
 
 test("the entry path produces the package verifier's own report for every publish shape", () => {
@@ -189,7 +214,7 @@ test("the entry path produces the package verifier's own report for every publis
   // outside .github reaches the gate through the shebang branch of
   // isExecutableSource instead, so an implementation that only looked at
   // workflows would agree on all of them and diverge here.
-  const SHAPES: ReadonlyArray<{ name: string; publish: string; failing: boolean; file?: string; raw?: string }> = [
+  const SHAPES: ReadonlyArray<{ name: string; publish: string; failing: boolean; file?: string; raw?: string; unnamed?: boolean }> = [
     ...ENTRY_PATH_FIXTURES,
     {
       name: "an unattested publish in a tracked script outside .github",
@@ -231,7 +256,7 @@ test("the entry path produces the package verifier's own report for every publis
           packageOutput,
           `${shape.name}: the entry path must produce the package verifier's own report, not a local equivalent`,
         );
-        if (shape.failing) {
+        if (shape.failing && shape.unnamed !== true) {
           // Name the file. `report` sets exit code 1 for ANY failure, so
           // asserting only that one occurred would let an unrelated failure - a
           // fixture that tracked nothing, say - stand in for the publish this
@@ -242,7 +267,7 @@ test("the entry path produces the package verifier's own report for every publis
             new RegExp(`FAIL - ${(shape.file ?? ".github/workflows/release.yml").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"),
             `${shape.name}: the failure must name the fixture's own workflow`,
           );
-        } else {
+        } else if (!shape.failing) {
           assert.doesNotMatch(launcherOutput, /FAIL - /u, `${shape.name}: an attested publish must produce no failure`);
         }
       } finally {
