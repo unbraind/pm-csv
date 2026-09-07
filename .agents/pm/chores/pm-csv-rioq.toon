@@ -1,0 +1,16 @@
+id: pm-csv-rioq
+title: "Correct a wrong shebang claim in the attestation launcher, and bring the canonical auditor up to date"
+description: "Two problems, and the second explains the first.\n\nThe launcher docstring said the auditor 'treats any file whose first two bytes are a shebang as executable shell'. Reproduced against the auditor this repository now consumes, that is false: a shebang says a file executes, it does not say it executes AS shell, so only a shebang naming a shell interpreter makes the body shell input. Written into a throwaway git repository and run through verify(): #!/bin/bash and #!/usr/bin/env sh report the file by name; #!/usr/bin/env node and no shebang do not.\n\nThe claim was TRUE for pm-ops 2026.9.5, which this repository was still pinned to - two releases behind the canonical auditor, and therefore missing every fail-open construction closed since. Bumping to ^2026.9.7 is what makes the corrected claim correct, which is why the two changes belong together rather than as a docstring tidy.\n\nThe same wrong sentence is in all seven repositories carrying this launcher; it was propagated by copying the reference file, so the error travelled with the text. Corrected in the six sibling convergence branches at the same time.\n\nAlso re-exports auditPublishAttestation and verify by reference. The launcher previously exported only runIfMain, so the fleet's bypass-corpus harness read this repository as broken rather than as converged, and no test asserted that what the launcher exposes IS the package's function rather than a wrapper."
+type: Chore
+status: closed
+priority: 2
+tags[2]: attestation,security
+created_at: "2026-09-07T10:36:23.835Z"
+updated_at: "2026-09-07T10:36:47.495Z"
+closed_at: "2026-09-07T10:36:47.485Z"
+completed_at: "2026-09-07T10:36:47.485Z"
+claim_principal: claude
+author: claude
+acceptance_criteria: "The shebang claim is reproduced in the suite, including the two negative cases; The corpus reads the same seven cases as every other converged repository"
+close_reason: "Docstring corrected and reproduced (4 states, including both negatives). pm-ops ^2026.9.7 installed. Corpus now reads the same seven cases as every other converged repository, all of them open in the canonical implementation and all closed by unbraind/pm-ops#100. Gates: typecheck pass, docstring 71/71, coverage thresholds met, 7 tests pass / 0 fail."
+body: ""
