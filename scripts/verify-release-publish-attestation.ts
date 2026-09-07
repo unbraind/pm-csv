@@ -17,18 +17,27 @@
  * root, maps the report onto the process streams, and sets the exit code.
  *
 
- * Deliberately carries no shebang. The auditor treats any file whose first two
- * bytes are a shebang as executable shell, so adding one pulls this file into
- * its own scan - and its prose, which necessarily names the command it is
- * guarding, then reads as an unattested invocation. The vendored predecessor
- * had no shebang for the same reason.
+ * Deliberately carries no shebang. The auditor reads a shebang naming a SHELL
+ * interpreter as saying the file's body is shell, so `#!/bin/bash` or
+ * `#!/usr/bin/env sh` pulls this file into its own scan - and its prose, which
+ * necessarily names the command it is guarding, then reads as an unattested
+ * invocation. A shebang naming a non-shell interpreter does not: a shebang says
+ * a file executes, it does not say it executes AS shell, so `#!/usr/bin/env node`
+ * leaves this file unscanned. The suite reproduces all three states rather than
+ * asserting them. The vendored predecessor had no shebang for the same reason.
  */
 
 import { resolve } from "node:path";
 
-import { report, verify } from "pm-ops/attestation";
+import { auditPublishAttestation, report, verify } from "pm-ops/attestation";
 
 import { isMainInvocation } from "./main-invocation.ts";
+
+// Re-exported by reference, not wrapped. Consumers and the fleet's bypass-corpus
+// harness read the gate through this module, and a wrapper here would be a
+// second implementation to keep in step - which is the duplication this launcher
+// exists to remove. The suite asserts the identity rather than the shape.
+export { auditPublishAttestation, verify };
 
 /**
  * Verify and report, but only when this module is the process entry point.

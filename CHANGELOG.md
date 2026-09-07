@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Correct a wrong shebang claim in the attestation launcher, and bring the canonical auditor up to date ([pm-csv-rioq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-rioq.toon))
+
 ## 2026.9.7 - 2026-09-07
 
 ### Fixed
