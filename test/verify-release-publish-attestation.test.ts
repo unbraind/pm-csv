@@ -137,12 +137,20 @@ function withTrackedFixture<T>(prefix: string, file: string, contents: string, u
  * agrees with the package across the SHAPE SPACE rather than on one string.
  *
  * A single fixture can be satisfied by a local verifier that hardcodes that one
- * report. These cannot: each exercises a different decision in the auditor -
+ * report. This set cannot be: it spans several distinct auditor decisions -
  * whether a publish is recognised at all, whether an unresolved program is
- * audited, whether a foreign publisher counts, and whether an attested publish
- * is left alone. A local implementation that matched all of them across every
- * decision would be a reimplementation of the auditor, which is the thing being
- * ruled out.
+ * audited, whether a foreign publisher counts, whether the subcommand must
+ * follow the program, which files are discovered, and whether an attested
+ * publish is left alone - and each discovery path carries BOTH verdicts, so a
+ * blanket refusal is caught as well as a blanket acceptance.
+ *
+ * What this establishes, stated narrowly because a wider claim here was wrong
+ * twice: the launcher and the package agree across the SELECTED shape space.
+ * It is not coverage of every auditor decision, and deliberately not - YAML
+ * normalisation, scalar scope across conditional arms, heredocs, wrapper-option
+ * parsing and the executable-path variants are the auditor's own behaviour,
+ * tested with the implementation in pm-ops where one fix reaches every consumer.
+ * Re-testing them here is the duplication this suite exists to remove.
  */
 interface PublishShape {
   /** Readable name, used in every assertion message for this shape. */
