@@ -187,13 +187,6 @@ const ENTRY_PATH_FIXTURES: readonly PublishShape[] = [
     failing: true,
     unnamed: true,
   },
-  {
-    name: "an unattested publish in a package.json script, a third discovery source",
-    publish: "",
-    failing: true,
-    file: "package.json",
-    raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --access public\"\n  }\n}\n",
-  },
 ];
 
 test("the entry path produces the package verifier's own report for every publish shape", () => {
@@ -232,12 +225,16 @@ test("the entry path produces the package verifier's own report for every publis
     return written.join("");
   };
 
-  // The shapes above are discovered because they are workflows. The auditor has
-  // two further discovery paths, and an implementation that scanned only
-  // workflows would agree on every shape above and diverge on these: a tracked
+  // Every shape above reaches the gate the same way: it is a workflow. The
+  // auditor has two further discovery paths, and an implementation that scanned
+  // only workflows would agree on all of them and diverge on these - a tracked
   // script outside .github, reached through the shebang branch of
-  // isExecutableSource, and a publish in a package.json script, reached through
-  // manifestCommandLines.
+  // isExecutableSource, and a publish declared in a package.json script,
+  // reached through manifestCommandLines.
+  //
+  // Each new path carries BOTH verdicts. An implementation that simply refused
+  // every manifest publish would satisfy a failing manifest case on its own,
+  // while disagreeing with the auditor about a correctly attested one.
   const SHAPES: readonly PublishShape[] = [
     ...ENTRY_PATH_FIXTURES,
     {
@@ -246,6 +243,27 @@ test("the entry path produces the package verifier's own report for every publis
       failing: true,
       file: "scripts/release.sh",
       raw: "#!/bin/bash\nnpm publish --access public\n",
+    },
+    {
+      name: "an attested publish in a tracked script outside .github",
+      publish: "",
+      failing: false,
+      file: "scripts/release.sh",
+      raw: "#!/bin/bash\nnpm publish --provenance --access public\n",
+    },
+    {
+      name: "an unattested publish in a package.json script",
+      publish: "",
+      failing: true,
+      file: "package.json",
+      raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --access public\"\n  }\n}\n",
+    },
+    {
+      name: "an attested publish in a package.json script",
+      publish: "",
+      failing: false,
+      file: "package.json",
+      raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --provenance --access public\"\n  }\n}\n",
     },
   ];
 
