@@ -21,23 +21,14 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { auditPublishAttestation, report, verify } from "pm-ops/attestation";
 
-import { runIfMain, auditPublishAttestation as launcher_auditPublishAttestation, verify as launcher_verify } from "../scripts/verify-release-publish-attestation.ts";
+import { auditPublishAttestation as launcherAudit, runIfMain, verify as launcherVerify } from "../scripts/verify-release-publish-attestation.ts";
 
 const root = resolve(import.meta.dirname, "..");
-
-test("the launcher re-exports the package's own functions, by reference", () => {
-  // Identity, not similarity. Asserting only that the package exports functions
-  // would pass for a launcher that imports the package and then ignores it,
-  // which is precisely the re-fork this suite exists to catch.
-  assert.equal(launcher_verify, verify, "the launcher must re-export the package's own verify");
-  assert.equal(launcher_auditPublishAttestation, auditPublishAttestation, "the launcher must re-export the package's own audit");
-  assert.equal(typeof report, "function");
-});
 
 test("the gate is the resolved package export, not a local copy", async () => {
   // Identity, not similarity. A vendored copy that happens to behave the same
@@ -57,9 +48,12 @@ test("the gate is the resolved package export, not a local copy", async () => {
     "the gate must not resolve any part of its shell model locally",
   );
 
-  // The functions the launcher runs are the package's own, by reference.
-  assert.equal(typeof verify, "function");
+  // The functions the launcher re-exports are the package's own, by reference.
+  assert.equal(typeof launcherVerify, "function");
+  assert.equal(typeof launcherAudit, "function");
   assert.equal(typeof report, "function");
+  assert.equal(launcherVerify, verify, "the launcher must re-export the package's own verify");
+  assert.equal(launcherAudit, auditPublishAttestation, "the launcher must re-export the package's own audit");
 });
 
 test("the resolved gate still refuses an unattested publish", () => {
@@ -96,47 +90,246 @@ test("the launcher runs only as the process entry point", () => {
   // A real path that is not this module: isMainInvocation resolves the argv
   // entry, so a nonexistent one throws rather than answering the question.
   assert.equal(runIfMain(["node", resolve(root, "package.json")], import.meta.url, root), false);
+  // An argv with no entry at all: node was given no script, so there is no path
+  // to compare and nothing can be the entry point. Reached in practice when the
+  // module is imported by a runner that rewrites argv, and it must answer false
+  // rather than resolve `undefined` as a path.
+  assert.equal(runIfMain(["node"], import.meta.url, root), false);
+  // An argv[1] that resolves to nothing must THROW, not answer false. If path
+  // resolution were changed to swallow the error, a broken direct invocation
+  // would exit 0 without ever running the release gate - a silent skip of the
+  // whole thing, which is worse than a loud failure.
+  assert.throws(
+    () => runIfMain(["node", resolve(root, "no", "such", "entry.ts")], import.meta.url, root),
+    /ENOENT/u,
+    "an unresolvable entry must fail loudly rather than quietly skip the gate",
+  );
 });
 
-test("the launcher runs the gate and sets a failing exit code on an unattested publish when it is the entry point", () => {
-  // The positive branch: argv[1] and moduleUrl both resolve to the launcher's
-  // own path, so isMainInvocation answers true and runIfMain executes the gate
-  // for real — writing to process.stdout and setting process.exitCode. Against
-  // a fixture with an unattested publish, the gate must set exit code 1 and
-  // return true. A regression that removes the `process.exitCode = code`
-  // assignment from the launcher, or that makes isMainInvocation return false
-  // for a real invocation, leaves the gate silently exiting 0 on an unattested
-  // publish — exactly the failure this test's own comment warns about.
+/**
+ * A throwaway git repository containing one file, for the gate to discover.
+ *
+ * Staged rather than committed: the gate finds files through `git ls-files`,
+ * which reads the index, so a commit would add nothing except a dependency on
+ * ambient git identity configuration.
+ *
+ * @param prefix - Temp directory name prefix, for readable failures.
+ * @param file - Repository-relative path to write.
+ * @param contents - What to write there.
+ * @param use - Receives the repository root; the tree is removed afterwards.
+ * @returns Whatever `use` returned.
+ */
+function withTrackedFixture<T>(prefix: string, file: string, contents: string, use: (root: string) => T): T {
+  const fixture = mkdtempSync(resolve(tmpdir(), prefix));
+  try {
+    mkdirSync(resolve(fixture, dirname(file)), { recursive: true });
+    writeFileSync(resolve(fixture, file), contents);
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], { cwd: fixture });
+    execFileSync("git", ["add", file], { cwd: fixture });
+    return use(fixture);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Structurally different publishes, so output equality means the executed path
+ * agrees with the package across the SHAPE SPACE rather than on one string.
+ *
+ * A single fixture can be satisfied by a local verifier that hardcodes that one
+ * report. This set cannot be: it spans several distinct auditor decisions -
+ * whether a publish is recognised at all, whether an unresolved program is
+ * audited, whether a foreign publisher counts, whether the subcommand must
+ * follow the program, which files are discovered, and whether an attested
+ * publish is left alone - and each discovery path carries BOTH verdicts, so a
+ * blanket refusal is caught as well as a blanket acceptance.
+ *
+ * What this establishes, stated narrowly because a wider claim here was wrong
+ * twice: the launcher and the package agree across the SELECTED shape space.
+ * It is not coverage of every auditor decision, and deliberately not - YAML
+ * normalisation, scalar scope across conditional arms, heredocs, wrapper-option
+ * parsing and the executable-path variants are the auditor's own behaviour,
+ * tested with the implementation in pm-ops where one fix reaches every consumer.
+ * Re-testing them here is the duplication this suite exists to remove.
+ */
+interface PublishShape {
+  /** Readable name, used in every assertion message for this shape. */
+  name: string;
+  /** The publish line(s) to place in the fixture's workflow. */
+  publish: string;
+  /** Whether the auditor must report a failure for this shape. */
+  failing: boolean;
+  /** Repository-relative fixture path, when it is not the default workflow. */
+  file?: string;
+  /** Literal file contents, when the shape is not a workflow. */
+  raw?: string;
+  /** Set when the failure names no file, as the no-publish case does. */
+  unnamed?: boolean;
+}
+
+const ENTRY_PATH_FIXTURES: readonly PublishShape[] = [
+  { name: "a plain unattested publish", publish: "npm publish --access public", failing: true },
+  // The subcommand need not be adjacent to `npm`: an option may precede it, and
+  // a diverted implementation matching only the literal pair `npm publish` would
+  // agree with the auditor on every other shape here.
+  { name: "an unattested publish whose subcommand is not adjacent to npm", publish: "npm --access public publish", failing: true },
+  { name: "an attested publish whose subcommand is not adjacent to npm", publish: "npm --access public publish --provenance", failing: false },
+  { name: "an unresolved program that cannot be proven not to publish", publish: "$(echo npm) publish", failing: true },
+  { name: "a foreign publisher", publish: "pnpm publish --access public", failing: true },
+  { name: "an attested publish, which must produce no failure", publish: "npm publish --provenance --access public", failing: false },
+  { name: "a runner-prefixed publish", publish: "npx npm publish --access public", failing: true },
+  {
+    name: "an attested publish that must not mask a second unattested one",
+    publish: "npm publish --provenance --access public\n          npm publish --access public",
+    failing: true,
+  },
+  { name: "a publish that disables provenance explicitly", publish: "npm publish --provenance=false --access public", failing: true },
+  {
+    name: "an unattested publish inside a shell function, the production wrapper shape",
+    publish: "publish_release() {\n            npm publish --access public\n          }\n          publish_release",
+    failing: true,
+  },
+  {
+    name: "an attested publish inside a shell function",
+    publish: "publish_with_provenance() {\n            npm publish --provenance --access public\n          }\n          publish_with_provenance",
+    failing: false,
+  },
+  {
+    name: "a repository with no publish at all, which must fail closed",
+    publish: "echo nothing to do",
+    failing: true,
+    unnamed: true,
+  },
+];
+
+test("the entry path produces the package verifier's own report for every publish shape", () => {
+  // The positive branch of the entry-point guard: argv[1] and moduleUrl both
+  // resolve to the launcher's own path, so isMainInvocation answers true and
+  // runIfMain executes the gate for real - writing to process.stdout and
+  // setting process.exitCode.
+  //
+  // Re-export identity pins the IMPORTED binding, not the one runIfMain calls,
+  // so a future edit could divert the executed path alone and leave every other
+  // assertion green. Comparing what the entry path writes against the package's
+  // own report(verify(...)) binds the two.
+  //
+  // What this does NOT establish, stated so it is not over-read: ESM gives no
+  // way to observe the call target from outside the module, so this is agreement
+  // across a shape space, not call-site identity. It is why the space is varied
+  // rather than a single fixture.
   const launcherPath = resolve(root, "scripts/verify-release-publish-attestation.ts");
   const launcherUrl = pathToFileURL(launcherPath).href;
 
-  // A fixture repository with one unattested publish, tracked by git so
-  // verify(root) — which calls `git ls-files` — discovers it.
-  const fixture = mkdtempSync(resolve(tmpdir(), "pm-csv-attestation-fixture-"));
-  try {
-    mkdirSync(resolve(fixture, ".github/workflows"), { recursive: true });
-    writeFileSync(
-      resolve(fixture, ".github/workflows/release.yml"),
-      ["jobs:", "  release:", "    steps:", "      - run: |", "          npm publish --access public"].join("\n") + "\n",
-    );
-    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], { cwd: fixture });
-    execFileSync("git", ["add", ".github/workflows/release.yml"], { cwd: fixture });
-    execFileSync(
-      "git",
-      ["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "fixture"],
-      { cwd: fixture },
-    );
-
-    const savedExitCode = process.exitCode;
+  const capture = (run: () => void): string => {
+    const written: string[] = [];
+    // The raw function, not a bound copy: it is only ever reinstalled, never
+    // called, so binding would replace the global method with a fresh wrapper on
+    // every capture and stack a layer per fixture iteration.
+    const original = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+      written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
+      return true;
+    }) as typeof process.stdout.write;
     try {
-      const ran = runIfMain(["node", launcherPath], launcherUrl, fixture);
-      assert.equal(ran, true, "the launcher must run the gate when it is the entry point");
-      assert.equal(process.exitCode, 1, "an unattested publish must set a failing exit code");
+      run();
     } finally {
-      process.exitCode = savedExitCode;
+      process.stdout.write = original;
     }
-  } finally {
-    rmSync(fixture, { recursive: true, force: true });
+    return written.join("");
+  };
+
+  // Every shape above reaches the gate the same way: it is a workflow. The
+  // auditor has two further discovery paths, and an implementation that scanned
+  // only workflows would agree on all of them and diverge on these - a tracked
+  // script outside .github, reached through the shebang branch of
+  // isExecutableSource, and a publish declared in a package.json script,
+  // reached through manifestCommandLines.
+  //
+  // Each new path carries BOTH verdicts. An implementation that simply refused
+  // every manifest publish would satisfy a failing manifest case on its own,
+  // while disagreeing with the auditor about a correctly attested one.
+  const SHAPES: readonly PublishShape[] = [
+    ...ENTRY_PATH_FIXTURES,
+    {
+      name: "an unattested publish in a tracked script outside .github",
+      publish: "",
+      failing: true,
+      file: "scripts/release.sh",
+      raw: "#!/bin/bash\nnpm publish --access public\n",
+    },
+    {
+      name: "an attested publish in a tracked script outside .github",
+      publish: "",
+      failing: false,
+      file: "scripts/release.sh",
+      raw: "#!/bin/bash\nnpm publish --provenance --access public\n",
+    },
+    {
+      name: "an unattested publish in a package.json script",
+      publish: "",
+      failing: true,
+      file: "package.json",
+      raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --access public\"\n  }\n}\n",
+    },
+    {
+      name: "an attested publish in a package.json script",
+      publish: "",
+      failing: false,
+      file: "package.json",
+      raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --provenance --access public\"\n  }\n}\n",
+    },
+  ];
+
+  for (const shape of SHAPES) {
+    // Staged is enough: the gate discovers files through `git ls-files`, which
+    // reads the index. Committing would also make the fixture depend on ambient
+    // git identity configuration for no gain.
+    withTrackedFixture(
+      "pm-csv-attestation-fixture-",
+      shape.file ?? ".github/workflows/release.yml",
+      shape.raw ?? ["jobs:", "  release:", "    steps:", "      - run: |", `          ${shape.publish}`].join("\n") + "\n",
+      (fixture) => {
+      const savedExitCode = process.exitCode;
+      try {
+        let ran = false;
+        const launcherOutput = capture(() => {
+          ran = runIfMain(["node", launcherPath], launcherUrl, fixture);
+        });
+        assert.equal(ran, true, `${shape.name}: the launcher must run the gate when it is the entry point`);
+        assert.equal(
+          process.exitCode,
+          shape.failing ? 1 : savedExitCode,
+          `${shape.name}: the exit code must follow the verdict`,
+        );
+
+        process.exitCode = savedExitCode;
+        const packageOutput = capture(() => {
+          report(verify(fixture), (line) => process.stdout.write(`${line}\n`), (code) => { process.exitCode = code; });
+        });
+        assert.equal(
+          launcherOutput,
+          packageOutput,
+          `${shape.name}: the entry path must produce the package verifier's own report, not a local equivalent`,
+        );
+        if (shape.failing && shape.unnamed !== true) {
+          // Name the file. `report` sets exit code 1 for ANY failure, so
+          // asserting only that one occurred would let an unrelated failure - a
+          // fixture that tracked nothing, say - stand in for the publish this
+          // case exists to catch, and the byte comparison would still hold
+          // because both sides made the same mistake.
+          assert.match(
+            launcherOutput,
+            new RegExp(`FAIL - ${(shape.file ?? ".github/workflows/release.yml").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"),
+            `${shape.name}: the failure must name the fixture's own workflow`,
+          );
+        } else if (!shape.failing) {
+          assert.doesNotMatch(launcherOutput, /FAIL - /u, `${shape.name}: an attested publish must produce no failure`);
+        }
+      } finally {
+        process.exitCode = savedExitCode;
+      }
+      },
+    );
   }
 });
 
@@ -153,23 +346,21 @@ test("the launcher runs the gate and sets a failing exit code on an unattested p
  */
 test("only a shebang naming a shell interpreter pulls this file into the scan", () => {
   const body = readFileSync(resolve(root, "scripts/verify-release-publish-attestation.ts"), "utf8");
-  const scannedAsShell = (shebang: string): boolean => {
-    const dir = mkdtempSync(resolve(tmpdir(), "shebang-"));
-    try {
-      execFileSync("git", ["init", "-q"], { cwd: dir });
-      mkdirSync(resolve(dir, "scripts"), { recursive: true });
-      writeFileSync(resolve(dir, "scripts/verify-release-publish-attestation.ts"), shebang + body);
-      execFileSync("git", ["add", "-A"], { cwd: dir });
+  // The whole test turns on this file's prose naming the command it guards: that
+  // is what the auditor reads as an unattested publish once the body is treated
+  // as shell. If the prose stopped mentioning it, every case below would report
+  // "not shell input" and the test would pass for the wrong reason.
+  assert.match(body, /npm publish/u, "this file must mention the command it guards for the scan to have anything to find");
+  const scannedAsShell = (shebang: string): boolean =>
+    withTrackedFixture("shebang-", "scripts/verify-release-publish-attestation.ts", shebang + body, (dir) =>
       // The file is reported by name only when the auditor read its body as
       // shell; otherwise the only failure is that the throwaway repository
       // contains no publish at all.
-      return verify(dir).failures.some((failure) => failure.includes("scripts/verify-release-publish-attestation.ts"));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  };
+      verify(dir).failures.some((failure) => failure.includes("scripts/verify-release-publish-attestation.ts")));
   assert.equal(scannedAsShell("#!/bin/bash\n"), true, "a bash shebang makes this file shell input");
   assert.equal(scannedAsShell("#!/usr/bin/env sh\n"), true, "an env sh shebang makes this file shell input");
+  assert.equal(scannedAsShell("#!/bin/sh\n"), true, "a plain sh shebang makes this file shell input");
   assert.equal(scannedAsShell("#!/usr/bin/env node\n"), false, "a node shebang does not make this file shell input");
+  assert.equal(scannedAsShell("#!/usr/bin/env python3\n"), false, "a non-shell interpreter does not make this file shell input");
   assert.equal(scannedAsShell(""), false, "with no shebang the file is not shell input, which is why it has none");
 });
