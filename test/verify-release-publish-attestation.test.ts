@@ -144,7 +144,22 @@ function withTrackedFixture<T>(prefix: string, file: string, contents: string, u
  * decision would be a reimplementation of the auditor, which is the thing being
  * ruled out.
  */
-const ENTRY_PATH_FIXTURES: ReadonlyArray<{ name: string; publish: string; failing: boolean }> = [
+interface PublishShape {
+  /** Readable name, used in every assertion message for this shape. */
+  name: string;
+  /** The publish line(s) to place in the fixture's workflow. */
+  publish: string;
+  /** Whether the auditor must report a failure for this shape. */
+  failing: boolean;
+  /** Repository-relative fixture path, when it is not the default workflow. */
+  file?: string;
+  /** Literal file contents, when the shape is not a workflow. */
+  raw?: string;
+  /** Set when the failure names no file, as the no-publish case does. */
+  unnamed?: boolean;
+}
+
+const ENTRY_PATH_FIXTURES: readonly PublishShape[] = [
   { name: "a plain unattested publish", publish: "npm publish --access public", failing: true },
   { name: "an unresolved program that cannot be proven not to publish", publish: "$(echo npm) publish", failing: true },
   { name: "a foreign publisher", publish: "pnpm publish --access public", failing: true },
@@ -214,7 +229,7 @@ test("the entry path produces the package verifier's own report for every publis
   // outside .github reaches the gate through the shebang branch of
   // isExecutableSource instead, so an implementation that only looked at
   // workflows would agree on all of them and diverge here.
-  const SHAPES: ReadonlyArray<{ name: string; publish: string; failing: boolean; file?: string; raw?: string; unnamed?: boolean }> = [
+  const SHAPES: readonly PublishShape[] = [
     ...ENTRY_PATH_FIXTURES,
     {
       name: "an unattested publish in a tracked script outside .github",
