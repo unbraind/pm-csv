@@ -146,6 +146,7 @@ const ENTRY_PATH_FIXTURES: ReadonlyArray<{ name: string; publish: string; failin
     publish: "npm publish --provenance --access public\n          npm publish --access public",
     failing: true,
   },
+  { name: "a publish that disables provenance explicitly", publish: "npm publish --provenance=false --access public", failing: true },
 ];
 
 test("the entry path produces the package verifier's own report for every publish shape", () => {
@@ -184,14 +185,29 @@ test("the entry path produces the package verifier's own report for every publis
     return written.join("");
   };
 
-  for (const shape of ENTRY_PATH_FIXTURES) {
+  // Every shape above is discovered because it is a workflow. A tracked script
+  // outside .github reaches the gate through the shebang branch of
+  // isExecutableSource instead, so an implementation that only looked at
+  // workflows would agree on all of them and diverge here.
+  const SHAPES: ReadonlyArray<{ name: string; publish: string; failing: boolean; file?: string; raw?: string }> = [
+    ...ENTRY_PATH_FIXTURES,
+    {
+      name: "an unattested publish in a tracked script outside .github",
+      publish: "",
+      failing: true,
+      file: "scripts/release.sh",
+      raw: "#!/bin/bash\nnpm publish --access public\n",
+    },
+  ];
+
+  for (const shape of SHAPES) {
     // Staged is enough: the gate discovers files through `git ls-files`, which
     // reads the index. Committing would also make the fixture depend on ambient
     // git identity configuration for no gain.
     withTrackedFixture(
       "pm-csv-attestation-fixture-",
-      ".github/workflows/release.yml",
-      ["jobs:", "  release:", "    steps:", "      - run: |", `          ${shape.publish}`].join("\n") + "\n",
+      shape.file ?? ".github/workflows/release.yml",
+      shape.raw ?? ["jobs:", "  release:", "    steps:", "      - run: |", `          ${shape.publish}`].join("\n") + "\n",
       (fixture) => {
       const savedExitCode = process.exitCode;
       try {
@@ -223,7 +239,7 @@ test("the entry path produces the package verifier's own report for every publis
           // because both sides made the same mistake.
           assert.match(
             launcherOutput,
-            /FAIL - \.github\/workflows\/release\.yml/u,
+            new RegExp(`FAIL - ${(shape.file ?? ".github/workflows/release.yml").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u"),
             `${shape.name}: the failure must name the fixture's own workflow`,
           );
         } else {
