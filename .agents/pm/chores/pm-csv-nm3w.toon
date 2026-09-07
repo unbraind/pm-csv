@@ -1,0 +1,16 @@
+id: pm-csv-nm3w
+title: Harden the attestation consumer suite to match the rest of the converged fleet
+description: "These seven repositories converged onto the canonical publish-attestation auditor before three review rounds hardened the consumer suite. They are correct - they consume the canonical auditor and report the same seven corpus cases as every other converged repository - but their suite is the earlier, weaker one, and their launcher docstring says the suite reproduces all three states when it reproduces four.\n\nWhat the hardened suite adds, all of it from review findings on the later PRs:\n\nThe entry path is compared against the package own report across FOUR structurally different publish shapes rather than one fixture. A single fixture is satisfiable by a local verifier that hardcodes its report - confirmed by building that attack, which passed 6 of 6 against the single-fixture version and fails against this one.\n\nThe shebang matrix covers six interpreters rather than four, and asserts its own precondition: the case depends on the launcher prose naming the command it guards, so without that assertion every state would read not-shell-input and the test would go green having proved nothing.\n\nThe failure must name the fixture own workflow rather than merely being some failure, since report sets exit code 1 for any failure at all.\n\nOne withTrackedFixture helper replaces two sites building the same throwaway repository, and documents why staging without committing is sufficient - the gate discovers files through git ls-files, which reads the index.\n\nThe docstring miscount is the same defect twice over: a claim about behaviour that no test checks, which reached seven repositories by being copied. That is exactly what the original wrong shebang sentence did, and exactly what this convergence removes from code while leaving prose free to repeat it."
+type: Chore
+status: closed
+priority: 3
+tags[2]: attestation,testing
+created_at: "2026-09-07T12:51:24.768Z"
+updated_at: "2026-09-07T12:51:26.421Z"
+closed_at: "2026-09-07T12:51:26.406Z"
+completed_at: "2026-09-07T12:51:26.406Z"
+claim_principal: claude
+author: claude
+acceptance_criteria: The entry path is compared against the package across four structurally different publish shapes; The docstring's state count matches the number of interpreters the suite reproduces
+close_reason: "Suite hardened to match the rest of the fleet. Proven not vacuous: a local verifier hardcoding one report passes the previous suite 6/6 and fails this one."
+body: ""

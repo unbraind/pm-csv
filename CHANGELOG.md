@@ -6,6 +6,10 @@
 
 - Correct a wrong shebang claim in the attestation launcher, and bring the canonical auditor up to date ([pm-csv-rioq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-rioq.toon))
 
+### Other
+
+- Harden the attestation consumer suite to match the rest of the converged fleet ([pm-csv-nm3w](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-nm3w.toon))
+
 ## 2026.9.7 - 2026-09-07
 
 ### Fixed
