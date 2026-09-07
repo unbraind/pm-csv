@@ -187,6 +187,13 @@ const ENTRY_PATH_FIXTURES: readonly PublishShape[] = [
     failing: true,
     unnamed: true,
   },
+  {
+    name: "an unattested publish in a package.json script, a third discovery source",
+    publish: "",
+    failing: true,
+    file: "package.json",
+    raw: "{\n  \"name\": \"attestation-fixture\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"release\": \"npm publish --access public\"\n  }\n}\n",
+  },
 ];
 
 test("the entry path produces the package verifier's own report for every publish shape", () => {
@@ -225,10 +232,12 @@ test("the entry path produces the package verifier's own report for every publis
     return written.join("");
   };
 
-  // Every shape above is discovered because it is a workflow. A tracked script
-  // outside .github reaches the gate through the shebang branch of
-  // isExecutableSource instead, so an implementation that only looked at
-  // workflows would agree on all of them and diverge here.
+  // The shapes above are discovered because they are workflows. The auditor has
+  // two further discovery paths, and an implementation that scanned only
+  // workflows would agree on every shape above and diverge on these: a tracked
+  // script outside .github, reached through the shebang branch of
+  // isExecutableSource, and a publish in a package.json script, reached through
+  // manifestCommandLines.
   const SHAPES: readonly PublishShape[] = [
     ...ENTRY_PATH_FIXTURES,
     {
