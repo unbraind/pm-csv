@@ -140,6 +140,12 @@ const ENTRY_PATH_FIXTURES: ReadonlyArray<{ name: string; publish: string; failin
   { name: "an unresolved program that cannot be proven not to publish", publish: "$(echo npm) publish", failing: true },
   { name: "a foreign publisher", publish: "pnpm publish --access public", failing: true },
   { name: "an attested publish, which must produce no failure", publish: "npm publish --provenance --access public", failing: false },
+  { name: "a runner-prefixed publish", publish: "npx npm publish --access public", failing: true },
+  {
+    name: "an attested publish that must not mask a second unattested one",
+    publish: "npm publish --provenance --access public\n          npm publish --access public",
+    failing: true,
+  },
 ];
 
 test("the entry path produces the package verifier's own report for every publish shape", () => {
@@ -162,7 +168,10 @@ test("the entry path produces the package verifier's own report for every publis
 
   const capture = (run: () => void): string => {
     const written: string[] = [];
-    const original = process.stdout.write.bind(process.stdout);
+    // The raw function, not a bound copy: it is only ever reinstalled, never
+    // called, so binding would replace the global method with a fresh wrapper on
+    // every capture and stack a layer per fixture iteration.
+    const original = process.stdout.write;
     process.stdout.write = ((chunk: string | Uint8Array): boolean => {
       written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
       return true;
