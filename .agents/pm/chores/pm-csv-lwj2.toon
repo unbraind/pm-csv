@@ -1,0 +1,23 @@
+id: pm-csv-lwj2
+title: Certify the CLI and SDK on PM 2026.9.7
+description: "Upgrade the development CLI and SDK to published 2026.9.7 and pm-changelog to published 2026.9.6. Re-run real package quality and acceptance gates against the exact installed dependencies, preserving the manifest compatibility floor unless runtime behavior requires a higher minimum. Companion tracking: pm-cli-companion item pm-cli-website-6yiv."
+type: Chore
+status: in_progress
+priority: 2
+tags[3]: cli,compatibility,sdk
+created_at: "2026-09-07T20:34:50.641Z"
+updated_at: "2026-09-07T21:03:15.330Z"
+assignee: codex-pm-ecosystem
+claim_principal: codex-pm-ecosystem
+author: codex-pm-ecosystem
+acceptance_criteria: Exact installed dependency versions are verified; package checks and real CLI acceptance pass without weakened gates; independent coverage and privacy limitations remain explicit
+comments[1]{created_at,author,text,edited_at}:
+  "2026-09-07T20:47:41.946Z",codex-pm-ecosystem,"2026-09-07 UTC correction of the earlier validation summary: npm run release:check exited 0. Installed @unbrained/pm-cli=2026.9.7; installed pm-changelog=2026.9.6. Final top-level report: tests=226, pass=226, fail=0, skipped=0. Reported line/branch/function coverage: ℹ all files          | 100.00 |   100.00 |  100.00 | . Nested child-fixture summaries are not independent package totals. These metrics do not certify all-source statement coverage or clear independent history privacy, production, or exact-head reviewer gates.","2026-09-07T21:03:15.330Z"
+files[2]{path,scope}:
+  package-lock.json,project
+  package.json,project
+tests[1]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,1200,codex-pm-ecosystem,"2026-09-07T20:34:54.297Z",local_mutation,chore/certify-pm-cli-2026-9-7
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli/releases/tag/v2026.9.7",project,Published CLI and SDK release
+body: ""
