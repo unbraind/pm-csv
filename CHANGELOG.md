@@ -4,7 +4,6 @@
 
 ### Other
 
-- Certify the CLI and SDK on PM 2026.9.7 ([pm-csv-lwj2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-lwj2.toon))
 - Certify pm CLI 2026.9.12 and the pm-ops 2026.9.11 auditor ([pm-csv-umrv](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-umrv.toon))
 
 ## 2026.9.11 - 2026-09-11
