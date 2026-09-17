@@ -1,0 +1,24 @@
+id: pm-csv-nkab
+title: Certify pm CLI 2026.9.17
+description: "CI runs the repository-pinned pm binary, so the pin decides what every gate exercises. This repository pins @unbrained/pm-cli 2026.9.12 while npm latest is 2026.9.17, which fixes telemetry consent/DO_NOT_TRACK handling, telemetry event loss under concurrent queue rewrites, a lock reclaimed during owner-metadata init, oversized item reads losing content without a receipt, and merge-driver launchers breaking after a runtime upgrade. 2026.9.14 also lets non-colliding extension leaves live beneath core command groups. Advance pm-ops to 2026.9.13 and pm-changelog to 2026.9.16 as well."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-09-17T19:40:00.441Z"
+updated_at: "2026-09-17T19:52:27.070Z"
+closed_at: "2026-09-17T19:52:27.041Z"
+completed_at: "2026-09-17T19:52:27.041Z"
+claim_principal: pi-agent
+author: pi-agent
+acceptance_criteria: "package.json pins @unbrained/pm-cli 2026.9.17 exactly, the lockfile resolves pm-cli 2026.9.17 and pm-ops 2026.9.13 and pm-changelog 2026.9.16, and npm run release:check exits 0 on the new pins"
+resolution: "Advanced @unbrained/pm-cli from 2026.9.12 to 2026.9.17, pm-ops from 2026.9.11 to 2026.9.13, and pm-changelog from 2026.9.9 to 2026.9.16."
+expected_result: "release:check exits 0 on @unbrained/pm-cli 2026.9.17"
+actual_result: "release:check exited 0 on 2026.9.17: 228 of 228 tests pass, coverage 100% line/100% branch across 2 source files, accept:packed ok across npm-current, bun-current, and npm-minimum scenarios, verify:release-publish-attestation ok, verify:release-changelog-date ok"
+files[2]{path,scope}:
+  package.json,project
+  package-lock.json,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,pi-agent,"2026-09-17T19:52:26.169Z",local_mutation,chore/certify-pm-cli-2026-9-17
+close_reason: Pins advanced to npm latest; all gates pass on the new versions
+body: ""
