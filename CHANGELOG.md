@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.17 ([pm-csv-nkab](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-nkab.toon))
+
 ## 2026.9.13 - 2026-09-13
 
 ### Other
@@ -44,18 +50,24 @@
 
 - Consume the canonical publish-attestation gate instead of carrying a copy of it ([pm-csv-orot](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-orot.toon))
 
+## 2026.9.1 - 2026-09-01
+
+### Fixed
+
+- Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
+
 ## 2026.8.31 - 2026-08-31
 
 ### Fixed
 
 - Keep CodeQL action updates synchronized in one pull request ([pm-csv-tbxy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-tbxy.toon))
 - Rebase the changelog date verifier onto the current release workflow ([pm-csv-bnra](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bnra.toon))
-- Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
 
 ## 2026.8.29 - 2026-08-29
 
 ### Fixed
 
+- A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
 - Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand ([pm-csv-v9cs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v9cs.toon))
 - The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-csv-ab5t](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ab5t.toon))
 
@@ -67,7 +79,6 @@
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
 - Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
 - Adopt the canonical certified complete-list reader ([pm-csv-t4cc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-t4cc.toon))
 - Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))
