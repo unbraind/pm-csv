@@ -74,7 +74,7 @@
     "pm-changelog": "2026.9.16",
     "pm-ops": "2026.9.13",
     "typescript": "^7.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "keywords": [
     "csv",
