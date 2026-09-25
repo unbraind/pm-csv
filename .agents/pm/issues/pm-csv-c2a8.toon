@@ -1,0 +1,18 @@
+id: pm-csv-c2a8
+title: A publish that npm accepts late is reported as failed and the GitHub Release is skipped on bun mirror lag
+description: "Companion item pm-cli-website-3y5d. pm-csv 2026.9.23 is the live case: npm accepted the publish with provenance and the tag was pushed, but bun still answered No version matching after 4 minutes, so the job failed before creating the GitHub Release. This repository's own release.yml gets a 10-minute npm visibility window with --prefer-online reads and an honest never-visible message, a ~10-minute bun window, and a GitHub Release that depends only on the publish and tag-push outcomes, with a gate step that fails the job visibly when bun verification failed."
+type: Issue
+status: closed
+priority: 1
+tags[2]: release,reliability
+created_at: "2026-09-25T08:06:24.097Z"
+updated_at: "2026-09-25T08:20:58.405Z"
+closed_at: "2026-09-25T08:20:54.438Z"
+completed_at: "2026-09-25T08:20:54.438Z"
+author: fleet-wave-script
+files[1]{path,scope}:
+  .github/workflows/release.yml,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,fleet-wave-script,"2026-09-25T08:06:44.747Z",local_mutation,certify-pm-cli-2026-9-23-and-roll-out-guarded-merge-driver-launcher
+close_reason: "Applied to this repository's own release.yml by anchored replacements (identity asserted: it names only unbraind/pm-csv); release:check exits 0."
+body: ""

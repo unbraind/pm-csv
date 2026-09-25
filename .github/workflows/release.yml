@@ -607,6 +607,7 @@ jobs:
       # publishing must be configured for this package on npmjs.com against
       # unbraind/pm-csv and this workflow filename, or publish fails closed.
       - name: Publish npm package
+        id: publish
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
         env:
@@ -667,11 +668,11 @@ jobs:
           # coordinate" and is refused rather than reconciled.
           registry_version_is_attested() {
             local attestations
-            attestations="$(npm view "${pkg_name}@${NPM_VERSION}" dist.attestations --json 2>/dev/null || true)"
+            attestations="$(npm view "${pkg_name}@${NPM_VERSION}" dist.attestations --prefer-online --json 2>/dev/null || true)"
             [[ -n "${attestations}" && "${attestations}" != "null" && "${attestations}" != "{}" && "${attestations}" != "[]" ]]
           }
           registry_has_version() {
-            npm view "${pkg_name}@${NPM_VERSION}" version --json >/dev/null 2>&1
+            npm view "${pkg_name}@${NPM_VERSION}" version --prefer-online --json >/dev/null 2>&1
           }
           # Answers one question and nothing else: is an attested copy of this
           # exact version visible right now? It must never terminate the step
@@ -690,11 +691,16 @@ jobs:
           # forbids overwriting a published version. It needs a human, and saying
           # so is more useful than a green run over an artifact the release notes
           # will misdescribe.
+          # Declared before any function that expands it: bindings are established
+          # before use so visibility never depends on call-time reasoning.
+          max_attempts=3
           refuse_unattested_or_fail() {
             if registry_has_version; then
               echo "::error::${pkg_name}@${NPM_VERSION} exists on the registry WITHOUT a visible provenance attestation. This workflow only ever publishes with --provenance, so either that artifact did not come from this job, or its attestation never became visible. Refusing to tag and release around it; investigate before re-running."
             else
-              echo "::error::Publish with provenance failed after ${max_attempts} attempts. Refusing to downgrade supply-chain attestations; retry the release transaction."
+              # Never claim the publish failed when only visibility was not
+              # confirmed: say exactly what this run knows (pm-cli-website-3y5d).
+              echo "::error::npm did not confirm ${pkg_name}@${NPM_VERSION} is published after ${max_attempts} publish attempts and a 10-minute visibility window. The registry shows nothing at that coordinate right now: either the publish genuinely failed, or propagation outlasted the window. Refusing to downgrade supply-chain attestations; retry the release transaction."
             fi
             exit 1
           }
@@ -712,7 +718,6 @@ jobs:
             npm publish --access public --provenance --ignore-scripts
           }
           attempt=0
-          max_attempts=3
           while (( attempt < max_attempts )); do
             attempt=$(( attempt + 1 ))
             if publish_with_provenance; then
@@ -737,24 +742,32 @@ jobs:
           # version that is on the registry, which is the "npm ahead of git"
           # split the release ordering exists to prevent. Poll instead.
           #
-          # 5 attempts, 30s apart. The bun verification step further down this
-          # file already retries the same registry on the same 30s schedule,
-          # because a version the registry has just accepted is not immediately
-          # visible; the npm read here needs the same grace for the same reason.
-          # A shorter window would fail a release that the very next step would
-          # then find. The cost is paid only on the path where npm has already
-          # reported an error, never on a successful publish.
-          reconcile_attempts=5
+          # 20 reads, 30 s apart: a 10-minute visibility window. The old
+          # 5 x 30 s window closed 2.5 minutes in while npm had already
+          # ACCEPTED the publish, printed the false "failed after 3 attempts",
+          # and skipped the tag and the GitHub release for a version the
+          # registry then served moments later (pm-slack/pm-web 2026-09-18:
+          # visible 35 s after the window closed). Ten minutes absorbs the
+          # observed propagation; --prefer-online on the registry reads keeps
+          # a stale cache answer from faking or hiding visibility. The cost is
+          # paid only on the path where npm has already reported an error,
+          # never on a successful publish.
+          reconcile_attempts=20
           for reconcile_attempt in $(seq 1 "${reconcile_attempts}"); do
             if reconciled_attested; then
               echo "::notice::Version landed attested after the final reported error; treating as success."
               exit 0
             fi
-            if (( reconcile_attempt < reconcile_attempts )); then
-              echo "Not yet visible on the registry; re-reading in 30s (${reconcile_attempt}/${reconcile_attempts})..."
-              sleep 30
-            fi
+            echo "Not yet visible on the registry; re-reading in 30s (${reconcile_attempt}/${reconcile_attempts})..."
+            sleep 30
           done
+          # The 20th sleep completes the 10-minute window; read once more so a
+          # version that became visible during that final 30 s is caught too,
+          # not failed on an arithmetic edge.
+          if reconciled_attested; then
+            echo "::notice::Version landed attested at the end of the 10-minute visibility window; treating as success."
+            exit 0
+          fi
           refuse_unattested_or_fail
 
       # Tag the exact merged/verified main commit AFTER a successful publish.
@@ -763,6 +776,7 @@ jobs:
       # prepared metadata and the next run resumes the same version instead of
       # inventing another release.
       - name: Push release tag
+        id: push_tag
         if: steps.decide.outputs.should_release == 'true'
         shell: bash
         env:
@@ -801,6 +815,7 @@ jobs:
           git push origin "refs/tags/${release_tag}"
 
       - name: Verify bun install of published package
+        id: verify_bun
         if: steps.decide.outputs.should_release == 'true'
         env:
           NPM_VERSION: ${{ steps.decide.outputs.npm_version }}
@@ -815,34 +830,64 @@ jobs:
           bun init -y > /dev/null
           # Smoke-test that the just-published version installs via bun.
           # Retry to absorb npm registry propagation (~60s typical).
-          for attempt in 1 2 3 4 5 6 7 8; do
+          # 21 attempts with a 30 s pause BETWEEN them: the same 10-minute
+          # window the npm reconcile uses. The last attempt runs after the
+          # final pause, so a version that becomes installable at the very end
+          # of the window still passes instead of failing on a trailing sleep.
+          bun_attempts=21
+          for attempt in $(seq 1 "${bun_attempts}"); do
             if bun add "${pkg_name}@${pkg_version}"; then
               echo "bun add succeeded on attempt $attempt"
               exit 0
             fi
-            echo "bun add failed on attempt $attempt, sleeping 30s..."
-            sleep 30
+            if (( attempt < bun_attempts )); then
+              echo "bun add failed on attempt $attempt, sleeping 30s..."
+              sleep 30
+            fi
           done
-          # bun's registry mirror can lag well past npm's own propagation,
-          # especially for prerelease (-N) versions. The npm registry is
-          # authoritative for what we just published: if it confirms the
-          # version, the release genuinely succeeded and the bun failure is
-          # mirror lag, not a publish failure. Do not let it block the
-          # GitHub release / post-publish steps that follow.
-          echo "bun could not resolve ${pkg_name}@${pkg_version}; checking npm registry authoritatively..."
-          if npm view "${pkg_name}@${pkg_version}" version --registry="https://registry.npmjs.org" > /dev/null 2>&1; then
-            echo "::warning::bun has not mirrored ${pkg_name}@${pkg_version} yet, but npm confirms it is published (registry mirror lag). Treating verification as successful."
-            exit 0
-          fi
-          echo "npm registry does not show ${pkg_name}@${pkg_version} - real publish failure."
+          # The GitHub release below is now created whenever the publish and
+          # the tag push succeeded, regardless of this step, so a bun failure
+          # must NOT be papered over as success. The old fallback here (treat
+          # mirror lag as a passing verification once `npm view` confirmed the
+          # version) still let a total failure skip the Release: pm-linear run
+          # 35323736826 (2026-09-18) failed this step, the Release was skipped,
+          # and tag v2026.09.18 has had no Release since. npm acceptance is
+          # already proven by the publish step above; this step verifies bun
+          # alone, so a failure here is reported as a failure and the gate
+          # step below fails the job visibly.
+          echo "::error::bun could not resolve ${pkg_name}@${pkg_version} after ${bun_attempts} attempts across a 10-minute window. npm accepted the publish and the GitHub release is created regardless of this step; this failure keeps the bun mirror problem visible instead of silent."
           exit 1
       - name: Create GitHub release
-        if: steps.decide.outputs.should_release == 'true'
+        # Created even when bun verification failed: this Release used to be
+        # skipped behind that step, which is how pm-linear v2026.09.18 ended
+        # up tagged with no Release. It depends only on the publish and the
+        # tag push; a bun failure is surfaced by the gate step below so
+        # nothing goes silent. !cancelled() is required: with the default
+        # success() condition any earlier failure would skip this step.
+        if: >-
+          !cancelled() &&
+          steps.publish.outcome == 'success' &&
+          steps.push_tag.outcome == 'success'
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           RELEASE_TAG: ${{ steps.decide.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${RELEASE_TAG}" --title "${REPO_NAME} ${RELEASE_TAG}" --notes-file RELEASE_NOTES.md --verify-tag
+
+      # The visible half of the bun decoupling: the Release above is created
+      # regardless of bun verification, so without this gate a bun failure
+      # would end in a green run and mirror lag would be invisible. Only a
+      # bun FAILURE trips it - a skipped bun step means the publish or the
+      # tag push already failed the job on its own.
+      - name: Fail the job on bun verification failure
+        if: >-
+          !cancelled() &&
+          steps.verify_bun.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::bun install verification failed (see the step log above); the npm publish, the tag push and the GitHub release were not affected. Failing the job so the bun mirror problem is not silent."
+          exit 1
 
   # A failed scheduled release otherwise produces no tracker-visible signal.
   # Keep alerting isolated, least-privileged, deduplicated, and non-blocking.
