@@ -6,11 +6,13 @@ status: closed
 priority: 1
 tags[4]: certify,merge-driver,multi-agent,pm-cli-2026.9.23
 created_at: "2026-09-25T08:06:23.143Z"
-updated_at: "2026-09-25T08:20:56.250Z"
+updated_at: "2026-09-25T08:52:02.719Z"
 closed_at: "2026-09-25T08:20:52.329Z"
 completed_at: "2026-09-25T08:20:52.329Z"
 author: fleet-wave-script
 acceptance_criteria: "package.json and package-lock.json pin pm-cli 2026.9.23 and pm-ops 2026.9.23 (pm-changelog 2026.9.23 where used); scripts/prepare-merge-driver.ts is byte-identical to the pinned pm-ops template, enforced by a test; CI runs pm health --strict-exit --require-merge-drivers and release:check exits 0"
+comments[1]{created_at,author,text}:
+  "2026-09-25T08:52:02.718Z",fleet-wave-script,"Review round 1 (Sourcery and Greptile on the wave PRs): the launcher test now builds isolated git-init checkouts, so drivers registered by this repository's own npm ci cannot mask a launcher that registers none; it asserts the full driver set .gitattributes declares, and it covers the omit-dev skip, stale pm-ops, failing and killed installer branches. The launcher stays in the coverage sources where it was, covered through the child processes as in pm-ops."
 files[7]{path,scope}:
   .github/workflows/ci.yml,project
   package-lock.json,project
