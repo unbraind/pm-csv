@@ -1,0 +1,25 @@
+id: pm-csv-nqi5
+title: Certify pm CLI 2026.9.23 and adopt the guarded pm-ops merge-driver launcher
+description: "Fleet wave 2026-09-25 (companion epic pm-cli-website-5s6z, launcher rollout pm-cli-website-xy19). Pins the toolchain to 2026.9.23 and replaces the prepare hook with the launcher template pm-ops ships: it imports nothing from pm-ops, so a production install of a clone (npm ci --omit=dev) skips with one notice instead of failing, while a stale or broken pm-ops still fails the install. A test keeps the copy byte-identical to the pinned template, whose branches pm-ops covers with real fixtures."
+type: Chore
+status: closed
+priority: 1
+tags[4]: certify,merge-driver,multi-agent,pm-cli-2026.9.23
+created_at: "2026-09-25T08:06:23.143Z"
+updated_at: "2026-09-25T08:20:56.250Z"
+closed_at: "2026-09-25T08:20:52.329Z"
+completed_at: "2026-09-25T08:20:52.329Z"
+author: fleet-wave-script
+acceptance_criteria: "package.json and package-lock.json pin pm-cli 2026.9.23 and pm-ops 2026.9.23 (pm-changelog 2026.9.23 where used); scripts/prepare-merge-driver.ts is byte-identical to the pinned pm-ops template, enforced by a test; CI runs pm health --strict-exit --require-merge-drivers and release:check exits 0"
+files[7]{path,scope}:
+  .github/workflows/ci.yml,project
+  package-lock.json,project
+  package.json,project
+  README.md,project
+  scripts/prepare-merge-driver.mjs,project
+  scripts/prepare-merge-driver.ts,project
+  test/prepare-merge-driver.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,fleet-wave-script,"2026-09-25T08:06:42.809Z",local_mutation,certify-pm-cli-2026-9-23-and-roll-out-guarded-merge-driver-launcher
+close_reason: "Pins: @unbrained/pm-cli 2026.9.17 -> 2026.9.23, pm-ops 2026.9.13 -> 2026.9.23, pm-changelog 2026.9.16 -> 2026.9.23 (package.json and package-lock.json). Launcher: pm-ops template copied unchanged, replacing the .mjs implementation; test/prepare-merge-driver.test.ts proves byte identity and a real driver install. git config lists the pm merge drivers; the CI health block runs green with --require-merge-drivers; release:check exits 0."
+body: ""

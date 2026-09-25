@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A publish that npm accepts late is reported as failed and the GitHub Release is skipped on bun mirror lag ([pm-csv-c2a8](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-c2a8.toon))
+
+### Other
+
+- Certify pm CLI 2026.9.23 and adopt the guarded pm-ops merge-driver launcher ([pm-csv-nqi5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-nqi5.toon))
+
 ## 2026.9.18 - 2026-09-18
 
 ### Other
