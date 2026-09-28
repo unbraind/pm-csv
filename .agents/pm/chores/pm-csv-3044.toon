@@ -1,0 +1,19 @@
+id: pm-csv-3044
+title: Certify pm-csv with pm CLI and SDK 2026.9.28
+description: "Update the exact development CLI pin and lockfile to the latest published 2026.9.28 toolchain, clear the extension host version skew, and certify the CSV package with its full release gate plus isolated packed npm and Bun acceptance. Companion fleet evidence: pm-cli-website-1o0w in the private companion tracker."
+type: Chore
+status: in_progress
+priority: 1
+tags[3]: cli,release-readiness,sdk
+created_at: "2026-09-28T15:34:43.752Z"
+updated_at: "2026-09-28T15:38:19.851Z"
+author: codex
+acceptance_criteria: "Installed CLI 2026.9.28 passes pm health --strict-exit with no gate-failing findings; Exact-head npm run release:check passes with measured tests, coverage, docs, audit, pack, and changelog checks; Packed package works in isolated npm/Node and Bun workspaces"
+notes[1]{created_at,author,text}:
+  "2026-09-28T15:38:19.824Z",codex,"CLI 2026.9.28 clears extension host skew; strict health passes with one stale-item advisory. Exact-head npm run release:check passed: 234/234 tests, zero skips, 100% lines/branches/functions over 2 measured sources, 71/71 docstrings over 9 files, zero production audit findings, changelog/attestation/date checks, packed npm-current/Bun-current/npm-minimum CSV create-import-export receipts. Whole-source and statement coverage remain open in pm-csv-rssj."
+files[2]{path,scope,note}:
+  package.json,project,Exact CLI development pin
+  package-lock.json,project,Resolved CLI and SDK dependency graph
+tests[1]{command,path,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",package.json,project,codex,"2026-09-28T15:38:19.824Z",local_mutation,chore/pm-csv-cli-sdk-2026-9-28
+body: ""
