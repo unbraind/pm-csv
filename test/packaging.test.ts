@@ -181,6 +181,27 @@ test("the host CLI dev dependency is pinned to an exact version at or above the 
   );
 });
 
+/**
+ * The README states which CLI version the development and release gates are
+ * pinned to. That sentence is public documentation of the dev pin, so it must
+ * name the exact version package.json declares: a stale README version quietly
+ * misstates which host produced the recorded gate verdicts.
+ */
+test("the README names the exact host CLI version the development gates pin", () => {
+  const declared = manifest.devDependencies?.[HOST_CLI];
+  assert.ok(declared, `${HOST_CLI} must be a devDependency so the gates have a CLI to run`);
+  const stated = readme.match(/gates are pinned to pm CLI\/SDK (\d+\.\d+\.\d+)/)?.[1];
+  assert.ok(
+    stated,
+    'README.md must state which pm CLI/SDK version the development and release gates are pinned to, as "gates are pinned to pm CLI/SDK x.y.z"',
+  );
+  assert.strictEqual(
+    stated,
+    declared,
+    `README states the gates are pinned to pm CLI/SDK ${stated}, but package.json pins ${declared}: the documented gate host must match the dev dependency that actually runs the gates`,
+  );
+});
+
 test("the extension manifest declares the same floor enforced by the peer dependency", () => {
   const peer = manifest.peerDependencies?.[HOST_CLI];
   assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency`);

@@ -1,0 +1,17 @@
+id: pm-csv-rssj
+title: Extend measured coverage to every executable TypeScript script
+description: "The 2026-09-28 release gate reports 100% lines, branches, and functions over only index.ts and scripts/docstring-gate.ts. The gate treats V8 line coverage as its statement-coverage figure; it does not emit a separate statements field. This repository has eight scripts/*.ts files plus index.ts. The current 100% receipt cannot support an all-source 100/100/100/100 claim because seven executable scripts are outside the measured source set. Expand the gate without exclusions or artificial counters, and document the line-to-statement mapping precisely."
+type: Issue
+status: open
+priority: 1
+tags: []
+created_at: "2026-09-28T15:38:07.333Z"
+updated_at: "2026-09-28T15:58:11.804Z"
+author: codex
+acceptance_criteria: "Fail closed if any executable TypeScript source file is missing from the coverage report; Enforce 100% V8 lines as the statement proxy plus 100% branches and functions for every executable source, and document the mapping without claiming a separate statement counter"
+severity: high
+repro_steps: "Run npm run coverage; observe coverage-gate: 2 source files reported and three dimensions, then compare with scripts/*.ts and index.ts."
+expected_result: "Every executable TypeScript source is included in the report and enforced at 100% lines, branches, and functions, with the V8 line-as-statement mapping documented precisely."
+actual_result: "2 of 9 executable TypeScript source files reported; line coverage represents statements in this Node/V8 gate, but seven scripts are outside the measured set."
+component: quality-gates
+body: ""
