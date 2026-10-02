@@ -6,17 +6,43 @@ status: in_progress
 priority: 1
 tags[3]: cli,release-readiness,sdk
 created_at: "2026-09-28T15:34:43.752Z"
-updated_at: "2026-10-02T18:44:06.945Z"
+updated_at: "2026-10-02T23:23:11.118Z"
 author: codex
 acceptance_criteria: "Installed CLI 2026.9.28 passes pm health --strict-exit with no gate-failing findings; Exact-head npm run release:check passes with measured tests, coverage, docs, audit, pack, and changelog checks; Packed package works in isolated npm/Node and Bun workspaces"
-comments[2]{created_at,author,text}:
+actual_result: "npm ci and npm run release:check PASS: 235/235 tests, zero skipped, 100% measured lines/branches/functions across two loaded sources, 71 documented declarations. Packed npm-current, Bun-current and npm-minimum CSV import/export scenarios pass; strict CI health and pm validate pass; linked packaging tests pass 7/7; bun install --no-save passes. Updated only transitive brace-expansion 5.0.9 to 5.0.12 after red all-dependency audit; final audit has zero vulnerabilities. Exact PM pins unchanged. Independent statements and seven executable scripts remain outside the receipt in open pm-csv-rssj. History prefixes preserved; final-head CI/review remain separate, no closure or publication."
+comments[5]{created_at,author,text}:
   "2026-10-02T18:24:29.432Z",pi-land-a,"Merge-readiness verification pass by pi-land-a (fleet PR landing session): exact head 2612575 is up to date with origin/main (merge-base equals main tip), mergeable and CLEAN; Node 22/26, CodeQL, Greptile, Semgrep, DeepScan and Hound CI are green; both review threads are resolved; CodeRabbit's full review of this head completed with no new actionable findings (pm-csv#141 issuecomment-5874421212, check 'Review completed'). Sourcery budget exhausted (quota notice, not a review); Gemini not active. The whole-source statement coverage gap remains separately open under pm-csv-rssj."
   "2026-10-02T18:44:06.945Z",pi-land-a,"Cubic review (new head 5723475) found the README still stated the development and release gates are pinned to pm CLI/SDK 2026.8.21 while package.json pins 2026.9.28. Fixed test-first: test/packaging.test.ts now asserts the README's stated gate version equals the exact dev pin (the new test failed before the README correction), README states 2026.9.28, and the full npm run release:check passed 235/235 tests with the coverage gate met, zero production audit findings, and changelog:check clean. The item intentionally remains in_progress: per the landing workflow the orchestrator closes certification items after merge, so it is not closed in this PR."
+  "2026-10-02T22:57:49.872Z",codex-sol,"Restart codex-sol: retained pushed head 381e7e7, existing README-pin fix and all four resolved threads preserved. Rebase current main, rerun full release:check/strict CI health/Bun install. Current-state evidence will report actual test totals and measured scope; whole-source/statement gap remains pm-csv-rssj. No item closure or publication."
+  "2026-10-02T23:09:27.536Z",codex-sol,"All-dependency npm audit reproduced one high development-only brace-expansion advisory at installed 5.0.9 via minimatch/ESLint. No matching tracker item. After the current serialized release gate completes, update only that allowed transitive range to a fixed patch and rerun npm ci plus release:check/Bun/audit. Exact PM tool pins remain unchanged. Linked packaging tests and strict CI health/validate pass."
+  "2026-10-02T23:23:10.632Z",codex-sol,"npm ci and npm run release:check PASS: 235/235 tests, zero skipped, 100% measured lines/branches/functions across two loaded sources, 71 documented declarations. Packed npm-current, Bun-current and npm-minimum CSV import/export scenarios pass; strict CI health and pm validate pass; linked packaging tests pass 7/7; bun install --no-save passes. Updated only transitive brace-expansion 5.0.9 to 5.0.12 after red all-dependency audit; final audit has zero vulnerabilities. Exact PM pins unchanged. Independent statements and seven executable scripts remain outside the receipt in open pm-csv-rssj. History prefixes preserved; final-head CI/review remain separate, no closure or publication."
 notes[1]{created_at,author,text}:
   "2026-09-28T15:38:19.824Z",codex,"CLI 2026.9.28 clears extension host skew; strict health passes with one stale-item advisory. Exact-head npm run release:check passed: 234/234 tests, zero skips, 100% lines/branches/functions over 2 measured sources, 71/71 docstrings over 9 files, zero production audit findings, changelog/attestation/date checks, packed npm-current/Bun-current/npm-minimum CSV create-import-export receipts. Whole-source and statement coverage remain open in pm-csv-rssj."
-files[2]{path,scope,note}:
-  package.json,project,Exact CLI development pin
-  package-lock.json,project,Resolved CLI and SDK dependency graph
-tests[1]{command,path,scope,provenance{author,created_at,source_kind,source_ref}}:
-  "npm run release:check",package.json,project,codex,"2026-09-28T15:38:19.824Z",local_mutation,chore/pm-csv-cli-sdk-2026-9-28
+files[3]:
+  - path: package-lock.json
+    scope: project
+    note: Resolved CLI and SDK dependency graph
+  - path: package.json
+    scope: project
+    note: Exact CLI development pin
+  - path: test/packaging.test.ts
+    scope: project
+tests[2]:
+  - command: "npm run release:check"
+    path: package.json
+    scope: project
+    provenance:
+      author: codex
+      created_at: "2026-09-28T15:38:19.824Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-cli-sdk-2026-9-28
+  - command: node --test test/packaging.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-02T22:57:51.894Z"
+      source_kind: local_mutation
+      source_ref: land-141
+docs[1]{path,scope}:
+  README.md,project
 body: ""
