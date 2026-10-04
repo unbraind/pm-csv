@@ -67,7 +67,7 @@ function stubPm(name: string, status: number, body = ""): string {
 
 /** Run the launcher as npm's `prepare` hook would: as the entry point, from `cwd`, with `path` as PATH. */
 function prepare(cwd: string, path: string): SpawnSyncReturns<string> {
-  return spawnSync(process.execPath, [launcher], { cwd, encoding: "utf8", env: { ...process.env, PATH: path } });
+  return spawnSync(process.execPath, [launcher], { cwd, encoding: "utf8", env: { ...process.env, PATH: path, NODE_PATH: "" } });
 }
 
 /** The merge drivers registered in a checkout's LOCAL Git config, by name. */
@@ -122,7 +122,7 @@ test("an incomplete pm-ops directory fails instead of reporting an omit-dev inst
 test("a dangling pm-ops link fails instead of reporting an omit-dev install", () => {
   const directory = checkout("dangling", "absent");
   mkdirSync(join(directory, "node_modules"));
-  symlinkSync(join(directory, "missing-pm-ops"), join(directory, "node_modules", "pm-ops"), "dir");
+  symlinkSync(join(directory, "missing-pm-ops"), join(directory, "node_modules", "pm-ops"), "junction");
   const result = prepare(directory, hostPath);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
@@ -133,7 +133,7 @@ test("a dangling pm-ops link fails instead of reporting an omit-dev install", ()
 test("a looping lookup path preserves the original installer error", () => {
   const directory = checkout("lookup-loop", "absent");
   const lookup = join(directory, "lookup");
-  symlinkSync(lookup, lookup, "dir");
+  symlinkSync(lookup, lookup, "junction");
   const result = spawnSync(process.execPath, [launcher], {
     cwd: directory,
     encoding: "utf8",
