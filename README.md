@@ -5,7 +5,7 @@ CSV importer and exporter for [pm-cli](https://github.com/unbraind/pm-cli).
 Import pm items from a CSV file, export them back out, or wire up a programmatic `csv-import` importer — all with zero external runtime dependencies.
 
 The extension requires pm CLI 2026.8.20 or newer. Its development and release
-gates are pinned to pm CLI/SDK 2026.8.21 so host behavior stays reproducible.
+gates are pinned to pm CLI/SDK 2026.9.28 so host behavior stays reproducible.
 
 ---
 
