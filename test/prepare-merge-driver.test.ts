@@ -109,6 +109,42 @@ test("a pm-ops too old to export the launcher entry fails the install", posixOnl
   assert.match(result.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
 });
 
+test("an incomplete pm-ops directory fails instead of reporting an omit-dev install", posixOnly, () => {
+  const directory = checkout("incomplete", "absent");
+  mkdirSync(join(directory, "node_modules", "pm-ops"), { recursive: true });
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+  assert.deepEqual(registeredDrivers(directory), []);
+});
+
+test("a dangling pm-ops link fails instead of reporting an omit-dev install", posixOnly, () => {
+  const directory = checkout("dangling", "absent");
+  mkdirSync(join(directory, "node_modules"));
+  symlinkSync(join(directory, "missing-pm-ops"), join(directory, "node_modules", "pm-ops"), "dir");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+  assert.deepEqual(registeredDrivers(directory), []);
+});
+
+test("a looping lookup path preserves the original installer error", posixOnly, () => {
+  const directory = checkout("lookup-loop", "absent");
+  const lookup = join(directory, "lookup");
+  symlinkSync(lookup, lookup, "dir");
+  const result = spawnSync(process.execPath, [launcher], {
+    cwd: directory,
+    encoding: "utf8",
+    env: { ...process.env, PATH: hostPath, NODE_PATH: lookup },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install|ELOOP|lstat/);
+  assert.deepEqual(registeredDrivers(directory), []);
+});
+
 test("a failing pm merge install fails the install with the same status", posixOnly, () => {
   const result = prepare(checkout("failing-pm", "pinned"), stubPm("failing-pm", 7));
   assert.equal(result.status, 7, result.stderr);
