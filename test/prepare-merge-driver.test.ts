@@ -109,7 +109,7 @@ test("a pm-ops too old to export the launcher entry fails the install", posixOnl
   assert.match(result.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
 });
 
-test("an incomplete pm-ops directory fails instead of reporting an omit-dev install", posixOnly, () => {
+test("an incomplete pm-ops directory fails instead of reporting an omit-dev install", () => {
   const directory = checkout("incomplete", "absent");
   mkdirSync(join(directory, "node_modules", "pm-ops"), { recursive: true });
   const result = prepare(directory, hostPath);
@@ -119,7 +119,7 @@ test("an incomplete pm-ops directory fails instead of reporting an omit-dev inst
   assert.deepEqual(registeredDrivers(directory), []);
 });
 
-test("a dangling pm-ops link fails instead of reporting an omit-dev install", posixOnly, () => {
+test("a dangling pm-ops link fails instead of reporting an omit-dev install", () => {
   const directory = checkout("dangling", "absent");
   mkdirSync(join(directory, "node_modules"));
   symlinkSync(join(directory, "missing-pm-ops"), join(directory, "node_modules", "pm-ops"), "dir");
@@ -130,7 +130,7 @@ test("a dangling pm-ops link fails instead of reporting an omit-dev install", po
   assert.deepEqual(registeredDrivers(directory), []);
 });
 
-test("a looping lookup path preserves the original installer error", posixOnly, () => {
+test("a looping lookup path preserves the original installer error", () => {
   const directory = checkout("lookup-loop", "absent");
   const lookup = join(directory, "lookup");
   symlinkSync(lookup, lookup, "dir");
