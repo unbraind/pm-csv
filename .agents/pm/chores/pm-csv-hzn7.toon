@@ -1,0 +1,91 @@
+id: pm-csv-hzn7
+title: Certify pm-csv on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates
+description: "Bump the exact development pin @unbrained/pm-cli to 2026.10.4 together with pm-ops and pm-changelog latest, take over the open Dependabot dependency updates (@types/node, jscpd, eslint) and the pinned codeql-action SHA group, keep the canonical pm-ops merge-driver launcher byte-identical, and certify with the full release gate plus isolated real-tracker dogfooding on npm and Bun."
+type: Chore
+status: in_progress
+priority: 2
+tags[4]: cli,dependencies,release-readiness,sdk
+created_at: "2026-10-04T08:43:00.128Z"
+updated_at: "2026-10-04T11:22:56.589Z"
+author: pi-glm
+acceptance_criteria: "npm run release:check passes with 100/100/100 coverage and clean npm audit including dev; pm health with the repo-pinned 2026.10.4 binary reports no gate-failing findings; packed tarball passes real-tracker import/export scenarios via npx @unbrained/pm-cli@2026.10.4 and bunx; pm-github managed extension installed with a read-only sync preview only"
+actual_result: "Resumed candidate rebased onto main release 7473779. Every devDependency exact; CLI/ops/changelog 2026.10.4, resolved Dependabot versions retained. Canonical launcher unchanged; 3 Greptile regression cases added. Clean npm ci and full release:check PASS: 238/238, zero skipped, 100/100/100 measured lines/branches/functions (2 sources). npm audit and audit --omit=dev: 0. Packed current-version tarball npx/bunx real tracker dogfood passed: 107 original exports, 108 after 1 isolated create; repeated imports update 1 with no duplicate. pm health ok, one prior stale-item advisory; read-only pm-github preview wouldSync 1. Pending reviewer availability is missing evidence; leave open."
+comments[11]{created_at,author,text}:
+  "2026-10-04T08:43:08.758Z",pi-glm,"Starting: worktree chore/pm-csv-pm-cli-2026-10-4 at c135b94. Plan: bump @unbrained/pm-cli 2026.9.28->2026.10.4, pm-ops 2026.9.23->2026.10.4, pm-changelog 2026.9.23->2026.9.25; consolidate Dependabot #137 (eslint 10.11.0), #142 (jscpd 5.4.0), #143 (pm-ops), #144 (@types/node 26.6.3), #145 (pm-changelog), #140 (codeql-action SHA 1c5b6756...); re-copy canonical prepare-merge-driver.ts from pm-ops 2026.10.4; full release gate + dogfood on npm/bun."
+  "2026-10-04T09:13:17.909Z",pi-glm,"Real-tracker dogfood PASS. Packed pm-csv-2026.9.26.tgz installed into a scratch copy of this repo's real .agents/pm (107 items). Registered via pm package install ./node_modules/pm-csv with pm-cli 2026.10.4 (capabilities commands/importers/schema). npm path (npx -y @unbrained/pm-cli@2026.10.4): csv export -> 107 items; csv export --status open -> 6; csv validate -> 107 rows clean; csv import -> imported 1; csv import --key title -> updated 1 (upsert verified idempotent, no duplicate). bun path (bunx @unbrained/pm-cli@2026.10.4): csv export -> 109 items; csv validate -> clean; csv import --key title --source bunx-cert -> updated 1. All commands exit 0 with correct real data round-trip. Scratch dir deleted after evidence capture."
+  "2026-10-04T09:14:03.016Z",pi-glm,"pm-github installed as managed project extension at latest npm 2026.9.26 (.agents/pm/extensions/.managed-extensions.json, capabilities commands/hooks/importers/preflight/schema/search). Read-only preview against unbraind/pm-csv: pm github validate --repo unbraind/pm-csv -> ok (token via gh CLI, repo HTTP 200, quota 4952/5000); pm github export --repo unbraind/pm-csv --dry-run -> plan only, writes nothing (create/update actions listed for real items incl. linked gh:unbraind/pm-csv#72); pm github sync --dry-run --repo unbraind/pm-csv -> wouldSync 1, no mutation. No issues created/modified, no scheduled sync enabled."
+  "2026-10-04T10:19:39.515Z",pi-glm,"Correction: pm-github 2026.10.4 was published mid-certification; the managed project extension was upgraded from 2026.9.26 to 2026.10.4 (latest npm). Re-ran read-only previews against unbraind/pm-csv: validate ok (HTTP 200, quota 4871/5000), sync --dry-run -> wouldSync 1, no mutation. Still no issues created/modified, no scheduled sync."
+  "2026-10-04T10:48:42.360Z",codex-sol,"Resumed after provider quota exhaustion. Re-read PR #146, existing author comments/reactions and Greptile thread. Rebased onto origin/main 7473779; addressing missing broken-install/lookup regression fixtures, exact devDependency pins, and newly published pm-changelog 2026.10.4 before rerunning the locked full gate."
+  "2026-10-04T10:50:43.600Z",codex-sol,"Greptile regression request verified: 9/9 launcher tests pass, zero skips, including incomplete package directory, dangling pm-ops symlink, and looping NODE_PATH. All assert a nonzero result and preserve the original installer diagnostic; canonical launcher is unchanged."
+  "2026-10-04T10:52:58.812Z",codex-sol,All devDependencies now use exact installed versions; pm-changelog upgraded to latest published 2026.10.4. The linked launcher run passed 9/9 using explicit tracker context (none requires an isolated/snapshot source mode; reserved PM_PATH env clearing was correctly rejected). No gate changes.
+  "2026-10-04T10:57:36.785Z",codex-sol,"Resumption validation PASS after rebase and exact pins: clean npm ci; flock-serialized npm run release:check passed 238/238 tests, 0 skipped, measured lines/branches/functions 100/100/100 across the existing two-source gate. Audits all/prod each 0. Packed pm-csv-2026.10.4.tgz installed into a fresh copy of this real tracker; npx -y @unbrained/pm-cli@2026.10.4 csv export --output real.csv exported 107; csv validate real.csv clean; csv import input.csv --key title created 1 then updated 1. bunx @unbrained/pm-cli@2026.10.4 csv export --output real-bun.csv exported 108; validate clean; import --key title updated 1. Scratch deleted. npx pm health ok with one prior-item stale advisory. Managed pm-github 2026.10.4 sync --dry-run --repo unbraind/pm-csv: wouldSync 1, no writes. Review availability remains separate from green gates."
+  "2026-10-04T10:59:48.449Z",codex-sol,"The three new regression fixtures run unconditionally; no new platform skips were added. Rechecked 9/9 launcher tests, zero skips. Linux full-gate behavior and the validated canonical launcher remain unchanged."
+  "2026-10-04T11:10:15.475Z",codex-sol,"Review round 2: Greptile found Windows symbolic-link privilege requirements in the new unconditional fixtures. Use symlinkSync type junction with absolute targets, which Node applies only on Windows (ignored on POSIX), retaining all scenarios without new skips. Linux launcher suite still passes 9/9; a Windows runner is unavailable. Canonical launcher remains unchanged; rerun the full locked release gate before push."
+  "2026-10-04T11:22:55.937Z",codex-sol,"Review correction validation PASS: full flock-serialized npm run release:check re-run after portable junction and ambient NODE_PATH isolation changes: 238/238 tests, zero skips, measured 100/100/100 thresholds met, audits/packed current npm/Bun/minimum-host acceptance/changelog/attestation/date gates green. Linked hostile run env NODE_PATH=\"$PWD/node_modules\" node --test test/prepare-merge-driver.test.ts also passes 9/9. Windows execution is not available; junction fixture API follows https://nodejs.org/api/fs.html#fssymlinksynctarget-path-type. Production package unchanged; real-tracker dogfood from this certification remains applicable."
+files[7]:
+  - path: .agents/pm/extensions/.managed-extensions.json
+    scope: project
+    note: pm-github 2026.9.26 managed extension registration
+  - path: .github/workflows/codeql.yml
+    scope: project
+    note: codeql-action pinned SHA group 1c5b6756
+  - path: package-lock.json
+    scope: project
+    note: Resolved dependency graph with consolidated Dependabot bumps
+  - path: package.json
+    scope: project
+    note: Exact CLI/SDK/ops/changelog pins
+  - path: README.md
+    scope: project
+    note: Documented gate host pin raised to 2026.10.4
+  - path: scripts/prepare-merge-driver.ts
+    scope: project
+    note: Canonical pm-ops 2026.10.4 launcher recopied byte-for-byte
+  - path: test/prepare-merge-driver.test.ts
+    scope: project
+tests[6]:
+  - command: npx -y @unbrained/pm-cli@2026.10.4 csv export --output dogfood-export.csv
+    scope: project
+    provenance:
+      author: pi-glm
+      created_at: "2026-10-04T09:13:17.786Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: bunx @unbrained/pm-cli@2026.10.4 csv import dogfood-import.csv --key title --source bunx-cert
+    scope: project
+    provenance:
+      author: pi-glm
+      created_at: "2026-10-04T09:13:18.328Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: "npm run release:check"
+    scope: project
+    provenance:
+      author: pi-glm
+      created_at: "2026-10-04T09:14:13.739Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: npx pm health
+    scope: project
+    provenance:
+      author: pi-glm
+      created_at: "2026-10-04T09:14:15.089Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: node --test test/prepare-merge-driver.test.ts
+    scope: project
+    pm_context_mode: none
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-04T10:50:41.998Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: "env NODE_PATH=\"$PWD/node_modules\" node --test test/prepare-merge-driver.test.ts"
+    scope: project
+    pm_context_mode: tracker
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-04T11:19:02.676Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-csv-pm-cli-2026-10-4
+body: ""
