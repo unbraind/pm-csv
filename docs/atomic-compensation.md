@@ -60,7 +60,8 @@ Validation uses real disposable trackers and the real SDK coordinator:
 - Every coordinator transition and the before-apply, after-apply, and
   after-restore journal gaps is interrupted and restarted.
 - Transparent subprocess wrappers fail before/after update and close. A real
-  SIGKILL between update and close proves process restart recovery.
+  SIGKILL between update and close proves process restart recovery. A real
+  failed create with suppressed stderr still compensates the preceding update.
 - An independent subprocess edits the item between update and compensation;
   restoration refuses on both the initial attempt and restart.
 - Duplicate existing keys compensate in reverse order; legacy step ids,

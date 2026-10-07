@@ -227,8 +227,8 @@ test("missing, incompatible or tampered prior records refuse restoration", async
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-/** Run a built importer in another process with transparent subprocess failures. */
-function faultedChild(root: string, file: string, mode: string) {
+/** Install transparent failure injection that always delegates normal PM writes. */
+function installFaultPm(root: string) {
   const bin = join(root, "fault-bin");
   mkdirSync(bin);
   const realPm = spawnSync("sh", ["-c", "command -v pm"], { encoding: "utf8" }).stdout.trim();
@@ -241,11 +241,18 @@ const mode = process.env.CSV_FAULT_MODE;
 if (command === 'close' && mode === 'crash-before-close') { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
 if (mode === command + '-before') { console.error('Injected failure ' + mode); process.exit(1); }
 const r = spawnSync(process.env.CSV_REAL_PM, args, { encoding: 'utf8' });
+if (command === 'create' && mode === 'create-silent') { process.stdout.write(r.stdout || ''); process.exit(r.status ?? 1); }
 process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || '');
 if (mode === command + '-after') { console.error('Injected failure ' + mode); process.exit(1); }
 process.exit(r.status ?? 1);
 `);
   chmodSync(wrapper, 0o755);
+  return { bin, realPm };
+}
+
+/** Run a built importer in another process with transparent subprocess failures. */
+function faultedChild(root: string, file: string, mode: string) {
+  const { bin, realPm } = installFaultPm(root);
   const script = `
 import extension from './dist/index.js';
 import { createExtensionTestHarness } from '@unbrained/pm-cli/sdk/testing';
@@ -263,6 +270,27 @@ finally { await harness.deactivate(); }
     timeout: 60_000,
   });
 }
+
+test("silent real create failure still restores a preceding update exactly", async () => {
+  const f = await fixture();
+  const { bin, realPm } = installFaultPm(f.root);
+  const previous = { PATH: process.env.PATH, CSV_REAL_PM: process.env.CSV_REAL_PM, CSV_FAULT_MODE: process.env.CSV_FAULT_MODE };
+  process.env.PATH = `${bin}${delimiter}${previous.PATH}`;
+  process.env.CSV_REAL_PM = realPm;
+  process.env.CSV_FAULT_MODE = "create-silent";
+  try {
+    await assert.rejects(importBatch(f.root, f.file), /pm create failed/);
+    assert.deepEqual(domain(await readUpdateDocument(f.root, f.id)), domain(f.before));
+    const history = await readHistoryEntries(getHistoryPath(f.root, f.id), f.id);
+    assert.equal(history.at(-1)?.message, `${f.marker}:compensate`);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 for (const mode of ["update-before", "update-after", "close-before", "close-after"]) {
   test(`built package subprocess failure ${mode} restores exact prior state`, async () => {
