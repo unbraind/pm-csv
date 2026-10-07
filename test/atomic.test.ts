@@ -210,6 +210,8 @@ function realPmPath(): string {
  */
 function installFakePm(): () => void {
   const bin = mkdtempSync(join(tmpdir(), "pm-csv-fakepm-"));
+  // Fix module semantics locally; a temporary-directory ancestor may be ESM.
+  writeFileSync(join(bin, "package.json"), JSON.stringify({ type: "commonjs" }));
   // No template literals / ${} in the wrapper source on purpose, so it embeds
   // cleanly in this template literal without escaping.
   const wrapper = [
@@ -734,7 +736,7 @@ test("--atomic duplicate-title partial resume: only row 0 tagged => resume creat
   }
 });
 
-test("--atomic --key upsert mid-import failure: created rows compensated, pre-existing updated rows NOT rolled back", async () => {
+test("--atomic --key upsert mid-import failure: created rows compensated, pre-existing prior values restored", async () => {
   const root = freshTracker();
   // Pre-create an item carrying a csv-key tag so it is matched as an UPDATE.
   const preR = spawnSync(
@@ -758,17 +760,17 @@ test("--atomic --key upsert mid-import failure: created rows compensated, pre-ex
   try {
     const { error } = await runImport(root, file, { atomic: true, key: "key" });
     assert.ok(error, "atomic upsert with a failing row should error");
-    assert.match(error!.message, /pre-existing item updates are intentionally not reverted/i);
+    assert.match(error!.message, /pre-existing updates restore captured prior values/i);
     assert.match(error!.message, /cannot claim a clean tracker/i);
     assert.match(error!.message, /may remain.*reconcile/is);
 
     const items = listItems(root);
-    // The pre-existing updated item must remain OPEN (update not reverted) and
-    // retain the updated priority (3). Compensation does NOT roll back updates.
+    // Compensation restores the pre-existing item without closing it.
     const updated = items.find((i) => i.id === preId);
     assert.ok(updated, "the pre-existing updated item still exists");
-    assert.equal(updated!.status, "open", "pre-existing updated item is NOT rolled back (still open)");
-    assert.equal(updated!.priority, 3, "pre-existing updated item retains the updated priority");
+    assert.equal(updated!.status, "open", "pre-existing item restores its open status");
+    assert.equal(updated!.priority, 1, "pre-existing updated item restores its prior priority");
+    assert.equal(updated!.title, "Pre Existing", "pre-existing updated item restores its prior title");
 
     // The created row (New One) was compensated (closed); the bad row was never
     // created. No committed (open) items from this import remain.

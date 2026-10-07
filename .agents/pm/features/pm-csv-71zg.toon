@@ -2,13 +2,59 @@ id: pm-csv-71zg
 title: Capture prior field values in the transaction record so a failed update can be truly compensated
 description: "The atomic import compensates creates by closing them, which is a real inverse: the item did not exist before, so closing it restores the prior state. An update has no inverse without the prior field values, and this extension does not capture them, so the atomic path deliberately skips update compensation. Writing some other value over a failed update would not be a rollback; it would be a second unreviewed mutation on top of a failed one, which on a partially applied import is a worse outcome than a loud identified failure. Making update compensation sound requires capturing the prior field values into the transaction record before each update and compensating from that record. That changes the transaction record format, so it is a real capability with real cost rather than part of a buffer overrun fix. Raised by a Greptile review of PR 59, where the narrower guarantee that no mutation is left un-identified was accepted as the honest ceiling for that PR."
 type: Feature
-status: open
+status: in_progress
 priority: 2
 tags[4]: atomic,csv,rollback,transaction
 created_at: "2026-08-09T00:13:19.589Z"
-updated_at: "2026-08-20T19:48:36.027Z"
+updated_at: "2026-10-07T22:42:50.404Z"
 author: claude
 acceptance_criteria: "The transaction record stores the prior values of every field an update will modify, written before the update subprocess runs; compensation restores those values rather than writing an invented value; the record format change is versioned so an in-flight transaction written by an older version is detected and refused rather than mis-restored; a regression test drives a mid-import failure after an update and asserts the pre-import field values are restored exactly"
+comments[9]{created_at,author,text}:
+  "2026-10-07T21:41:37.431Z",codex-sol,"Built-package baseline in a scratch pm project: a keyed row changed Original (priority 1) to Changed (priority 3), then a new row with priority 99 failed. After coordinator compensation the original item still had Changed/3. Acceptance: capture a versioned full prior document and immutable history boundary before each update; restore exact absent/empty and collection state under the item lock, refuse intervening non-transaction history, and resume interrupted forward/compensation phases idempotently. Existing item references and pm-csv-5si5 evidence were read; no linked docs, files, or blocking dependencies were listed."
+  "2026-10-07T21:48:53.248Z",codex-sol,"Initial real-tracker suite passed 19/19 scenarios: exact prior-state recovery, all coordinator transitions, journal/mutation gaps, duplicate existing keys, legacy plan refusal, record validation, and concurrent subprocess writer refusal. Added immutable update/close inspection for the terminal subprocess gap and a real SIGKILL restart test. The SDK bulk restore helper lacks a concurrent-writer guard, so compensation uses its public mutateItem primitive with the guard inside the item lock. No SDK issue was filed."
+  "2026-10-07T21:57:55.152Z",codex-sol,"Exact stored-value checks exposed SDK normalization: empty assignee strings and empty dependency arrays become absent in canonical reads/writes. The record now saves both canonical prior state and original representation/format. Compensation restores canonical state through mutateItem, then uses SDK item lock, atomic file write, and append-only history primitives to preserve original physical fields at the same verified canonical hash. Its final completion receipt follows that write. Seven focused built-package, empty-representation, phase-crash, and writer-gap scenarios passed; a real SIGKILL between update and close also passed. No SDK issue was filed."
+  "2026-10-07T22:04:45.050Z",codex-sol,"Behavioral revert proof: an isolated copy retained the same index, tests and SDK, built successfully, and replaced only compensateUpdate's body with its previous no-op behavior. All three selected tests failed on behavioral assertions (two built-package exact-state cases retained Changed/priority 3/type Feature/lifecycle changes; the independent-writer case lacked the required refusal). The current implementation passed the focused exact-state and writer checks. Existing subprocess fixtures were given a local CommonJS package boundary so an ancestor ESM setting cannot prevent their failure injections from loading."
+  "2026-10-07T22:25:21.524Z",codex-sol,"The PM-linked suite passed 32/32 real-tracker scenarios. A further red regression showed restart could lose the update target after another writer replaced all CSV tags. Versioned step identities now bind operation, target id, and row; replay recovers those immutable bindings from the SDK journal. The removed-tags scenario, legacy refusal, keyed resume, rollback retry, and closed-row resume passed 5/5 focused checks. npm/Bun/current and npm/minimum packed acceptance also passed. SDK gaps handled locally: canonical normalization of empty fields and bulk restore without a concurrent-writer guard."
+  "2026-10-07T22:29:06.062Z",codex-sol,"Final behavioral revert proof uses identical tests and importer with only compensateUpdate restored to its former no-op behavior. The isolated package compiles, and all four selected tests fail on assertions: unset and empty built-package prior-state restoration, independent body writer refusal, and tag-removal writer refusal. No load failure counts as evidence. Durable step identities now bind the original create/update role and update item id; README and design documentation explain replay after mutable tags disappear. The linked tag-removal test passed through pm test on the current implementation."
+  "2026-10-07T22:29:28.976Z",codex-sol,"The full release suite passed all 271 tests with 100% branches and functions. The first line report saw two extra comment lines appended while its source module was already loaded, so that in-flight run failed the unchanged 100% line threshold. Source will now remain frozen for npm and Bun release verification on the committed revision; this failed gate is not approval. Packed acceptance passed npm current, Bun current, and npm minimum peer scenarios. SDK gaps handled locally: canonical empty-value normalization and bulk restore lacking an intervening-writer guard. No SDK issue was filed."
+  "2026-10-07T22:40:40.335Z",codex-sol,"The committed npm release gate passed completely: 271 tests and 100% configured line/branch/function coverage, zero production vulnerabilities, and all three packed scenarios. Bun passed all 271 assertions but exposed nondeterministic coverage of the existing silent create-error fallback (99.88% branches). Added a transparent wrapper that delegates the real invalid create and suppresses only its stderr; the scenario must still restore the preceding update exactly and report pm create failed. Thresholds are unchanged. Both release gates will rerun on the final revision."
+  "2026-10-07T22:42:47.508Z",codex-sol,"The silent real-create failure regression passed directly and via its PM-linked command. Lint, duplicate and docstring checks passed. Refreshed final behavioral revert: the isolated package compiles cleanly with identical importer/tests and only the compensation body replaced by its former no-op; all four selected tests fail on assertions. The implementation and journal design are unchanged. Final npm and Bun release verification will use the new frozen head, with the extra deterministic failure scenario included."
 notes[1]{created_at,author,text}:
   "2026-08-20T19:48:35.990Z",codex,"PR 73 Greptile review reconfirmed this open capability gap: aggregate atomic failures can only make a conservative reconciliation claim until prior update state is journaled and restored. pm-csv-5si5 fixes the misleading receipt without pretending this feature is complete."
+files[8]{path,scope}:
+  .gitignore,project
+  atomic-update.ts,project
+  index.ts,project
+  package-lock.json,project
+  package.json,project
+  test/atomic-update.test.ts,project
+  test/atomic.test.ts,project
+  test/packaging.test.ts,project
+tests[3]:
+  - command: npm run build && node --test test/atomic-update.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T21:48:58.060Z"
+      source_kind: local_mutation
+      source_ref: feat/compensating-prior-values
+  - command: "node --test --test-name-pattern=\"concurrent writer removing CSV tags\" test/atomic-update.test.ts"
+    scope: project
+    timeout_seconds: 300
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T22:25:22.766Z"
+      source_kind: local_mutation
+      source_ref: feat/compensating-prior-values
+  - command: "node --test --test-name-pattern=\"silent real create failure\" test/atomic-update.test.ts"
+    scope: project
+    timeout_seconds: 300
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T22:41:01.466Z"
+      source_kind: local_mutation
+      source_ref: feat/compensating-prior-values
+docs[2]{path,scope}:
+  docs/atomic-compensation.md,project
+  README.md,project
 body: ""
