@@ -1,9 +1,11 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
-import { readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { readFileSync, writeFileSync, createReadStream, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { certifyCompleteListResult, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
+
+import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
 import type {
   WorkspaceTransactionStep,
@@ -1067,8 +1069,9 @@ interface CsvImportOptions {
   /**
    * Import under one workspace writer-locked, crash-recoverable transaction
    * (pm-cli >= 2026.7.19 `commitWorkspaceTransaction`). On failure the
-   * coordinator attempts reverse-order, best-effort create compensation;
-   * pre-existing item updates are intentionally not reverted. An interrupted
+   * coordinator attempts reverse-order compensation: creates are closed on a
+   * best-effort basis and updates restore their captured prior state unless
+   * another writer intervened. An interrupted
    * run resumes from the durable journal, while a failed compensation remains
    * transaction-marked so an operator can inspect and reconcile it before a
    * retry. Incompatible with `--stream` (an unbounded stream cannot be one
@@ -1541,19 +1544,47 @@ export function atomicTransactionId(
   return deriveTransactionId(resolve(filePath), fingerprintContent(rawHeaders, dataRows));
 }
 
+/** Bind a CSV step to its format, operation, target, and original row. */
+function atomicStepId(rowIndex: number, existingId: string | undefined): string {
+  const operation = existingId ? `update-${existingId}` : "create";
+  return `csv-import-v${UPDATE_COMPENSATION_VERSION}-${operation}-row-${rowIndex}`;
+}
+
+/**
+ * Recover the original plan's update targets and create roles from SDK journal
+ * step identities. Mutable CSV key tags cannot retarget an interrupted update
+ * or turn a previously planned create into an update. Incompatible identities
+ * refuse replay before any mutation; the SDK validates the remaining journal.
+ */
+function loadAtomicBindings(pmRoot: string, transactionId: string): Map<number, string | undefined> {
+  const bindings = new Map<number, string | undefined>();
+  const journalPath = resolve(pmRoot, "transactions", "sdk", `${transactionId}.json`);
+  if (!existsSync(journalPath)) return bindings;
+  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { stepIds: string[] };
+  const pattern = new RegExp(String.raw`^csv-import-v${UPDATE_COMPENSATION_VERSION}-(?:create|update-(.+))-row-(\d+)$`);
+  for (const id of journal.stepIds) {
+    const match = pattern.exec(id);
+    if (!match) throw new Error(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
+    bindings.set(Number(match[2]), match[1]);
+  }
+  return bindings;
+}
+
 /**
  * Load every item stamped with this transaction's per-row ownership marker
  * (`csv-txrow:<transactionId>#<rowIndex>`) and build a single lookup the step
  * `inspect()` uses to detect rows already applied by a prior (interrupted) run:
  *   - byRowIndex: rowIndex -> item id
  *
- * The per-row marker is the source of truth for resume/compensation: it makes
+ * For creates, the per-row marker is the source of truth for resume: it makes
  * matching per-row-precise, so a CSV with duplicate titles or duplicate keys
  * can never trick inspect() into skipping the wrong row. The batch-level
  * `csv-tx:<transactionId>` marker is also stamped (handy for scanning) but is
  * NOT used for matching. Only items carrying a per-row marker for THIS
  * transaction are included, so pre-existing items this transaction never
- * touched are never mistaken for already-applied steps.
+ * touched are never mistaken for already-applied steps. Updates additionally
+ * inspect immutable history and bind their targets through journal step ids,
+ * so removing mutable tags cannot retarget an interrupted update.
  *
  * Presence of the row marker — NOT item status — is the applied signal. A row
  * whose CSV `status` is `closed`/`canceled` is legitimately imported as a
@@ -1746,8 +1777,8 @@ function compensateCreate(
  * {@link ImportResult} as the non-atomic path is returned (counts derived from
  * the committed step results). On failure the coordinator attempts reverse-
  * order compensation, but callers receive a conservative reconciliation
- * warning because create cleanup is best-effort and updates to pre-existing
- * items are intentionally not reverted. An interrupted run resumes from the
+ * warning because create cleanup is best-effort and concurrent writers can
+ * prevent safe update compensation. An interrupted run resumes from the
  * durable journal (inspect() skips already applied rows).
  */
 async function importCSVAtomic(
@@ -1790,6 +1821,7 @@ async function importCSVAtomic(
 
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
+  const bindings = loadAtomicBindings(pmRoot, transactionId);
   const applied = loadAppliedByTransaction(pmRoot, transactionId);
   const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
   // In-batch duplicate-KEY guard: keys already claimed by an earlier planned
@@ -1842,7 +1874,8 @@ async function importCSVAtomic(
       result.skipped++;
       continue;
     }
-    const existingId = normalizedKey ? keyIndex.get(normalizedKey) : undefined;
+    const existingId = bindings.has(rowIndex) ? bindings.get(rowIndex)
+      : normalizedKey ? keyIndex.get(normalizedKey) : undefined;
     if (normalizedKey && !existingId) claimedKeys.set(normalizedKey, rowIndex);
     planned.push({ rowIndex, lineNo, parsed, keyValue, existingId, isUpdate: Boolean(existingId) });
   }
@@ -1852,9 +1885,8 @@ async function importCSVAtomic(
   //     path (parity) plus the csv-tx batch marker AND the per-row marker;
   //     compensate() closes the created id.
   //   - update (--key match): apply() updates the pre-existing item and stamps
-  //     both markers; compensate() is a no-op (an arbitrary update cannot be
-  //     safely reverted without capturing prior state; best-effort
-  //     compensation is therefore scoped to creates).
+  //     both markers; prepareCompensation captures prior state before apply;
+  //     compensate restores it under the item lock after a history check.
   //
   // Resume/compensation matching is per-row-precise via the per-row marker
   // (csv-txrow:<transactionId>#<rowIndex>), so duplicate titles or duplicate
@@ -1866,11 +1898,14 @@ async function importCSVAtomic(
   // left over from a prior interrupted run (which the pre-run `applied` lookup
   // already detects).
   const steps: WorkspaceTransactionStep[] = planned.map((row) => {
-    const stepId = `csv-import-row-${row.rowIndex}`;
+    const stepId = atomicStepId(row.rowIndex, row.existingId);
     const rowTag = rowTagFor(row.rowIndex);
     // Set by apply() in this run; undefined before that or on a fresh resume.
     let appliedId: string | undefined;
     const inspect = async (): Promise<WorkspaceTransactionStepInspection> => {
+      if (row.isUpdate) {
+        return inspectUpdate(pmRoot, row.existingId!, rowTag, row.parsed.status === "closed" || row.parsed.status === "canceled");
+      }
       // A step applied earlier in THIS run (apply() captured the id).
       if (appliedId) return { state: "applied", result: appliedId };
       // A prior interrupted run already applied this row: an item carries this
@@ -1883,7 +1918,7 @@ async function importCSVAtomic(
     const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => {
       const ownershipTags = [ownershipTag, rowTag];
       if (row.isUpdate) {
-        upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, ownershipTags);
+        upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, ownershipTags, `${rowTag}:apply`);
         appliedId = row.existingId!;
         return row.existingId!;
       }
@@ -1897,11 +1932,13 @@ async function importCSVAtomic(
       appliedId = newId;
       return newId;
     };
-    const prepareCompensation = async (): Promise<WorkspaceTransactionJsonValue | undefined> => undefined;
-    const compensate = async (): Promise<void> => {
-      // Only creates are compensated (closed); updates to pre-existing items
-      // are intentionally left in place (documented limitation).
-      if (row.isUpdate) return;
+    const prepareCompensation = async (): Promise<WorkspaceTransactionJsonValue | undefined> =>
+      row.isUpdate ? captureUpdateCompensation(pmRoot, row.existingId!, rowTag, author) : undefined;
+    const compensate = async (data?: WorkspaceTransactionJsonValue): Promise<void> => {
+      if (row.isUpdate) {
+        await compensateUpdate(pmRoot, row.existingId!, rowTag, author, data);
+        return;
+      }
       // Prefer the id captured by apply() in this run; fall back to the
       // pre-run per-row lookup (resume-compensation of a prior run's applied step).
       const id = appliedId ?? applied.byRowIndex.get(row.rowIndex);
@@ -1920,9 +1957,9 @@ async function importCSVAtomic(
     // The coordinator invokes compensations in reverse order, but this package
     // cannot prove a clean tracker: create cleanup deliberately tolerates an
     // unavailable status lookup or failed close so the remaining sweep can
-    // continue, and update steps intentionally preserve pre-existing items.
+    // continue, and update compensation refuses concurrent-writer conflicts.
     throw new CommandError(
-      `Atomic CSV import failed. The transaction coordinator attempted reverse-order compensation, but pm-csv cannot claim a clean tracker: created items are closed on a best-effort basis, and pre-existing item updates are intentionally not reverted. Mutations from transaction ${transactionId} may remain; inspect and reconcile that transaction before retrying. Underlying error: ${msg}`,
+      `Atomic CSV import failed. The transaction coordinator attempted reverse-order compensation, but pm-csv cannot claim a clean tracker: created items are closed on a best-effort basis, and pre-existing updates restore captured prior values unless a conflict prevents safe compensation. Mutations from transaction ${transactionId} may remain; inspect and reconcile that transaction before retrying. Underlying error: ${msg}`,
       EXIT_CODE.GENERIC_FAILURE,
     );
   }
@@ -1933,7 +1970,7 @@ async function importCSVAtomic(
   // count toward imported/updated — resumed rows from a prior interrupted run
   // are already in the tracker and must not be double-counted.
   for (const row of planned) {
-    const stepId = `csv-import-row-${row.rowIndex}`;
+    const stepId = atomicStepId(row.rowIndex, row.existingId);
     const res = committed.results[stepId];
     if (res === undefined) continue;
     const alreadyApplied = applied.byRowIndex.has(row.rowIndex);
@@ -2225,9 +2262,8 @@ function upsertCreate(
  * carries the item id and states explicitly that the mutation may already have
  * been applied, so the operator can verify and reconcile by id. The guarantee
  * is NOT that no mutation is left behind — an update has no inverse without the
- * prior field values, which this extension does not capture, so a failed update
- * is reported loudly by id rather than compensated with a second unreviewed
- * write on top of a failed one (see the deferred capture-prior-values feature).
+ * prior field values. Atomic imports journal those values before calling this
+ * helper and compensate from them; non-atomic imports report failures by id.
  */
 function upsertUpdate(
   pmRoot: string,
@@ -2235,9 +2271,11 @@ function upsertUpdate(
   p: ParsedRow,
   source?: string,
   extraTags?: string[],
+  historyMessage?: string,
 ): void {
   const args = ["--path", pmRoot, "update", id, "--title", p.title];
   appendMutableItemArgs(args, p, true);
+  if (historyMessage) args.push("--message", historyMessage);
   // Preserve the csv-key tag (additive) and refresh the user tags.
   const addTags = [...p.tags];
   if (source) addTags.push(`${SOURCE_TAG_PREFIX}${encodeKeyTagValue(source)}`);
@@ -2252,9 +2290,8 @@ function upsertUpdate(
   // failure must carry the item id and state that explicitly — matching the
   // create path. The guarantee is that no mutation is left un-IDENTIFIED, NOT
   // that no mutation is left behind: an update has no inverse without the prior
-  // field values, which this extension does not capture, so a failed update is
-  // reported loudly by id rather than papered over with a second unreviewed
-  // write on top of a failed one.
+  // field values. The atomic coordinator journals those before calling this
+  // helper; a non-atomic update only reports its failure by id.
   if (r.status === null) {
     throw new CommandError(
       `${describePmNullStatus(r, "update")}. The update for item ${id} may already have been applied — verify the item by id before retrying.`,
@@ -2272,7 +2309,7 @@ function upsertUpdate(
   // and the explicit caveat that the terminal transition may already have taken
   // effect too — the close, like the update, is a single non-atomic subprocess.
   if (p.status === "closed" || p.status === "canceled") {
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source)], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
+    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source), ...(historyMessage ? ["--message", historyMessage.replace(/:apply$/, ":close")] : [])], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
     if (cr.status === null) {
       throw new CommandError(
         `${describePmNullStatus(cr, "close")}. The update for item ${id} was applied, but the terminal ${p.status} close may already have been applied too — verify the item by id before retrying.`,
@@ -2926,7 +2963,7 @@ export default {
         { long: "--dry-run", description: "Preview without writing" },
         { long: "--skip-headers", description: "The CSV file has no header row; map columns positionally to the standard import order (title, type, status, priority, tags, deadline, body, parent, assignee, sprint, release, blocked_by)" },
         { long: "--stream", description: "Stream the file row-by-row instead of loading it fully into memory (recommended for large CSV files)" },
-        { long: "--atomic", description: "Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing item updates are intentionally not reverted. Inspect and reconcile any marked orphan before retrying. Incompatible with --stream" },
+        { long: "--atomic", description: "Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing updates restore captured prior values unless a conflict prevents safe compensation. Inspect and reconcile any marked orphan before retrying. Incompatible with --stream" },
       ],
       async run(ctx) {
         const filePath = ctx.args[0] as string | undefined;

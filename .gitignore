@@ -19,3 +19,12 @@ coverage/
 # SDK workspace-transaction journals are runtime state, not tracked data.
 # pm health fails closed on these (tracked_runtime_cache_files).
 .agents/pm/transactions/
+
+# pm-cli:runtime-cache:start
+.agents/pm/runtime/
+.agents/pm/search/*
+.agents/pm/locks/
+.agents/pm/transactions/
+.agents/pm/checkpoints/
+!.agents/pm/search/eval-queries.json
+# pm-cli:runtime-cache:end

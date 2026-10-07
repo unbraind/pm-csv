@@ -63,7 +63,7 @@ pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 | `--priority <n>` | integer | — | Import **only** rows whose integer priority equals this value |
 | `--strict` | boolean | false | Abort before writing if validation finds missing titles, unknown statuses, invalid/out-of-range priorities, or duplicate mapped columns |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
-| `--atomic` | boolean | false | Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing item updates are intentionally not reverted. Inspect and reconcile any marked orphan before retrying. Incompatible with `--stream` |
+| `--atomic` | boolean | false | Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing updates restore captured prior values unless a conflict prevents safe compensation. Inspect and reconcile any marked orphan before retrying. Incompatible with `--stream` |
 
 #### Strict import gate
 
@@ -88,8 +88,20 @@ workspace writer lock and recorded in a crash-recoverable journal.
   reason `atomic csv import rolled back`, rolls back the transaction journal,
   and exits non-zero with a reconciliation warning. A failed close deliberately
   retains both transaction markers so an operator can inspect and reconcile the
-  open orphan by transaction id before retrying. Pre-existing item updates are
-  intentionally not reverted because arbitrary prior state is not captured.
+  open orphan by transaction id before retrying. Before each update, a version 2
+  compensation record stores the complete prior item document and verified
+  history boundary. On failure, an append-only restore recovers prior values,
+  including absent versus empty metadata, tags, dependencies, body, and lifecycle
+  side effects. A second guarded phase preserves stored empty fields that the
+  SDK canonicalizes away; its completion receipt makes that phase resumable.
+  Only `updated_at` advances to record the compensation. See
+  [the compensation design and validation](docs/atomic-compensation.md).
+- **Concurrent writer safety:** compensation checks the history boundary and
+  current state while holding the SDK item lock. Any intervening mutation
+  outside this batch refuses restoration, including edits to unrelated fields.
+  The journal remains compensating with its prior values intact; inspect and
+  reconcile the conflict before retrying. The workspace transaction lock
+  serializes atomic imports; ordinary item writers use their item locks.
 - **Crash-recoverable / resumable:** the transaction id is stable and derivable
   from the resolved file path and parsed content fingerprint, so re-running the
   same unchanged `--atomic` import resumes from the durable journal while edited
@@ -97,8 +109,10 @@ workspace writer lock and recorded in a crash-recoverable journal.
   Resume/compensation matching is **per-row-precise**: every item this
   transaction writes is stamped with a per-row ownership marker
   `csv-txrow:<transactionId>#<rowIndex>` (plus a batch-level
-  `csv-tx:<transactionId>` marker for scanning), and a resumed run detects
-  already-applied rows by parsing the rowIndex out of that marker. This means a
+  `csv-tx:<transactionId>` marker for scanning). Creates resume from these
+  markers; updates also inspect immutable history. Versioned journal step ids
+  preserve the original operation and update target even if another writer
+  removes the CSV tags. This means a
   CSV with **duplicate titles or duplicate keys** is handled correctly — a row
   is only skipped when its exact rowIndex was already applied, never because a
   same-titled/same-keyed sibling happens to match.
@@ -114,13 +128,16 @@ workspace writer lock and recorded in a crash-recoverable journal.
 - **Incompatible with `--stream`:** an unbounded stream cannot be committed as
   one bounded transaction, so `--atomic --stream` fails fast with a usage
   error.
-- **Compensation uses `close`, not `delete`**, to avoid the known history-
+- **Create compensation uses `close`, not `delete`**, to avoid the known history-
   resurrection issue, so compensated items remain in the tracker as closed
-  items rather than being erased. For `--key` upsert rows that update
-  pre-existing items, the update is applied within the transaction but is not
-  reverted on failure (an arbitrary update cannot be safely undone without
-  capturing prior state). Compensation is best-effort and reports remaining
-  work for operator reconciliation.
+  items rather than being erased. Update compensation restores the pre-update
+  document through the SDK mutation primitive, retaining immutable history.
+  Versioned step ids refuse legacy in-flight journals before mutation instead
+  of guessing missing prior values. Replaying a restore after a crash is a
+  no-op, and reverse-order compensation supports multiple rows for one item.
+  A terminal row interrupted between update and close is compensated on restart
+  before a fresh attempt; it is never treated as a completed row.
+  A failed compensation reports remaining work for operator reconciliation.
 
 ```bash
 pm csv import tasks.csv --atomic            # resumes an unchanged interrupted import
