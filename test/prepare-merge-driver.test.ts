@@ -1,7 +1,9 @@
+import "./support/isolated-environment.ts";
+
 /**
  * Tests for the npm `prepare` hook `scripts/prepare-merge-driver.ts`.
  *
- * The hook must stay the canonical pm-ops launcher byte for byte, and it is
+ * The hook must delegate to the installed pm-ops public installer entry, and it is
  * exercised the way npm runs it: as the entry point of a child process whose
  * working directory is a consumer checkout. Every checkout is a fresh
  * `git init` with its own local config, so the drivers this repository's own
@@ -81,9 +83,18 @@ function registeredDrivers(cwd: string): string[] {
   return config.stdout.split("\n").filter(Boolean).map((key) => key.split(".")[1]).sort();
 }
 
-test("the prepare launcher is the unmodified pm-ops template", () => {
-  const canonical = readFileSync(join(root, "node_modules", "pm-ops", "templates", "prepare-merge-driver.ts"), "utf8");
-  assert.equal(readFileSync(launcher, "utf8"), canonical);
+test("the prepare launcher delegates to the installed public entry even when its template changes", () => {
+  const directory = checkout("entry-contract", "absent");
+  const installed = join(directory, "node_modules", "pm-ops");
+  mkdirSync(join(installed, "templates"), { recursive: true });
+  writeFileSync(join(installed, "package.json"), JSON.stringify({
+    name: "pm-ops", type: "module", exports: { "./merge-driver/prepare": "./installer.js" },
+  }));
+  writeFileSync(join(installed, "templates", "prepare-merge-driver.ts"), "a future template revision");
+  writeFileSync(join(installed, "installer.js"), 'import { writeFileSync } from "node:fs"; writeFileSync("delegated", "installed entry");');
+  const result = prepare(directory, hostPath);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(join(directory, "delegated"), "utf8"), "installed entry");
 });
 
 test("a full install registers every merge driver .gitattributes declares", posixOnly, () => {
