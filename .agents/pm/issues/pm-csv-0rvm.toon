@@ -1,0 +1,15 @@
+id: pm-csv-0rvm
+title: Make repeated terminal keyed CSV imports idempotent
+description: "Dependency certification exposed a separate package behavior: reimporting a CSV row keyed to an already closed item applies its update and then calls pm close again, which the host refuses as already terminal. The current closure-field fix validates create and open-to-terminal transitions but does not change this repeated-import path. Reproduce with a real tracker: import a closed row with a stable key, then import changed row content with the same key and closed status. Preserve verified lifecycle state and report the applied update honestly."
+type: Issue
+status: open
+priority: 2
+tags[3]: csv,follow-up,terminal
+created_at: "2026-10-11T06:23:15.913Z"
+updated_at: "2026-10-11T06:25:48.746Z"
+author: codex-agent
+acceptance_criteria: Normal and atomic repeated terminal keyed imports preserve item identity and do not fail only because the item is already terminal; real-tracker regression fails when only the changed behavior is reverted; validate the declared minimum and current host without weakening lifecycle checks
+files[2]{path,scope}:
+  index.ts,project
+  test/atomic.test.ts,project
+body: ""

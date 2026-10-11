@@ -1745,14 +1745,10 @@ function compensateCreate(
   const status = compensationItemStatus(pmRoot, id);
   if (status === undefined) return; // absent or unverified; never invent closure
   if (status !== "closed") {
-    // Compensation is an internal rollback, not a user closure: it must
-    // reliably undo the create regardless of closure-validation governance, so
-    // it bypasses `--validate-close` (off). `require_close_reason` still applies
-    // and is satisfied by `reason`. Used by both the atomic transaction path
-    // (rollback) and the non-atomic `upsertCreate` close-failure path.
+    // Compensation records the rollback outcome through the normal close contract.
     const closeResult = spawnSync(
       "pm",
-      ["--path", pmRoot, "close", id, "--reason", reason, "--validate-close", "off"],
+      csvCloseArgs(pmRoot, id, reason, "The failed CSV import leaves no active created item.", "Closing the created item as CSV import compensation."),
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
     if (closeResult.status !== 0) {
@@ -2059,6 +2055,12 @@ function appendMutableItemArgs(args: string[], p: ParsedRow, preserveEmptyBody: 
   appendRelationalArgs(args, p);
 }
 
+/** Build a normal validated close with factual CSV provenance and outcome fields. */
+function csvCloseArgs(pmRoot: string, id: string, reason: string, expected: string, actual: string): string[] {
+  return ["--path", pmRoot, "close", id, "--reason", reason,
+    "--resolution", reason, "--expected-result", expected, "--actual-result", actual];
+}
+
 /**
  * Build the `pm close --reason` text for an imported row whose CSV status is
  * terminal (`closed`/`canceled`). Since pm-cli 2026.8.3 the CLI enforces
@@ -2096,8 +2098,8 @@ function importCloseReason(status: "closed" | "canceled", source?: string): stri
  *      operator can find and reconcile the open orphan manually. The created
  *      open item is left behind in this one unrecoverable case.
  *   2. `pm close` failed after the item was persisted as open. The orphan is
- *      compensated (closed) via {@link compensateCreate} with `--validate-close
- *      off`, so a verified cleanup leaves no open orphan and a retry re-imports
+ *      compensated (closed) via {@link compensateCreate} with explicit rollback
+ *      outcome fields, so a verified cleanup leaves no open orphan and a retry re-imports
  *      it. If
  *      compensation also fails, the thrown error carries the created id and
  *      states the item was left open, so the partial state is actionable and a
@@ -2175,7 +2177,7 @@ function upsertCreate(
     if (id) {
       const rc = spawnSync(
         "pm",
-        ["--path", pmRoot, "close", id, "--validate-close", "off", "--reason", "csv import create overran its receipt buffer; closing the orphaned created item"],
+        csvCloseArgs(pmRoot, id, "csv import create overran its receipt buffer; closing the orphaned created item", "The failed CSV create leaves no active orphan.", "Closing the identified created item after its receipt failed."),
         { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
       );
       const createCause = describePmNullStatus(r, "create");
@@ -2210,7 +2212,7 @@ function upsertCreate(
   if (p.status === "closed") {
     const cr = spawnSync(
       "pm",
-      ["--path", pmRoot, "close", id, "--reason", importCloseReason("closed", source)],
+      csvCloseArgs(pmRoot, id, importCloseReason("closed", source), "Persist the imported CSV row with source status closed.", "CSV fields imported; applying the source status closed."),
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
     // Deliberately NO assertPmOutputFit(cr, "close") here: a null close status
@@ -2222,8 +2224,7 @@ function upsertCreate(
       // (2) The close failed but the item is already persisted as open.
       // Compensate (close) the orphan so a verified cleanup leaves no open item
       // that a retry without --key-field could duplicate.
-      // Compensation bypasses closure-validation governance (it is a rollback,
-      // not a user closure) so a strict tracker cannot block the cleanup.
+      // Compensation supplies explicit rollback outcome fields for strict closure.
       compensateCreate(
         pmRoot,
         id,
@@ -2317,7 +2318,7 @@ function upsertUpdate(
   // and the explicit caveat that the terminal transition may already have taken
   // effect too — the close, like the update, is a single non-atomic subprocess.
   if (p.status === "closed" || p.status === "canceled") {
-    const cr = spawnSync("pm", ["--path", pmRoot, "close", id, "--reason", importCloseReason(p.status, source), ...(historyMessage ? ["--message", historyMessage.replace(/:apply$/, ":close")] : [])], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
+    const cr = spawnSync("pm", [...csvCloseArgs(pmRoot, id, importCloseReason(p.status, source), `Persist the imported CSV update with source status ${p.status}.`, `CSV fields updated; applying the source status ${p.status}.`), ...(historyMessage ? ["--message", historyMessage.replace(/:apply$/, ":close")] : [])], { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
     if (cr.status === null) {
       throw new CommandError(
         `${describePmNullStatus(cr, "close")}. The update for item ${id} was applied, but the terminal ${p.status} close may already have been applied too — verify the item by id before retrying.`,

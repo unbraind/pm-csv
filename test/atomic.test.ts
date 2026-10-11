@@ -57,6 +57,9 @@ interface ListedItem {
   status: string;
   priority?: number;
   tags?: string[];
+  resolution?: string;
+  expected_result?: string;
+  actual_result?: string;
 }
 
 /** Command failure shape exposed by package command errors. */
@@ -217,7 +220,7 @@ function installFakePm(): () => void {
   const wrapper = [
     "#!/usr/bin/env node",
     "const { spawnSync } = require('child_process');",
-    "const { existsSync, writeSync } = require('fs');",
+    "const { existsSync, writeSync, unlinkSync } = require('fs');",
     "const args = process.argv.slice(2);",
     "let root = '';",
     "for (let i = 0; i < args.length; i++) {",
@@ -236,6 +239,11 @@ function installFakePm(): () => void {
     "if (root && existsSync(root + '/fake-close-conflict') && has('close')) {",
     "  process.stderr.write('simulated pm close conflict (test)\\n');",
     "  process.exit(4);",
+    "}",
+    "if (root && existsSync(root + '/fake-close-fail-once') && has('close')) {",
+    "  unlinkSync(root + '/fake-close-fail-once');",
+    "  process.stderr.write('simulated first close failure (test)\\n');",
+    "  process.exit(1);",
     "}",
     "if (root && existsSync(root + '/fake-close-after-apply-conflict') && has('close')) {",
     "  const r = spawnSync(realPm, args, { encoding: 'utf-8' });",
@@ -350,7 +358,7 @@ test("the test wrapper reaps its writer before an outer output overrun permits c
   }
 });
 
-/** Toggle strict closure-validation on a tracker so `pm close --reason` fails. */
+/** Require the complete lifecycle close contract on a real tracker. */
 function enableStrictCloseValidation(pmRoot: string): void {
   const r = spawnSync(
     "pm",
@@ -963,11 +971,10 @@ test("--atomic editing the file in place re-imports new content (transaction id 
 
 test("non-atomic closed row whose pm close fails: the persisted open orphan is compensated (closed), not left behind", async () => {
   const root = freshTracker();
-  // Strict closure-validation makes `pm close --reason` fail (missing
-  // resolution/expected/actual) while `pm create` still succeeds under the
-  // minimal preset — exactly the gap: the item is persisted open, then the
-  // terminal close fails.
+  // Fail only the first close receipt; compensation must use the real strict contract.
   enableStrictCloseValidation(root);
+  writeFileSync(join(root, "fake-close-fail-once"), "1");
+  const restorePm = installFakePm();
   const file = join(root, "closed.csv");
   writeFileSync(file, "title,status\nGood Open,open\nBad Closed,closed\n");
   try {
@@ -992,10 +999,14 @@ test("non-atomic closed row whose pm close fails: the persisted open orphan is c
     const orphan = items.find((i) => i.title === "Bad Closed");
     assert.ok(orphan, "the closed row's created item exists");
     assert.equal(orphan!.status, "closed", "the orphan was compensated (closed), not left open");
+    assert.equal(orphan.resolution, "csv import row failed; closing orphan created item");
+    assert.ok(orphan.expected_result);
+    assert.ok(orphan.actual_result);
     const good = items.find((i) => i.title === "Good Open");
     assert.ok(good, "the open row was imported");
     assert.equal(good!.status, "open", "the open row remains open");
   } finally {
+    restorePm();
     removeTreeResiliently(root);
   }
 });
@@ -1463,6 +1474,60 @@ test("F-B: a terminal close that exits non-zero after a successful update also r
     assert.match(msg, /close may already have been applied/i, "the close's uncertainty is stated");
   } finally {
     restorePm();
+    removeTreeResiliently(root);
+  }
+});
+
+/** Strict close fields must be persisted by real creates, upserts and transaction compensation. */
+for (const atomic of [false, true]) {
+  test(`validated close fields survive closed CSV create and keyed update (atomic=${atomic})`, async () => {
+    const root = freshTracker();
+    enableStrictCloseValidation(root);
+    const file = join(root, "validated-close.csv");
+    writeFileSync(file, "title,status,body\nImported Closed,closed,original\n");
+    try {
+      const first = await runImport(root, file, { atomic, key: "title", source: "regression" });
+      assert.ifError(first.error);
+      assert.equal(first.result.imported, 1);
+      assert.deepEqual(first.result.errors, []);
+      const created = listItems(root)[0];
+      assert.equal(created.status, "closed");
+      assert.equal(created.resolution, "Imported from regression (source status: closed)");
+      assert.equal(created.expected_result, "Persist the imported CSV row with source status closed.");
+      assert.equal(created.actual_result, "CSV fields imported; applying the source status closed.");
+      const reopened = spawnSync("pm", ["--path", root, "update", created.id, "--status", "open"], { encoding: "utf8" });
+      assert.equal(reopened.status, 0, reopened.stderr);
+      writeFileSync(file, "title,status,body\nImported Closed,closed,updated\n");
+      const second = await runImport(root, file, { atomic, key: "title", source: "regression" });
+      assert.ifError(second.error);
+      assert.equal(second.result.updated, 1);
+      assert.deepEqual(second.result.errors, []);
+      const updated = listItems(root)[0];
+      assert.equal(updated.id, created.id);
+      assert.equal(updated.status, "closed");
+      assert.equal(updated.expected_result, "Persist the imported CSV update with source status closed.");
+      assert.equal(updated.actual_result, "CSV fields updated; applying the source status closed.");
+    } finally {
+      removeTreeResiliently(root);
+    }
+  });
+}
+
+test("validated compensation records rollback fields and removes markers after real closure", () => {
+  const root = freshTracker();
+  enableStrictCloseValidation(root);
+  try {
+    const created = spawnSync("pm", ["--path", root, "create", "--title", "Rollback fields", "--tags", "csv-tx:regression", "--json"], { encoding: "utf8" });
+    assert.equal(created.status, 0, created.stderr);
+    const id = (JSON.parse(created.stdout) as { id: string }).id;
+    compensateCreate(root, id, ["csv-tx:regression"]);
+    const item = listItems(root)[0];
+    assert.equal(item.status, "closed");
+    assert.equal(item.resolution, "atomic csv import rolled back");
+    assert.equal(item.expected_result, "The failed CSV import leaves no active created item.");
+    assert.equal(item.actual_result, "Closing the created item as CSV import compensation.");
+    assert.ok(!item.tags?.includes("csv-tx:regression"));
+  } finally {
     removeTreeResiliently(root);
   }
 });

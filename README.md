@@ -4,8 +4,10 @@ CSV importer and exporter for [pm-cli](https://github.com/unbraind/pm-cli).
 
 Import pm items from a CSV file, export them back out, or wire up a programmatic `csv-import` importer.
 
-The extension requires pm CLI 2026.8.20 or newer. Its development and release
-gates are pinned to pm CLI/SDK 2026.10.4 so host behavior stays reproducible.
+The extension requires the pm CLI compatibility floor declared in
+`package.json` and `manifest.json`. Development and release gates use the exact
+pm CLI/SDK, pm-ops and pm-changelog versions in `package.json`, verified against
+`package-lock.json` and installed package metadata so host behavior stays reproducible.
 
 ---
 
@@ -392,7 +394,7 @@ npm install
 npm run build   # runs tsc → dist/
 ```
 
-TypeScript 5, ES2022 target, NodeNext module resolution, strict mode. The runtime dependency is `@toon-format/toon`.
+TypeScript version pinned in `package.json`, ES2022 target, NodeNext module resolution, strict mode. The runtime dependency is `@toon-format/toon`.
 
 ---
 
@@ -421,7 +423,7 @@ This package is release-ready for GitHub, npm, and Bun-compatible installs. CI r
 This repo tracks its project management in `.agents/pm/` and ships a committed `.gitattributes`
 that maps those tracker artifacts to pm-cli's field-aware Git merge drivers, so concurrent-branch
 tracker edits merge cleanly instead of hard-conflicting. The driver **definitions** live in
-per-clone Git config; `npm install` / `npm ci` wires them automatically via the `prepare` script, `scripts/prepare-merge-driver.ts`: the launcher template pm-ops ships, copied unchanged, which a test compares byte for byte with the pinned template. It runs pm-ops's installer, which calls `pm merge install` when the `pm` CLI is on `PATH` and skips with a notice when it is not. A production install of a clone (`npm ci --omit=dev`) has no `pm-ops`, so the launcher skips with one notice, while a stale or broken `pm-ops` fails the install. Registry installs of this package never run `prepare`. Being Node-based, it behaves identically on POSIX shells and Windows `cmd.exe`. To (re)run manually: `npm run merge:install`.
+per-clone Git config; `npm install` / `npm ci` wires them automatically via the `prepare` script, `scripts/prepare-merge-driver.ts`: a launcher delegating to the installed pm-ops public installer entry. Tests verify the installer behavior rather than comparing version-specific template bytes. It runs pm-ops's installer, which calls `pm merge install` when the `pm` CLI is on `PATH` and skips with a notice when it is not. A production install of a clone (`npm ci --omit=dev`) has no `pm-ops`, so the launcher skips with one notice, while a stale or broken `pm-ops` fails the install. Registry installs of this package never run `prepare`. Being Node-based, it behaves identically on POSIX shells and Windows `cmd.exe`. To (re)run manually: `npm run merge:install`.
 
 After merging a branch that touched `.agents/pm/`, reconcile any residual history-hash drift with
 **`pm merge reconcile`** (pm-cli ≥ 2026.7.22): preview with `pm merge reconcile --dry-run`, apply with
