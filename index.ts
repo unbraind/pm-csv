@@ -1,5 +1,5 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
-import { readFileSync, writeFileSync, createReadStream, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
