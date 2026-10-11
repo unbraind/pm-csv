@@ -15,6 +15,7 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
+    "docs/",
     "manifest.json",
     "README.md",
     "CHANGELOG.md"
@@ -114,6 +115,7 @@
     },
     "docs": [
       "README.md",
+      "docs/atomic-compensation.md",
       "CHANGELOG.md"
     ],
     "examples": [
@@ -122,5 +124,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@toon-format/toon": "4.1.1"
   }
 }
