@@ -275,7 +275,7 @@ test("missing, incompatible or tampered prior records refuse restoration", async
   try {
     const good = await captureUpdateCompensation(f.root, f.id, f.marker, author);
     assert.ok(good && typeof good === "object" && !Array.isArray(good));
-    for (const data of [undefined, null, false, [], {}, { ...good, version: 1 }, { ...good, id: "other" }, { ...good, marker: "other" }, { ...good, raw: 1 }, { ...good, format: "unknown" }, { ...good, prior: 1 }, { ...good, historyLength: "0" }, { ...good, historyHash: 1 }]) {
+    for (const data of [undefined, null, false, [], {}, { ...good, version: 1 }, { ...good, id: "other" }, { ...good, marker: "other" }, { ...good, raw: 1 }, { ...good, format: "unknown" }, { ...good, prior: 1 }, { ...good, prior: "not json" }, { ...good, prior: "null" }, { ...good, prior: "[]" }, { ...good, prior: "{}" }, { ...good, prior: JSON.stringify({ metadata: null }) }, { ...good, prior: JSON.stringify({ metadata: [] }) }, { ...good, historyLength: "0" }, { ...good, historyHash: 1 }]) {
       await assert.rejects(compensateUpdate(f.root, f.id, f.marker, author, data), /incompatible prior values/);
     }
     for (const data of [{ ...good, historyHash: "corrupt" }, { ...good, prior: JSON.stringify({ ...f.before, body: "invented" }) }]) {

@@ -80,6 +80,21 @@ export async function captureUpdateCompensation(
 export type CompensationPhase = "canonical_restored" | "representation_written" | "compensation_recorded";
 
 /**
+ * Parse a journalled prior document read back from disk. Anything other than
+ * an object with an object `metadata` field (invalid JSON, null, arrays,
+ * scalars) is refused with the same reconcile message as other journal damage.
+ */
+function parsePriorDocument(raw: string, id: string): ItemDocument {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !("metadata" in parsed)
+      || parsed.metadata === null || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata)) {
+    throw new Error(`Atomic update item ${id} has missing or incompatible prior values; reconcile before retrying.`);
+  }
+  return parsed as ItemDocument;
+}
+
+/**
  * Restore the captured document through an append-only SDK mutation. History
  * verification and writer detection occur INSIDE the item lock, so another
  * agent cannot write between the guard and restoration. Refuse any intervening
@@ -97,7 +112,7 @@ export async function compensateUpdate(
       || typeof data.prior !== "string" || typeof data.historyLength !== "number" || typeof data.historyHash !== "string") {
     throw new Error(`Atomic update item ${id} has missing or incompatible prior values; reconcile before retrying.`);
   }
-  const prior = JSON.parse(data.prior) as ItemDocument;
+  const prior = parsePriorDocument(data.prior, id);
   const historyLength = data.historyLength;
   const historyHash = data.historyHash;
   const batchPrefix = `${marker.slice(0, marker.lastIndexOf("#"))}#`;
