@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Capture prior field values in the transaction record so a failed update can be truly compensated ([pm-csv-71zg](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-71zg.toon))
+
+### Other
+
+- Certify self-syncing toolchain upgrades and validated CSV closure ([pm-csv-hzn7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-hzn7.toon))
+
 ## 2026.10.5 - 2026-10-05
 
 ### Other

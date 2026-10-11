@@ -2,15 +2,18 @@ id: pm-csv-hzn7
 title: Certify self-syncing toolchain upgrades and validated CSV closure
 description: "Continue the dependency certification item with metadata-driven exact development pins, unchanged host compatibility floors, installed prepare-entry behavior checks and strict CSV closure outcomes. Automated toolchain bumps must pass full gates without a second human version edit. Existing certification receipts remain in the history."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[4]: cli,dependencies,release-readiness,sdk
 created_at: "2026-10-04T08:43:00.128Z"
-updated_at: "2026-10-11T07:10:42.091Z"
+updated_at: "2026-10-11T23:29:49.433Z"
+closed_at: "2026-10-11T23:29:49.414Z"
+completed_at: "2026-10-11T23:29:49.414Z"
 author: pi-glm
 acceptance_criteria: "Manifest exact pins agree with root lock declarations, resolved lock versions and installed metadata; inconsistent layers and ranges fail; host compatibility floors remain minimums; Validated create, keyed update and create compensation persist resolution and expected/actual outcome fields on real trackers; function-only reversion fails the new regressions; Full npm and Bun release gates pass unchanged thresholds on original and actual dependency-bump manifest pairs, including CI identity isolation and packed consumers; restore the original manifest pair before commit"
-expected_result: "Weekly metadata-consistent toolchain updates require no README or approved-version edit, while inconsistent pins and incomplete closure outcomes remain rejected."
-actual_result: "Original and actual automated bump manifest pairs each passed full npm and Bun release:check under isolated Git identity configuration: 246/246 tests per gate, no failures/skips/cancellations, unchanged two-source 100/100/100 coverage, all three packed scenarios, zero production vulnerabilities, changelog/attestation/date checks. Original manifest pair and npm ci restored; metadata pin checks pass 5/5. Function-only closure reversion failed 3/3 selected regressions on assertions; restored functions and PM progress run pass 3/3. Pin validator no-op control failed all three inconsistency regressions among five tests. PM item remains open for independent review."
+resolution: "Implemented and merged in https://github.com/unbraind/pm-csv/pull/153: toolchain pins self-sync from package metadata and CSV closure supplies required close fields"
+expected_result: The acceptance criteria recorded on pm-csv-hzn7 are met on main.
+actual_result: "Merged in https://github.com/unbraind/pm-csv/pull/153 after its full CI, an isolated release gate and a CodeRabbit full review with every finding resolved; toolchain pins self-sync from package metadata and CSV closure supplies required close fields"
 comments[28]{created_at,author,text}:
   "2026-10-04T08:43:08.758Z",pi-glm,"Starting: worktree chore/pm-csv-pm-cli-2026-10-4 at c135b94. Plan: bump @unbrained/pm-cli 2026.9.28->2026.10.4, pm-ops 2026.9.23->2026.10.4, pm-changelog 2026.9.23->2026.9.25; consolidate Dependabot #137 (eslint 10.11.0), #142 (jscpd 5.4.0), #143 (pm-ops), #144 (@types/node 26.6.3), #145 (pm-changelog), #140 (codeql-action SHA 1c5b6756...); re-copy canonical prepare-merge-driver.ts from pm-ops 2026.10.4; full release gate + dogfood on npm/bun."
   "2026-10-04T09:13:17.909Z",pi-glm,"Real-tracker dogfood PASS. Packed pm-csv-2026.9.26.tgz installed into a scratch copy of this repo's real .agents/pm (107 items). Registered via pm package install ./node_modules/pm-csv with pm-cli 2026.10.4 (capabilities commands/importers/schema). npm path (npx -y @unbrained/pm-cli@2026.10.4): csv export -> 107 items; csv export --status open -> 6; csv validate -> 107 rows clean; csv import -> imported 1; csv import --key title -> updated 1 (upsert verified idempotent, no duplicate). bun path (bunx @unbrained/pm-cli@2026.10.4): csv export -> 109 items; csv validate -> clean; csv import --key title --source bunx-cert -> updated 1. All commands exit 0 with correct real data round-trip. Scratch dir deleted after evidence capture."
@@ -152,4 +155,5 @@ tests[10]:
       source_ref: fix/self-syncing-toolchain-pin
 docs[1]{path,scope}:
   README.md,project
+close_reason: "Delivered by https://github.com/unbraind/pm-csv/pull/153 (merged); toolchain pins self-sync from package metadata and CSV closure supplies required close fields"
 body: ""
