@@ -14,6 +14,10 @@ history. CSV step ids include `v2`, the operation, target item id for updates, a
 row index; the stable transaction id is unchanged. Replay uses these durable
 bindings even when another writer removes the CSV key or ownership tags. A
 planned create keeps its original role after its item exists.
+Journal paths come from the public SDK transaction inventory in dry-run mode
+with infinite retention. The reader requires a JSON object with a string-only
+`stepIds` array before planning; incompatible shapes refuse without modifying
+tracker files. The SDK still validates the rest of the journal on commit.
 An older in-flight journal therefore fails the SDK plan identity check before
 mutation. Missing or incompatible prior records refuse compensation.
 

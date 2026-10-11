@@ -1,9 +1,9 @@
 import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import { readFileSync, writeFileSync, createReadStream, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
+import { certifyCompleteListResult, inspectCompleteListResult, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
@@ -1555,12 +1555,20 @@ function atomicStepId(rowIndex: number, existingId: string | undefined): string 
  * step identities. Mutable CSV key tags cannot retarget an interrupted update
  * or turn a previously planned create into an update. Incompatible identities
  * refuse replay before any mutation; the SDK validates the remaining journal.
+ * The public read-only inventory supplies the path, including after SDK layout
+ * changes. Infinite retention and dry-run prevent recovery receipts being pruned.
  */
-function loadAtomicBindings(pmRoot: string, transactionId: string): Map<number, string | undefined> {
+async function loadAtomicBindings(pmRoot: string, transactionId: string): Promise<Map<number, string | undefined>> {
   const bindings = new Map<number, string | undefined>();
-  const journalPath = resolve(pmRoot, "transactions", "sdk", `${transactionId}.json`);
-  if (!existsSync(journalPath)) return bindings;
-  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { stepIds: string[] };
+  const inventory = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
+  const entry = inventory.entries.find(candidate => basename(candidate.file) === `${transactionId}.json`);
+  if (!entry) return bindings;
+  const journal: unknown = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8"));
+  if (journal === null || typeof journal !== "object" || Array.isArray(journal)
+      || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
+      || !journal.stepIds.every((id: unknown) => typeof id === "string")) {
+    throw new Error(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
+  }
   const pattern = new RegExp(String.raw`^csv-import-v${UPDATE_COMPENSATION_VERSION}-(?:create|update-(.+))-row-(\d+)$`);
   for (const id of journal.stepIds) {
     const match = pattern.exec(id);
@@ -1821,7 +1829,7 @@ async function importCSVAtomic(
 
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
-  const bindings = loadAtomicBindings(pmRoot, transactionId);
+  const bindings = await loadAtomicBindings(pmRoot, transactionId);
   const applied = loadAppliedByTransaction(pmRoot, transactionId);
   const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
   // In-batch duplicate-KEY guard: keys already claimed by an earlier planned

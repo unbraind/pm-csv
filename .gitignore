@@ -26,5 +26,6 @@ coverage/
 .agents/pm/locks/
 .agents/pm/transactions/
 .agents/pm/checkpoints/
+!.agents/pm/search/
 !.agents/pm/search/eval-queries.json
 # pm-cli:runtime-cache:end

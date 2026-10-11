@@ -1,6 +1,6 @@
 import "./support/isolated-environment.ts";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,7 +8,7 @@ import test from "node:test";
 import { decode, encode } from "@toon-format/toon";
 import {
   commitWorkspaceTransaction, createExtensionCommandSdk, create, getHistoryPath, locateItem,
-  mutateItem, PmClient, readHistoryEntries, readSettings, update,
+  mutateItem, PmClient, readHistoryEntries, readSettings, runWorkspaceTransactionGc, update,
   WorkspaceTransactionInterruptedError,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionJsonValue, WorkspaceTransactionTransition } from "@unbrained/pm-cli/sdk";
@@ -206,6 +206,67 @@ test("legacy in-flight step format is refused before mutation", async () => {
     })), /Atomic CSV import failed/);
     await assert.rejects(importBatch(f.root, f.file), /journal does not match the supplied plan/);
     assert.deepEqual(domain(await readUpdateDocument(f.root, f.id)), domain(f.before));
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+/** Capture every fixture file byte, including item history and the SDK journal. */
+function fixtureBytes(root: string): Record<string, string> {
+  return Object.fromEntries(readdirSync(root, { recursive: true, encoding: "utf8" }).sort()
+    .filter(file => statSync(join(root, file)).isFile())
+    .map(file => [file, readFileSync(join(root, file)).toString("base64")]));
+}
+
+test("malformed SDK journal step identities refuse before any tracker mutation", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(importBatch(f.root, f.file, options => ({ ...options,
+      onTransition() { throw new WorkspaceTransactionInterruptedError(); },
+    })), /Atomic CSV import failed/);
+    const inventory = await runWorkspaceTransactionGc(f.root, { dryRun: true, retentionDays: Infinity });
+    assert.equal(inventory.entries.length, 1);
+    const file = join(f.root, inventory.entries[0].file);
+    const original: unknown = JSON.parse(readFileSync(file, "utf8"));
+    assert.ok(original !== null && typeof original === "object" && !Array.isArray(original));
+    assert.ok("stepIds" in original && Array.isArray(original.stepIds));
+    const invalid: unknown[] = [null, false, 42, "journal", [], {},
+      { ...original, stepIds: null }, { ...original, stepIds: "not-an-array" },
+      { ...original, stepIds: [42] }, { ...original, stepIds: [null] },
+      { ...original, stepIds: [{}] }, { ...original, stepIds: [original.stepIds[0], false] }];
+    for (const value of invalid) {
+      writeFileSync(file, JSON.stringify(value));
+      const before = fixtureBytes(f.root);
+      for (const built of [false, true]) {
+        await assert.rejects(importBatch(f.root, f.file, options => options, built), /incompatible CSV step identity\./,
+          `journal value ${JSON.stringify(value)}`);
+      }
+      assert.deepEqual(fixtureBytes(f.root), before, "refusal must leave every fixture byte unchanged");
+    }
+    // Shape narrowing must still defer the rest of the format to SDK validation.
+    writeFileSync(file, JSON.stringify({ ...original, schemaVersion: 99 }));
+    const before = fixtureBytes(f.root);
+    await assert.rejects(importBatch(f.root, f.file), /journal does not match the supplied plan/);
+    assert.deepEqual(fixtureBytes(f.root), before);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("prepared SDK journal preserves a create role when a new matching key appears", async () => {
+  const f = await fixture();
+  writeFileSync(f.file, "title,priority,key\nNew import,3,new\n");
+  try {
+    await assert.rejects(importBatch(f.root, f.file, options => ({ ...options,
+      onTransition() { throw new WorkspaceTransactionInterruptedError(); },
+    })), /Atomic CSV import failed/);
+    const other = await create({ title: "Independent", tags: "csv-key:new" }, { pmRoot: f.root });
+    const before = await readUpdateSnapshot(f.root, other.item.id);
+    const history = await readHistoryEntries(getHistoryPath(f.root, other.item.id), other.item.id);
+    const result = await importBatch(f.root, f.file, options => options, true);
+    const value = result.result;
+    assert.ok(value !== null && typeof value === "object");
+    assert.ok("imported" in value && "updated" in value);
+    assert.equal(value.imported, 1);
+    assert.equal(value.updated, 0);
+    assert.equal((await readUpdateSnapshot(f.root, other.item.id)).raw, before.raw);
+    assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, other.item.id), other.item.id), history);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 

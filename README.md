@@ -2,7 +2,7 @@
 
 CSV importer and exporter for [pm-cli](https://github.com/unbraind/pm-cli).
 
-Import pm items from a CSV file, export them back out, or wire up a programmatic `csv-import` importer — all with zero external runtime dependencies.
+Import pm items from a CSV file, export them back out, or wire up a programmatic `csv-import` importer.
 
 The extension requires pm CLI 2026.8.20 or newer. Its development and release
 gates are pinned to pm CLI/SDK 2026.10.4 so host behavior stays reproducible.
@@ -392,7 +392,7 @@ npm install
 npm run build   # runs tsc → dist/
 ```
 
-TypeScript 5, ES2022 target, NodeNext module resolution, strict mode. Zero runtime dependencies.
+TypeScript 5, ES2022 target, NodeNext module resolution, strict mode. The runtime dependency is `@toon-format/toon`.
 
 ---
 
