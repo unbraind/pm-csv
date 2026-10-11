@@ -1,16 +1,17 @@
 id: pm-csv-hzn7
-title: Certify pm-csv on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates
-description: "Bump the exact development pin @unbrained/pm-cli to 2026.10.4 together with pm-ops and pm-changelog latest, take over the open Dependabot dependency updates (@types/node, jscpd, eslint) and the pinned codeql-action SHA group, keep the canonical pm-ops merge-driver launcher byte-identical, and certify with the full release gate plus isolated real-tracker dogfooding on npm and Bun."
+title: Certify self-syncing toolchain upgrades and validated CSV closure
+description: "Continue the dependency certification item with metadata-driven exact development pins, unchanged host compatibility floors, installed prepare-entry behavior checks and strict CSV closure outcomes. Automated toolchain bumps must pass full gates without a second human version edit. Existing certification receipts remain in the history."
 type: Chore
 status: in_progress
 priority: 2
 tags[4]: cli,dependencies,release-readiness,sdk
 created_at: "2026-10-04T08:43:00.128Z"
-updated_at: "2026-10-04T11:22:56.589Z"
+updated_at: "2026-10-11T06:58:13.911Z"
 author: pi-glm
-acceptance_criteria: "npm run release:check passes with 100/100/100 coverage and clean npm audit including dev; pm health with the repo-pinned 2026.10.4 binary reports no gate-failing findings; packed tarball passes real-tracker import/export scenarios via npx @unbrained/pm-cli@2026.10.4 and bunx; pm-github managed extension installed with a read-only sync preview only"
-actual_result: "Resumed candidate rebased onto main release 7473779. Every devDependency exact; CLI/ops/changelog 2026.10.4, resolved Dependabot versions retained. Canonical launcher unchanged; 3 Greptile regression cases added. Clean npm ci and full release:check PASS: 238/238, zero skipped, 100/100/100 measured lines/branches/functions (2 sources). npm audit and audit --omit=dev: 0. Packed current-version tarball npx/bunx real tracker dogfood passed: 107 original exports, 108 after 1 isolated create; repeated imports update 1 with no duplicate. pm health ok, one prior stale-item advisory; read-only pm-github preview wouldSync 1. Pending reviewer availability is missing evidence; leave open."
-comments[11]{created_at,author,text}:
+acceptance_criteria: "Manifest exact pins agree with root lock declarations, resolved lock versions and installed metadata; inconsistent layers and ranges fail; host compatibility floors remain minimums; Validated create, keyed update and create compensation persist resolution and expected/actual outcome fields on real trackers; function-only reversion fails the new regressions; Full npm and Bun release gates pass unchanged thresholds on original and actual dependency-bump manifest pairs, including CI identity isolation and packed consumers; restore the original manifest pair before commit"
+expected_result: "Weekly metadata-consistent toolchain updates require no README or approved-version edit, while inconsistent pins and incomplete closure outcomes remain rejected."
+actual_result: "Original and actual automated bump manifest pairs each passed full npm and Bun release:check under isolated Git identity configuration: 246/246 tests per gate, no failures/skips/cancellations, unchanged two-source 100/100/100 coverage, all three packed scenarios, zero production vulnerabilities, changelog/attestation/date checks. Original manifest pair and npm ci restored; metadata pin checks pass 5/5. Function-only closure reversion failed 3/3 selected regressions on assertions; restored functions and PM progress run pass 3/3. Pin validator no-op control failed all three inconsistency regressions among five tests. PM item remains open for independent review."
+comments[27]{created_at,author,text}:
   "2026-10-04T08:43:08.758Z",pi-glm,"Starting: worktree chore/pm-csv-pm-cli-2026-10-4 at c135b94. Plan: bump @unbrained/pm-cli 2026.9.28->2026.10.4, pm-ops 2026.9.23->2026.10.4, pm-changelog 2026.9.23->2026.9.25; consolidate Dependabot #137 (eslint 10.11.0), #142 (jscpd 5.4.0), #143 (pm-ops), #144 (@types/node 26.6.3), #145 (pm-changelog), #140 (codeql-action SHA 1c5b6756...); re-copy canonical prepare-merge-driver.ts from pm-ops 2026.10.4; full release gate + dogfood on npm/bun."
   "2026-10-04T09:13:17.909Z",pi-glm,"Real-tracker dogfood PASS. Packed pm-csv-2026.9.26.tgz installed into a scratch copy of this repo's real .agents/pm (107 items). Registered via pm package install ./node_modules/pm-csv with pm-cli 2026.10.4 (capabilities commands/importers/schema). npm path (npx -y @unbrained/pm-cli@2026.10.4): csv export -> 107 items; csv export --status open -> 6; csv validate -> 107 rows clean; csv import -> imported 1; csv import --key title -> updated 1 (upsert verified idempotent, no duplicate). bun path (bunx @unbrained/pm-cli@2026.10.4): csv export -> 109 items; csv validate -> clean; csv import --key title --source bunx-cert -> updated 1. All commands exit 0 with correct real data round-trip. Scratch dir deleted after evidence capture."
   "2026-10-04T09:14:03.016Z",pi-glm,"pm-github installed as managed project extension at latest npm 2026.9.26 (.agents/pm/extensions/.managed-extensions.json, capabilities commands/hooks/importers/preflight/schema/search). Read-only preview against unbraind/pm-csv: pm github validate --repo unbraind/pm-csv -> ok (token via gh CLI, repo HTTP 200, quota 4952/5000); pm github export --repo unbraind/pm-csv --dry-run -> plan only, writes nothing (create/update actions listed for real items incl. linked gh:unbraind/pm-csv#72); pm github sync --dry-run --repo unbraind/pm-csv -> wouldSync 1, no mutation. No issues created/modified, no scheduled sync enabled."
@@ -22,13 +23,31 @@ comments[11]{created_at,author,text}:
   "2026-10-04T10:59:48.449Z",codex-sol,"The three new regression fixtures run unconditionally; no new platform skips were added. Rechecked 9/9 launcher tests, zero skips. Linux full-gate behavior and the validated canonical launcher remain unchanged."
   "2026-10-04T11:10:15.475Z",codex-sol,"Review round 2: Greptile found Windows symbolic-link privilege requirements in the new unconditional fixtures. Use symlinkSync type junction with absolute targets, which Node applies only on Windows (ignored on POSIX), retaining all scenarios without new skips. Linux launcher suite still passes 9/9; a Windows runner is unavailable. Canonical launcher remains unchanged; rerun the full locked release gate before push."
   "2026-10-04T11:22:55.937Z",codex-sol,"Review correction validation PASS: full flock-serialized npm run release:check re-run after portable junction and ambient NODE_PATH isolation changes: 238/238 tests, zero skips, measured 100/100/100 thresholds met, audits/packed current npm/Bun/minimum-host acceptance/changelog/attestation/date gates green. Linked hostile run env NODE_PATH=\"$PWD/node_modules\" node --test test/prepare-merge-driver.test.ts also passes 9/9. Windows execution is not available; junction fixture API follows https://nodejs.org/api/fs.html#fssymlinksynctarget-path-type. Production package unchanged; real-tracker dogfood from this certification remains applicable."
-files[7]:
+  "2026-10-11T05:00:03.501Z",codex-sol,Investigating Dependabot toolchain CI failure and real CLI close-field contracts. Package and lock metadata will remain the pin authority; compatibility floors remain lower bounds. Full original CI log and PR 152 checks reviewed; README version duplication is the failing test and closed-row import errors expose missing lifecycle fields.
+  "2026-10-11T05:00:26.834Z",codex-sol,"Design: replace README numeric gate-host duplication with manifest pointers, validate all three toolchain exact pins against root lock declarations, resolved lock entries and installed metadata, and retain host peer/extension floor checks. Keep installer safety scenarios while asserting its durable delegation contract instead of template bytes. Supply factual resolution, expected-result and actual-result for imported and compensated closes; no validation exception."
+  "2026-10-11T05:06:44.066Z",codex-agent,"Orchestrator review: the downloaded CI log includes the duplicated README version failure and a strict close refusal. New real tracker regressions also expose repeat closure of an already terminal upsert target; closure evidence and repeated import behavior both require verification."
+  "2026-10-11T05:06:59.738Z",codex-sol,"Pin and installer regressions pass 21/21, including all three rejected mismatch layers and a changed installer template. Strict first-close failure compensation succeeded on a real tracker. A separate already-terminal keyed reimport reaches the host repeat-close refusal; reported for orchestrator follow-up without expanding this patch. The added close/upsert regressions use an explicitly reopened item to isolate the requested lifecycle-field contract."
+  "2026-10-11T05:13:23.841Z",codex-sol,"Behavioral revert proof: reverted only compensateCreate, upsertCreate and upsertUpdate to their main bodies, retaining new tests and all other code. The validated close regression command exited 1: 3 selected tests, 0 passed, 3 assertion failures, zero skipped; strict create refused missing lifecycle fields and compensation had no recorded resolution. Restored functions: the same command passed 3/3, zero skipped. PM-linked run with progress also passed. Existing first-close failure regression passes with real strict compensation and persisted fields. Starting full release gates with unchanged thresholds and isolated Git identity configuration."
+  "2026-10-11T05:36:49.246Z",codex-sol,"Original npm gate under isolated Git identity: 246/246 tests passed, zero skipped, but Node coverage collection failed on an empty child-process coverage file. A separate real Node probe confirmed parent coverage remains 100/100/100 when child inheritance is cleared, including a SIGKILL child. The negative-process fixture environment now clears child NODE_V8_COVERAGE inheritance; installer safety fixtures also use that isolation. Repository source capture and thresholds are unchanged. Re-running the full gate is necessary to verify this collection failure is repaired."
+  "2026-10-11T05:58:32.471Z",codex-sol,"Original manifests full npm release:check PASS under empty HOME, GIT_CONFIG_GLOBAL disabled and GIT_CONFIG_NOSYSTEM=1: 246/246 tests, zero failures/skips/cancellations; 100/100/100 coverage across the unchanged 2-source scope; 10 files and 72 declarations documented; zero production vulnerabilities; all 3 packed npm/native Bun/minimum-host scenarios passed. Additional pin negative control changed only assertToolchainPins to a no-op in a separate scratch copy with the real metadata bytes: 5 tests, 2 passed and all 3 mismatch regressions failed on missing expected exceptions. The package worktree stayed fixed during that proof. Starting full Bun gate on the original manifest pair."
+  "2026-10-11T06:03:29.072Z",codex-agent,"Orchestrator task handoff: the separate PR 150 review is now assigned to a dedicated codex CLI worker in its own feature worktree and tracker claim. The toolchain worker should finish only the self-syncing pin PR and its actual dependency-manifest gates; do not edit the feature worktree or post PR 150 replies. The orchestrator verifies and reports both deliverables."
+  "2026-10-11T06:11:20.511Z",codex-sol,"Original manifest pair full Bun release gate passed: 246/246 tests, zero failures/skips, configured source coverage 100/100/100, three packed consumer scenarios including minimum host. Full npm CI identity gate also passed. Next validation uses the exact automated dependency bump manifest pair with no source or threshold edits."
+  "2026-10-11T06:18:04.507Z",codex-agent,"Orchestrator verification independently passed 8/8 selected tests: normal and atomic validated close fields, validated rollback, future coherent pins, and layer mismatch rejection. Task handoff remains binding: finish only the toolchain PR here. PR 150 is being edited and verified by the separate codex-sol-review-150 worker, which owns pm-csv-71zg and thread replies; do not perform the second feature task from the original prompt."
+  "2026-10-11T06:18:16.490Z",codex-sol,"Acknowledged the orchestrator handoff recorded in this item: review PR 150 now has a separate worker and existing detached worktree. This worker will finish only the toolchain PR and actual bumped-manifest gates, avoiding duplicate feature edits or replies. Gate lesson for the review worker: negative-process fixtures can inherit NODE_V8_COVERAGE and leave an empty coverage file; clearing inheritance in test/support/isolated-environment.ts preserves the parent collector and unchanged configured coverage thresholds. Out-of-scope finding: reimporting an already terminal keyed item calls close again and the CLI refuses repeated closure; no upstream issue filed."
+  "2026-10-11T06:24:15.944Z",codex-agent,"Orchestrator follow-up: search found no open duplicate for repeated terminal keyed imports; recorded package issue pm-csv-0rvm, left open and unclaimed. Acceptance scope correction: scripts/accept-packed.ts uses bunx --no-install without --bun, so its bun-current scenario proves Bun/bunx launcher compatibility, not forced native Bun execution. Earlier comments using native Bun overstate that runtime scope. Include this new issue toon and history with the toolchain commit; no feature review work is assigned here."
+  "2026-10-11T06:25:24.041Z",codex-sol,The orchestrator created pm-csv-0rvm for the separate repeated terminal keyed-import issue. Its tracker record and history will accompany this documentation evidence; the implementation remains out of scope for this fix.
+  "2026-10-11T06:31:00.173Z",codex-sol,"Actual automated bump manifest pair full npm release:check PASS under empty HOME and disabled global/system Git configuration: CLI and pm-ops 2026.10.6, pm-changelog 2026.10.5; 246/246 tests, zero failures/skips/cancellations, unchanged configured 2-source coverage 100/100/100. Zero production vulnerabilities, nine tarball files, all three packed npm/native Bun/minimum-host scenarios, changelog and release attestation/date checks passed. No source or threshold changes were needed for the bumped versions. Starting the full Bun gate on this same actual pair."
+  "2026-10-11T06:56:20.955Z",codex-sol,"Actual automated bump manifest pair full Bun release:check PASS: 246/246 tests, zero failures/skips/cancellations, unchanged configured two-source coverage 100/100/100, zero production vulnerabilities, nine tarball files and all three packed current npm/current native Bun/minimum-host scenarios. Both original-manifest gates and both actual bumped-manifest gates passed under isolated HOME and disabled global/system Git configuration. The complete bump needed no human version or source edits. Restoring the original manifest pair and install before final commit; no dependency upgrade is necessary for this behavior fix."
+  "2026-10-11T06:58:09.046Z",codex-sol,"Final review preparation: original manifest pair and installed toolchain restored, with 5/5 metadata pin tests passing. All eight installer safety cases remain, and the changed-template public-entry contract plus packaging/pin suite previously passed 21/21. Only source/tests/docs and their tracker evidence will be committed. The follow-up pm-csv-0rvm stays open; PR 150 is assigned separately by the orchestrator. Releasing this claim without closing the item, then generating and checking changelog after the final tracker writes."
+files[13]:
   - path: .agents/pm/extensions/.managed-extensions.json
     scope: project
     note: pm-github 2026.9.26 managed extension registration
   - path: .github/workflows/codeql.yml
     scope: project
     note: codeql-action pinned SHA group 1c5b6756
+  - path: index.ts
+    scope: project
   - path: package-lock.json
     scope: project
     note: Resolved dependency graph with consolidated Dependabot bumps
@@ -41,9 +60,19 @@ files[7]:
   - path: scripts/prepare-merge-driver.ts
     scope: project
     note: Canonical pm-ops 2026.10.4 launcher recopied byte-for-byte
+  - path: scripts/toolchain-pins.ts
+    scope: project
+  - path: test/atomic.test.ts
+    scope: project
+  - path: test/packaging.test.ts
+    scope: project
   - path: test/prepare-merge-driver.test.ts
     scope: project
-tests[6]:
+  - path: test/support/isolated-environment.ts
+    scope: project
+  - path: test/toolchain-pins.test.ts
+    scope: project
+tests[10]:
   - command: npx -y @unbrained/pm-cli@2026.10.4 csv export --output dogfood-export.csv
     scope: project
     provenance:
@@ -88,4 +117,38 @@ tests[6]:
       created_at: "2026-10-04T11:19:02.676Z"
       source_kind: local_mutation
       source_ref: chore/pm-csv-pm-cli-2026-10-4
+  - command: node --test test/toolchain-pins.test.ts test/packaging.test.ts test/prepare-merge-driver.test.ts
+    scope: project
+    timeout_seconds: 2400
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-11T05:05:16.637Z"
+      source_kind: local_mutation
+      source_ref: fix/self-syncing-toolchain-pin
+  - command: node --test --test-name-pattern=validated test/atomic.test.ts
+    scope: project
+    timeout_seconds: 2400
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-11T05:06:10.927Z"
+      source_kind: local_mutation
+      source_ref: fix/self-syncing-toolchain-pin
+  - command: "bun run release:check"
+    scope: project
+    timeout_seconds: 2400
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-11T06:28:00.632Z"
+      source_kind: local_mutation
+      source_ref: fix/self-syncing-toolchain-pin
+  - command: "env HOME=\"$(mktemp -d)\" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 npm run release:check"
+    scope: project
+    timeout_seconds: 2400
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-11T06:28:05.752Z"
+      source_kind: local_mutation
+      source_ref: fix/self-syncing-toolchain-pin
+docs[1]{path,scope}:
+  README.md,project
 body: ""
