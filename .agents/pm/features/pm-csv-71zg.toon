@@ -6,13 +6,13 @@ status: closed
 priority: 2
 tags[4]: atomic,csv,rollback,transaction
 created_at: "2026-08-09T00:13:19.589Z"
-updated_at: "2026-10-11T23:29:48.736Z"
+updated_at: "2026-10-12T00:39:58.601Z"
 closed_at: "2026-10-11T23:29:48.724Z"
 completed_at: "2026-10-11T23:29:48.724Z"
 author: claude
 acceptance_criteria: "The transaction record stores the prior values of every field an update will modify, written before the update subprocess runs; compensation restores those values rather than writing an invented value; the record format change is versioned so an in-flight transaction written by an older version is detected and refused rather than mis-restored; a regression test drives a mid-import failure after an update and asserts the pre-import field values are restored exactly"
 resolution: "Implemented and merged in https://github.com/unbraind/pm-csv/pull/150: failed atomic updates restore journalled prior values through audited SDK compensation"
-expected_result: The acceptance criteria recorded on pm-csv-71zg are met on main.
+expected_result: "Meets its recorded acceptance criteria: The transaction record stores the prior values of every field an update will modify, written before the update subprocess runs; compensation restores those values rather than writing an invented value; the record format change is versioned so an in-flight transaction written by an older version is detected and refused rather than mis-restored; a regression test drives a mid-import failure after an update and asserts the pre-import field values are restored exactly"
 actual_result: "Merged in https://github.com/unbraind/pm-csv/pull/150 after its full CI, an isolated release gate and a CodeRabbit full review with every finding resolved; failed atomic updates restore journalled prior values through audited SDK compensation"
 comments[23]{created_at,author,text}:
   "2026-10-07T21:41:37.431Z",codex-sol,"Built-package baseline in a scratch pm project: a keyed row changed Original (priority 1) to Changed (priority 3), then a new row with priority 99 failed. After coordinator compensation the original item still had Changed/3. Acceptance: capture a versioned full prior document and immutable history boundary before each update; restore exact absent/empty and collection state under the item lock, refuse intervening non-transaction history, and resume interrupted forward/compensation phases idempotently. Existing item references and pm-csv-5si5 evidence were read; no linked docs, files, or blocking dependencies were listed."

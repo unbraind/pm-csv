@@ -6,13 +6,13 @@ status: closed
 priority: 2
 tags[4]: cli,dependencies,release-readiness,sdk
 created_at: "2026-10-04T08:43:00.128Z"
-updated_at: "2026-10-11T23:29:49.433Z"
+updated_at: "2026-10-12T00:39:56.268Z"
 closed_at: "2026-10-11T23:29:49.414Z"
 completed_at: "2026-10-11T23:29:49.414Z"
 author: pi-glm
 acceptance_criteria: "Manifest exact pins agree with root lock declarations, resolved lock versions and installed metadata; inconsistent layers and ranges fail; host compatibility floors remain minimums; Validated create, keyed update and create compensation persist resolution and expected/actual outcome fields on real trackers; function-only reversion fails the new regressions; Full npm and Bun release gates pass unchanged thresholds on original and actual dependency-bump manifest pairs, including CI identity isolation and packed consumers; restore the original manifest pair before commit"
 resolution: "Implemented and merged in https://github.com/unbraind/pm-csv/pull/153: toolchain pins self-sync from package metadata and CSV closure supplies required close fields"
-expected_result: The acceptance criteria recorded on pm-csv-hzn7 are met on main.
+expected_result: "Weekly metadata-consistent toolchain updates require no README or approved-version edit, while inconsistent pins and incomplete closure outcomes remain rejected."
 actual_result: "Merged in https://github.com/unbraind/pm-csv/pull/153 after its full CI, an isolated release gate and a CodeRabbit full review with every finding resolved; toolchain pins self-sync from package metadata and CSV closure supplies required close fields"
 comments[28]{created_at,author,text}:
   "2026-10-04T08:43:08.758Z",pi-glm,"Starting: worktree chore/pm-csv-pm-cli-2026-10-4 at c135b94. Plan: bump @unbrained/pm-cli 2026.9.28->2026.10.4, pm-ops 2026.9.23->2026.10.4, pm-changelog 2026.9.23->2026.9.25; consolidate Dependabot #137 (eslint 10.11.0), #142 (jscpd 5.4.0), #143 (pm-ops), #144 (@types/node 26.6.3), #145 (pm-changelog), #140 (codeql-action SHA 1c5b6756...); re-copy canonical prepare-merge-driver.ts from pm-ops 2026.10.4; full release gate + dogfood on npm/bun."
