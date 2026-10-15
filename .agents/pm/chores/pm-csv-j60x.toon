@@ -4,9 +4,9 @@ description: Add a SHA-pinned scheduled caller for the audited gated issue impor
 type: Chore
 status: in_progress
 priority: 2
-tags[2]: github-sync,maintenance
+tags[3]: changed,github-sync,maintenance
 created_at: "2026-10-14T11:25:26.412Z"
-updated_at: "2026-10-14T12:13:19.966Z"
+updated_at: "2026-10-15T12:28:21.651Z"
 author: codex-agent
 comments[3]{created_at,author,text}:
   "2026-10-14T11:25:42.066Z",codex-agent,"Plan: add the independently authored scheduled thin caller pinned to the audited workflow SHA and matching published extension version. Preserve dependencies, merge-driver scripts, and thresholds. Verify npm and Bun release gates and audits; leave the item open for orchestrator review. No TypeScript functions change, so a function revert regression test does not apply."
