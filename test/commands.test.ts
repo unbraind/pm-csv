@@ -26,6 +26,44 @@ async function commandHarness() {
   });
 }
 
+test("CSV commands and configured importers reject partial create/update failures", async () => {
+  const root = freshTracker();
+  const harness = await commandHarness();
+  try {
+    const seeded = spawnSync("pm", ["--path", root, "create", "--title", "Existing", "--tags", "csv-key:existing", "--json"], { encoding: "utf8" });
+    assert.equal(seeded.status, 0, seeded.stderr);
+    const input = join(root, "partial.csv");
+    for (const stream of [false, true]) {
+      for (const configured of [false, true]) {
+        const title = `Created ${stream} ${configured}`;
+        writeFileSync(input, "title,priority,type\nExisting,99,Task\nExisting,2,Task\nInvalid,99,Task\n"
+          + `${title},2,Task\nFiltered,2,Feature\n,2,Task\n`, "utf8");
+        const options = { file: input, key: "title", type: "Task", stream };
+        const run = configured
+          ? harness.runImporter({ importer: "csv-import", options, pmRoot: root })
+          : harness.runCommand({ command: "csv import", args: [input], options, pmRoot: root });
+        await assert.rejects(run, (error: unknown) => {
+          assert.ok(error instanceof CommandError);
+          assert.equal(error.exitCode, 1);
+          assert.match(error.message, /^Import completed with 2 row error\(s\): imported 1, updated 1, skipped 4 \(1 filtered out\)\./u);
+          assert.match(error.message, /Row 2: update failed/u);
+          assert.match(error.message, /Row 4: create failed/u);
+          return true;
+        });
+        const listed = spawnSync("pm", ["--path", root, "list", "--all", "--json"], { encoding: "utf8" });
+        assert.equal(listed.status, 0, listed.stderr);
+        const items = (JSON.parse(listed.stdout) as { items: Array<{ title: string; priority: number }> }).items;
+        assert.ok(items.some((item) => item.title === title), "valid rows after failures still import");
+        assert.equal(items.find((item) => item.title === "Existing")?.priority, 2);
+        assert.ok(!items.some((item) => item.title === "Invalid" || item.title === "Filtered"));
+      }
+    }
+  } finally {
+    await harness.deactivate();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /** Assert and return the record carried by a successfully handled command. */
 function handledRecord(result: CommandHandlerResult): Record<string, unknown> {
   assert.equal(result.handled, true, result.errorMessage ?? "command was not handled");

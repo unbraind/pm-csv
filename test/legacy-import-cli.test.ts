@@ -27,8 +27,8 @@ test("legacy CSV CLI shares native input, flags, errors and dry-run without git"
   symlinkSync(resolve(repo, "node_modules/@unbrained/pm-cli/dist/cli.js"), join(bin, "pm"));
   const env = { ...process.env, PATH: bin, HOME: root, PM_AUTHOR: "cli-regression", GIT_CEILING_DIRECTORIES: dirname(root) };
   /** Run the pinned host as a real process with no Git executable available. */
-  function pm(args: string[]) {
-    const result = spawnSync(join(bin, "pm"), ["--pm-path", tracker, ...args], { cwd: root, env, encoding: "utf8", timeout: 60_000 });
+  function pm(args: string[], timeout = 60_000) {
+    const result = spawnSync(join(bin, "pm"), ["--pm-path", tracker, ...args], { cwd: root, env, encoding: "utf8", timeout });
     assert.equal(result.error, undefined);
     assert.equal(result.signal, null);
     assert.notEqual(result.status, null);
@@ -73,6 +73,26 @@ test("legacy CSV CLI shares native input, flags, errors and dry-run without git"
     assert.equal(preview.status, 0, preview.stderr);
     assert.equal(JSON.parse(preview.stdout).wouldUpdate, 1);
     assert.deepEqual(snapshot(tracker), after);
+
+    for (const command of [["csv", "import"], ["csv-import", "import"]]) {
+      for (const stream of [false, true]) {
+        const title = `Valid after failure ${command[0]} ${stream}`;
+        writeFileSync(join(root, "partial.csv"), "title,priority,type\nLegacy fixture,99,Task\nLegacy fixture,2,Task\nInvalid,99,Task\n"
+          + `${title},2,Task\nFiltered,2,Feature\n,2,Task\n`);
+        const failed = pm([...command, "partial.csv", "--key", "title", "--type", "Task", "--json", ...(stream ? ["--stream"] : [])], 180_000);
+        assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+        assert.match(failed.stderr, /Import completed with 2 row error\(s\): imported 1, updated 1, skipped 4 \(1 filtered out\)\./u);
+        assert.match(failed.stderr, /Row 2: update failed/u);
+        assert.match(failed.stderr, /Row 4: create failed/u);
+        assert.doesNotMatch(failed.stdout, /"imported"/u, "failed imports must not emit a success receipt");
+        const listed = pm(["list", "--all", "--json"]);
+        assert.equal(listed.status, 0, listed.stderr);
+        const rows = (JSON.parse(listed.stdout) as { items: Array<{ title: string; priority: number }> }).items;
+        assert.ok(rows.some((item) => item.title === title), "valid rows after failures still import");
+        assert.equal(rows.find((item) => item.title === "Legacy fixture")?.priority, 2);
+        assert.ok(!rows.some((item) => item.title === "Invalid" || item.title === "Filtered"));
+      }
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

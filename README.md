@@ -48,6 +48,11 @@ tracker without a Git repository. None of these commands requires Git.
 
 Read a CSV file and create or update pm items.
 
+If any row mutation fails, the command exits nonzero and reports the error
+count, imported/updated/skipped counts, and row errors. Non-atomic imports
+continue with later rows; successful writes remain in the tracker. This also
+applies to `csv-import import` and configured importers.
+
 ```
 pm csv import tasks.csv
 pm csv import backlog.csv --delimiter ';'
@@ -82,7 +87,7 @@ pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 #### Strict import gate
 
 Default imports remain lenient for messy spreadsheets: empty titles are skipped,
-unknown statuses fall back to `open`, and invalid priorities are ignored. Add
+unknown statuses fall back to `open`, and non-numeric priorities are ignored. Add
 `--strict` when the CSV is expected to be a production source of truth. In
 strict mode the importer runs the same parser as `pm csv validate` before any
 write, then aborts on row-level data issues or duplicate mapped columns so a bad

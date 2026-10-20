@@ -3029,6 +3029,14 @@ export default {
           };
         }
 
+        if (res.errors.length > 0) {
+          throw new CommandError(
+            `Import completed with ${res.errors.length} row error(s): ` +
+              `imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.\n` +
+              res.errors.join("\n"),
+          );
+        }
+
         console.error(
           `Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`,
         );
