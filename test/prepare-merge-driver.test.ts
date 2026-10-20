@@ -26,11 +26,13 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 // The fixtures use POSIX stub executables and directory symlinks, like pm-ops's own launcher suite.
 const posixOnly = { skip: process.platform === "win32" };
 
-/** Every merge driver `.gitattributes` asks Git to use, e.g. `pm-history` from `merge=pm-history`. */
 /** Custom attribute drivers; Git supplies text, binary and union without local registration. */
-const declaredDrivers = [
-  ...new Set([...readFileSync(join(root, ".gitattributes"), "utf8").matchAll(/\bmerge=([\w-]+)/g)].map((match) => match[1])),
-].filter((driver) => !["text", "binary", "union"].includes(driver)).sort();
+function customDrivers(attributes: string): string[] {
+  return [...new Set([...attributes.matchAll(/\bmerge=([\w-]+)/g)].map((match) => match[1]))]
+    .filter((driver) => !["text", "binary", "union"].includes(driver)).sort();
+}
+
+const declaredDrivers = customDrivers(readFileSync(join(root, ".gitattributes"), "utf8"));
 
 /**
  * Create a consumer checkout: a fresh Git repository carrying this
@@ -105,6 +107,20 @@ test("a full install registers every merge driver .gitattributes declares", posi
   assert.equal(result.status, 0, result.stderr);
   assert.ok(declaredDrivers.length > 0, ".gitattributes declares no pm merge drivers");
   assert.deepEqual(registeredDrivers(directory), declaredDrivers);
+});
+
+test("Git resolves text, binary and union attributes without custom driver registrations", posixOnly, () => {
+  const directory = checkout("built-in-drivers", "pinned");
+  const attributes = `${readFileSync(join(directory, ".gitattributes"), "utf8")}\n*.txt merge=text\n*.bin merge=binary\n*.union merge=union\n`;
+  writeFileSync(join(directory, ".gitattributes"), attributes);
+  const result = prepare(directory, hostPath);
+  assert.equal(result.status, 0, result.stderr);
+  const resolved = spawnSync("git", ["check-attr", "merge", "--", "sample.txt", "sample.bin", "sample.union"], {
+    cwd: directory, encoding: "utf8",
+  });
+  assert.equal(resolved.status, 0, resolved.stderr);
+  assert.equal(resolved.stdout, "sample.txt: merge: text\nsample.bin: merge: binary\nsample.union: merge: union\n");
+  assert.deepEqual(registeredDrivers(directory), customDrivers(attributes));
 });
 
 test("an omit-dev checkout without pm-ops skips with one notice and registers nothing", posixOnly, () => {
