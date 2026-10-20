@@ -1,0 +1,13 @@
+id: pm-csv-sdyz
+title: Align the development host with the installed pm-github extension
+description: "Separate from Dependabot PR #170 release gates: pm health --strict-exit --json fails with extension_host_pm_cli_version_skew:2026.10.15:2026.10.19:pm-github. pm validate is structurally healthy and the npm/Bun release gates pass. Reconcile the intended extension/development-host compatibility in a separately validated toolchain update, without rewriting history or changing telemetry configuration."
+type: Issue
+status: open
+priority: 2
+tags[2]: follow-up,toolchain
+created_at: "2026-10-20T08:41:55.486Z"
+updated_at: "2026-10-20T08:41:55.486Z"
+author: codex-agent
+estimated_minutes: 30
+acceptance_criteria: Strict health no longer reports the pm-github host-version skew; both release gates remain green.
+body: ""
