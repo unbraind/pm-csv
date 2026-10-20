@@ -1,4 +1,4 @@
-import type { ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
+import type { CommandDefinition, ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
 import { readFileSync, writeFileSync, createReadStream } from "node:fs";
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
@@ -2928,7 +2928,7 @@ export default {
     // -----------------------------------------------------------------------
     // Command: pm csv import <file>
     // -----------------------------------------------------------------------
-    api.registerCommand({
+    const csvImport = {
       name: "csv import",
       description:
         "Import pm items from a CSV file with full RFC-4180 parsing (quoted fields, " +
@@ -2940,6 +2940,7 @@ export default {
         "--source to record import provenance in the csv_source field, and " +
         "--status/--type/--priority to import only matching rows (others are skipped). " +
         "Use --strict to fail before writing when row-level data issues are present.",
+      arguments: [{ name: "file", required: true, description: "CSV file to import" }],
       intent: "import items from a CSV file into pm",
       examples: [
         "pm csv import tasks.csv",
@@ -3028,6 +3029,14 @@ export default {
           };
         }
 
+        if (res.errors.length > 0) {
+          throw new CommandError(
+            `Import completed with ${res.errors.length} row error(s): ` +
+              `imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.\n` +
+              res.errors.join("\n"),
+          );
+        }
+
         console.error(
           `Imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`,
         );
@@ -3041,7 +3050,8 @@ export default {
           fieldMapWarnings: res.fieldMapWarnings,
         };
       },
-    });
+    } satisfies CommandDefinition;
+    api.registerCommand(csvImport);
 
     // -----------------------------------------------------------------------
     // Command: pm csv validate <file>
@@ -3206,39 +3216,11 @@ export default {
     // Importer: csv-import  (programmatic / config-driven)
     // -----------------------------------------------------------------------
     api.registerImporter("csv-import", async (ctx) => {
-      const filePath = ctx.options["file"] as string | undefined;
-      if (!filePath) {
-        console.error("csv-import: no 'file' provided in options — skipping.");
-        return;
-      }
-
-      const invocation = parseCsvImportInvocation(ctx.options, false);
-      const absolutePath = resolve(filePath);
-
-      let res: ImportResult;
-      try {
-        res = await executeLoggedCsvImport(
-          "csv-import: reading",
-          ctx.pm_root,
-          absolutePath,
-          invocation,
-          ctx.sdk?.commitWorkspaceTransaction,
-          (ctx.global?.author as string | undefined) ?? undefined,
-        );
-      } catch (err: unknown) {
-        const msg = errorMessage(err);
-        console.error(`csv-import: failed — ${msg}`);
-        return;
-      }
-
-      const filterNote = res.filtered > 0 ? ` (${res.filtered} filtered out)` : "";
-      if (res.autoMappings.length > 0) {
-        console.error(`csv-import: auto-mapped columns ${formatAutoMappings(res.autoMappings)}.`);
-      }
-      console.error(
-        `csv-import: done — imported ${res.imported}, updated ${res.updated}, skipped ${res.skipped}${filterNote}.`,
-      );
-    });
+      // Configured SDK callers supply options.file; CLI callers supply args.
+      const file = ctx.options["file"];
+      const args = ctx.args.length > 0 ? ctx.args : typeof file === "string" ? [file] : [];
+      return csvImport.run({ ...ctx, args });
+    }, csvImport);
   },
 } satisfies ExtensionModule & { readonly name: string; readonly version: string };
 

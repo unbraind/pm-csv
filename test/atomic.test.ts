@@ -568,7 +568,7 @@ test("--atomic mid-import failure: ZERO uncompensated items remain (all compensa
   }
 });
 
-test("default (non-atomic) path unchanged: same failing input leaves earlier rows present", async () => {
+test("default non-atomic import reports failure while preserving earlier and later valid rows", async () => {
   const root = freshTracker();
   const file = join(root, "mixed.csv");
   writeFileSync(
@@ -576,14 +576,14 @@ test("default (non-atomic) path unchanged: same failing input leaves earlier row
     "title,status,priority\nGood Row 1,open,2\nGood Row 2,open,3\nBad Row,open,99\nGood Row 3,open,1\n",
   );
   try {
-    const { result, error } = await runImport(root, file, {});
-    // Non-atomic does NOT abort the whole import; it logs the row error and
-    // continues, so no CommandError is thrown — it returns a result.
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    // Non-atomic continues processing, then reports the partial failure.
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
     // 3 good rows created (the bad row is skipped); the import continues past
     // the failure, leaving earlier AND later good rows present and open.
-    assert.equal(result.imported, 3, "non-atomic continues past the failure");
-    assert.equal(result.skipped, 1, "the bad row is counted as skipped");
+    assert.match(error.message, /^Import completed with 1 row error\(s\): imported 3, updated 0, skipped 1\./u);
+    assert.match(error.message, /Row 4: create failed/u);
 
     const items = listItems(root);
     const open = items.filter((i) => i.status !== "closed");
@@ -978,17 +978,17 @@ test("non-atomic closed row whose pm close fails: the persisted open orphan is c
   const file = join(root, "closed.csv");
   writeFileSync(file, "title,status\nGood Open,open\nBad Closed,closed\n");
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
     // The open row imports normally; the closed row's terminal close failed.
-    assert.equal(result.imported, 1, "the open row is imported");
-    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the closed-row failure is reported");
+    assert.match(error.message, /imported 1, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
 
     // The fix compensates (closes) the orphan rather than leaving it open.
     assert.match(
-      result.errors[0],
+      error.message,
       /compensated \(verified closed\)/,
       "error must state the orphan was compensated AND that the closed status was verified — an unchecked claim of compensation is what let an unverifiable status pass as success",
     );
@@ -1020,17 +1020,17 @@ test("non-atomic closed row whose create id cannot be recovered: hard failure, n
   writeFileSync(file, "title,status\nUnrecoverable Closed,closed\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
     // The defect: with the old code the empty id silently skipped the close and
     // returned "" — the row was counted as IMPORTED while actually open. The
     // fix makes it a hard failure: imported is NOT incremented for this row.
-    assert.equal(result.imported, 0, "a closed row with no recoverable id is NOT silently imported");
-    assert.equal(result.skipped, 1, "the row is counted as skipped (hard failure)");
-    assert.equal(result.errors.length, 1, "the unrecoverable id is reported as an error");
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
     assert.match(
-      result.errors[0],
+      error.message,
       /returned no id.*cannot be applied/i,
       "error must name the unrecoverable id rather than returning silently",
     );
@@ -1065,14 +1065,14 @@ test("non-atomic closed row: an unverifiable status is not treated as successful
   writeFileSync(file, "title,status\nUnverifiable Closed,closed\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
-    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the failure is reported");
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
 
-    const msg = result.errors[0];
+    const msg = error.message;
     assert.match(
       msg,
       /could not be verified/i,
@@ -1100,16 +1100,16 @@ test("non-atomic closed row: when compensation also fails, the error carries the
   writeFileSync(file, "title,status\nGood Open,open\nOrphan Closed,closed\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 1, "the open row is imported");
-    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the closed-row failure is reported");
+    assert.match(error.message, /imported 1, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
 
     // Compensation also failed: the error MUST carry the created id and state
     // the item was left OPEN, so a retry/operator can reconcile it by id.
-    const msg = result.errors[0];
+    const msg = error.message;
     assert.match(msg, /left OPEN/i, "error must state the orphan was left open when compensation failed");
     assert.match(msg, /id pm-[a-z0-9]+/i, "error must carry the created item id so the partial state is actionable");
 
@@ -1183,15 +1183,15 @@ test("F2: create overrun never strands an un-identifiable orphan — the id is r
   writeFileSync(join(root, "fake-create-overrun"), "");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await withCappedReadBufferAsync("16", () => runImport(root, file, {}));
-    assert.ifError(error);
+    const { error } = await withCappedReadBufferAsync("16", () => runImport(root, file, {}));
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
     // The overrun row was NOT counted as imported; it was skipped with a named
     // error that carries the recovered id.
-    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
-    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the overrun is reported once");
-    const msg = result.errors[0];
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried so the state is identifiable");
 
     // The CREATE overrun is named (its real cause) ...
@@ -1226,13 +1226,13 @@ test("F2: create overrun whose recovery close SUCCEEDS reports the orphan was cl
   writeFileSync(file, "title,status\nOverrun Orphan,open\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
-    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the overrun is reported once");
-    const msg = result.errors[0];
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried");
     assert.match(msg, /was closed/i, "a successful recovery close is reported as closed");
     assert.match(msg, /retry the import/i, "the operator is told the import can be retried");
@@ -1260,13 +1260,13 @@ test("F2: create overrun whose recovery close FAILS reports the orphan still ope
   writeFileSync(file, "title,status\nOverrun Orphan,open\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 0, "the overrun create is not counted as imported");
-    assert.equal(result.skipped, 1, "the overrun row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the overrun is reported once");
-    const msg = result.errors[0];
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.match(msg, /id pm-[a-z0-9]+/i, "the recovered id is carried");
     assert.match(msg, /still open/i, "a failed recovery close is reported as still-open");
     assert.match(msg, /must be closed manually/i, "the operator is told to close the orphan by id");
@@ -1295,16 +1295,16 @@ test("F2: a create killed before it writes cannot strand an orphan — the title
   writeFileSync(file, "title,status\nKilled Create,open\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 0, "the killed create is not counted as imported");
-    assert.equal(result.skipped, 1, "the killed row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the failure is reported once");
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
     // Worded for the REAL cause (a signal, not a buffer) and naming the title:
-    assert.match(result.errors[0], /signal/i, "the error names the signal cause, not a buffer overrun");
-    assert.match(result.errors[0], /Killed Create/, "the error names the title so the row is identifiable");
-    assert.match(result.errors[0], /reconcile manually/i, "the error tells the operator how to recover the unrecoverable id");
+    assert.match(error.message, /signal/i, "the error names the signal cause, not a buffer overrun");
+    assert.match(error.message, /Killed Create/, "the error names the title so the row is identifiable");
+    assert.match(error.message, /reconcile manually/i, "the error tells the operator how to recover the unrecoverable id");
 
     // The create was killed before it persisted, so nothing was left behind.
     assert.equal(listItems(root).length, 0, "no item was created — nothing to strand");
@@ -1328,16 +1328,16 @@ test("F2: a null close status routes into compensation, never bypasses it", asyn
   writeFileSync(file, "title,status\nClose Killed,closed\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, {});
-    assert.ifError(error);
+    const { error } = await runImport(root, file, {});
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
 
-    assert.equal(result.imported, 0, "the failed closed row is not counted as imported");
-    assert.equal(result.skipped, 1, "the failed closed row is counted as skipped");
-    assert.equal(result.errors.length, 1, "the failure is reported once");
+    assert.match(error.message, /imported 0, updated 0, skipped 1/u);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
 
     // The compensation branch ran (the error is a compensation outcome), NOT a
     // raw signal/buffer abort from a bypassed guard.
-    const msg = result.errors[0];
+    const msg = error.message;
     assert.match(msg, /left OPEN/i, "compensation ran and reported the orphan left open");
     assert.match(msg, /id pm-[a-z0-9]+/i, "the created id is carried so the partial state is actionable");
     assert.doesNotMatch(msg, /terminated by signal.*will not help/i, "the error is not a raw signal abort that bypassed compensation");
@@ -1391,10 +1391,11 @@ test("F-B: an update killed mid-flight names the item, because the mutation may 
   writeFileSync(file, "title,status,priority,key\nSeeded Row,open,3,upd-kill\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, { key: "key" });
-    assert.ifError(error);
-    assert.equal(result.errors.length, 1, "the killed update is reported once");
-    const msg = result.errors[0];
+    const { error } = await runImport(root, file, { key: "key" });
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.ok(msg.includes(id), "the error names the item id so the state is reconcilable");
     assert.match(msg, /may already have been applied/i, "the error states the mutation may have landed");
     assert.match(msg, /NOT a stdout buffer overrun/i, "a signal kill is not misreported as a buffer overrun");
@@ -1416,10 +1417,11 @@ test("F-B: an update that exits non-zero still names the item — a failed write
   writeFileSync(file, "title,status,priority,key\nSeeded Row,open,3,upd-fail\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, { key: "key" });
-    assert.ifError(error);
-    assert.equal(result.errors.length, 1, "the failed update is reported once");
-    const msg = result.errors[0];
+    const { error } = await runImport(root, file, { key: "key" });
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.ok(msg.includes(id), "the error names the item id");
     assert.match(msg, /simulated pm update failure/i, "the underlying stderr is preserved, not swallowed");
     assert.match(msg, /may already have been applied/i, "the error does not imply the item is untouched");
@@ -1441,10 +1443,11 @@ test("F-B: a terminal close killed after a successful update reports BOTH mutati
   writeFileSync(file, "title,status,priority,key\nSeeded Row,closed,3,cls-kill\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, { key: "key" });
-    assert.ifError(error);
-    assert.equal(result.errors.length, 1, "the killed close is reported once");
-    const msg = result.errors[0];
+    const { error } = await runImport(root, file, { key: "key" });
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.ok(msg.includes(id), "the error names the item id");
     assert.match(msg, /update for item .* was applied/i, "the already-applied update is stated, not hidden behind the close failure");
     assert.match(msg, /close may already have been applied/i, "the close's own uncertainty is stated");
@@ -1465,10 +1468,11 @@ test("F-B: a terminal close that exits non-zero after a successful update also r
   writeFileSync(file, "title,status,priority,key\nSeeded Row,closed,3,cls-fail\n");
   const restorePm = installFakePm();
   try {
-    const { result, error } = await runImport(root, file, { key: "key" });
-    assert.ifError(error);
-    assert.equal(result.errors.length, 1, "the failed close is reported once");
-    const msg = result.errors[0];
+    const { error } = await runImport(root, file, { key: "key" });
+    assert.ok(error);
+    assert.equal(error.exitCode, 1);
+    assert.match(error.message, /^Import completed with 1 row error\(s\):/u);
+    const msg = error.message;
     assert.ok(msg.includes(id), "the error names the item id");
     assert.match(msg, /update was applied/i, "the already-applied update is stated");
     assert.match(msg, /close may already have been applied/i, "the close's uncertainty is stated");

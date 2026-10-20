@@ -429,12 +429,11 @@ test("command paths exercise rich create/update, headerless streaming, strict su
     await assert.rejects(harness.runCommand({ command: "csv import", args: [root], pmRoot: root }), /Failed to import/u);
     await assert.rejects(harness.runCommand({ command: "csv validate", args: [root], pmRoot: root }), /Failed to validate/u);
 
-    const incompatible = await harness.runImporter({
+    await assert.rejects(harness.runImporter({
       importer: "csv-import",
       pmRoot: root,
       options: { file: warnings, stream: true, atomic: true },
-    });
-    assert.equal(incompatible.handled, true);
+    }), /--atomic cannot be combined with --stream/u);
   } finally {
     await harness.deactivate();
     rmSync(root, { recursive: true, force: true });
