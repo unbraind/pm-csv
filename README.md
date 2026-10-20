@@ -30,7 +30,19 @@ pm install npm:pm-csv --project
 
 ---
 
+## Without git
+
+CSV validation, import, export, and configured importers work in a plain pm
+tracker without a Git repository. None of these commands requires Git.
+
 ## Commands
+
+| Command | Input and behavior |
+|---|---|
+| `pm csv import <file>` | Import a required CSV file; `--dry-run` previews without writes. |
+| `pm csv-import import <file>` | Same required file, flags, implementation and results as `csv import`. |
+| `pm csv validate <file>` | Validate a CSV file without writes. |
+| `pm csv export` / `pm csv-export export` | Export tracker items as CSV. |
 
 ### `pm csv import <file>`
 
@@ -260,6 +272,10 @@ pm csv export --all-fields --output full.csv
 ---
 
 ## Programmatic importer: `csv-import`
+
+The CLI spelling `pm csv-import import <file>` accepts every `csv import` flag.
+Missing input and import failures exit nonzero. Programmatic callers can still
+supply `options.file`.
 
 Register the importer in your pm-cli config to automatically pull from a CSV file on every sync:
 

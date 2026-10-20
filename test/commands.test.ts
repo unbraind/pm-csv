@@ -249,11 +249,22 @@ test("registered importer and exporter execute through host-owned capability dis
   const root = freshTracker();
   const harness = await commandHarness();
   try {
-    const skipped = await harness.runImporter({ importer: "csv-import", pmRoot: root });
-    assert.equal(skipped.handled, true);
+    await assert.rejects(
+      harness.runImporter({ importer: "csv-import", pmRoot: root }),
+      (error: unknown) => error instanceof CommandError && error.exitCode === 2,
+    );
 
     const input = join(root, "import.csv");
     writeFileSync(input, "Summary,Status\nImported,Open\n", "utf8");
+    const preview = await harness.runImporter({
+      importer: "csv-import",
+      args: [input],
+      options: { autoMap: true, dryRun: true },
+      pmRoot: root,
+    });
+    assert.equal(preview.handled, true);
+    assert.equal((preview.result as Record<string, unknown>).wouldCreate, 1);
+
     const imported = await harness.runImporter({
       importer: "csv-import",
       options: { file: input, autoMap: true },
@@ -279,12 +290,11 @@ test("registered importer and exporter execute through host-owned capability dis
     assert.equal(file.handled, true, file.errorMessage ?? "exporter was not handled");
     assert.match(readFileSync(output, "utf8"), /^title\r\nImported\r\n$/u);
 
-    const failed = await harness.runImporter({
+    await assert.rejects(harness.runImporter({
       importer: "csv-import",
       options: { file: join(root, "missing.csv") },
       pmRoot: root,
-    });
-    assert.equal(failed.handled, true);
+    }), (error: unknown) => error instanceof CommandError && error.exitCode === 3);
   } finally {
     await harness.deactivate();
     rmSync(root, { recursive: true, force: true });
