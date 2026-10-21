@@ -1,0 +1,29 @@
+id: pm-csv-bwrv
+title: Apply edited spreadsheet exports without overwriting concurrent tracker changes
+description: Export an explicit item/revision/field-digest edit session and import the edited table as a three-way patch. Reuse keyed identity and existing atomic compensation; this is distinct from the general terminal keyed retry defect and does not replace the SDK transaction coordinator.
+type: Feature
+status: in_progress
+priority: 2
+tags[3]: added,concurrency,csv
+created_at: "2026-10-21T20:06:53.134Z"
+updated_at: "2026-10-21T20:20:54.652Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: Two editors on one exported table cannot overwrite newer tracker values; terminal keyed updates stay idempotent; a stale digest causes zero item/history writes; typed SDK and CLI with compact TOON/JSON receipts and actionable refusals; documented example and real public-tracker copy validation without git; targeted regression revert proof and unchanged npm/Bun CI release gates
+comments[5]{created_at,author,text}:
+  "2026-10-21T20:07:08.204Z",codex-agent,"Overlap check against current CLI source and fleet sibling documentation: native bulk keyed upsert and workspace transactions already exist; pm-csv keyed identity, atomic coordinator integration and full-document compensation are reused. pm-ado has remote revision-checked three-way sync specific to Azure. pm-beads, pm-todos, pm-jira and pm-linear have format/service round trips, without a spreadsheet edit-session contract. No matching CSV session item found by context/search/open inventory. pm-csv-0rvm remains the separate legacy terminal retry bug. Reconciliation PR 178 closes unrelated delivered items; none will be edited. Registry latest CLI is 2026.10.21; repository pin remains unchanged."
+  "2026-10-21T20:13:38.356Z",codex-agent,"Implemented versioned CSV plus baseline session JSON, explicit stable item/history/field digests, bounded typed refusals, three-way scalar patches and per-item locked conflict checks. Uses the existing SDK coordinator plus CSV full-document compensation. Ten targeted real non-git tracker scenarios pass, including two editors, zero-write stale preflight, terminal identity/lifecycle preservation, convergent retry, native-writer races and interrupted resume. Status is intentionally read-only with a lifecycle-command remedy; editable fields and boundaries are documented. Host canonicalization trims trailing body whitespace, now normalized before comparison to preserve retry idempotency."
+  "2026-10-21T20:17:51.616Z",codex-agent,"Real-data validation passed on a non-git scratch copy of public pm-csv main 1f7e523b6d5539264d3316362665506486eeea3a: 118 real items, zero enumeration warnings, 17 columns/6 editable fields; session JSON 114257 bytes and CSV 97461 bytes. Three rows across open/in-progress/terminal states applied; one concurrent unedited field survived. Retry applied zero. Four whole-corpus raw-document/history hash comparisons proved zero writes for unchanged import, retry, second-editor conflict and altered revision. Actual built CLI exported 118 items with no git executable. Full-table JSON/TOON receipts measured 89/61 bytes. Single sample took 31.32 seconds. Details: docs/spreadsheet-validation.md."
+  "2026-10-21T20:18:51.013Z",codex-agent,"Behavioral revert proof: replaced only conflicts() with an empty conflict list, then ran node --test --test-name-pattern=\"two editors|native writer after preflight\" test/roundtrip.test.ts. Both selected regressions failed (0 pass, 2 fail, exit 1) because expected conflict refusals disappeared. Restored the function byte-for-byte. With the guard restored the targeted suite passes 12/12, and roundtrip.ts measures 100% lines, 100% branches and 100% functions under targeted V8 coverage. Typecheck, test typecheck, lint, docstrings and duplication checks pass. Full unchanged npm/Bun release gates will run in CI."
+  "2026-10-21T20:20:54.652Z",codex-agent,"Final targeted suite now passes 13/13 through the PM-linked runner. Added a native-convergence receipt regression: applied counts only rows actually mutated during this attempt, including zero when a native writer supplies the desired value after preflight. Local typecheck/test-typecheck/lint/docstring/duplication checks pass. Test-result tracking is disabled by existing project policy, so the linked runner printed success without persisting a run record; this comment records its 13 pass / 0 fail / 0 skip result. No tracker policy was changed."
+files[3]{path,scope}:
+  index.ts,project
+  roundtrip.ts,project
+  test/roundtrip.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npm exec -- node --test test/roundtrip.test.ts,project,codex-agent,"2026-10-21T20:18:52.997Z",local_mutation,feat/conflict-aware-roundtrip
+docs[2]{path,scope}:
+  docs/spreadsheet-roundtrip.md,project
+  docs/spreadsheet-validation.md,project
+body: ""

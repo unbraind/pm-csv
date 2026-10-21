@@ -5,6 +5,8 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { certifyCompleteListResult, inspectCompleteListResult, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
 
+import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
 import type {
@@ -2925,6 +2927,57 @@ export default {
       { name: "csv_source", type: "string", optional: true },
     ]);
 
+    api.registerCommand({
+      name: "csv checkout",
+      description: "Export a conflict-aware CSV edit session and immutable baseline JSON (maximum 1000 items).",
+      flags: [
+        { long: "--output", value_name: "file", description: "New CSV filename; baseline uses <file>.session.json" },
+        { long: "--ids", value_name: "ids", description: "Comma-separated canonical item IDs (default: complete tracker)" },
+      ],
+      async run(ctx) {
+        const output = ctx.options["output"] as string | undefined;
+        if (!output) throw new EditRefusal("csv_edit_invalid", "Provide --output items.csv; retain items.csv.session.json alongside the CSV.");
+        const selection = ctx.options["ids"] as string | undefined;
+        const ids = selection ? selection.split(",").map(id => id.trim())
+          : parseCSV(buildCsvExport(ctx.pm_root, { delimiter: ",", columns: ["id"] }).csvText).slice(1).map(row => row[0]);
+        const { session, table } = await exportEditSession(ctx.pm_root, ids);
+        // Exclusive creation prevents accidental replacement of an earlier edit session.
+        try {
+          writeFileSync(`${output}.session.json`, JSON.stringify(session), { encoding: "utf8", flag: "wx", mode: 0o600 });
+          writeFileSync(output, serializeCSV(table, ",") + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });
+        } catch {
+          throw new EditRefusal("csv_edit_invalid", "Use new writable checkout filenames. Existing files were preserved; an incomplete new baseline may remain if CSV creation failed.");
+        }
+        return { exported: session.rows.length, session: session.digest };
+      },
+    });
+    api.registerCommand({
+      name: "csv apply",
+      description: "Apply an edited checkout as a three-way patch; conflicts refuse before application.",
+      arguments: [{ name: "file", required: true, description: "Edited checkout CSV" }],
+      flags: [
+        { long: "--session", value_name: "file", description: "Baseline JSON (default: <file>.session.json)" },
+        { long: "--dry-run", description: "Read-only conflict check and compact patch counts" },
+      ],
+      async run(ctx) {
+        const file = ctx.args[0];
+        if (!file) throw new EditRefusal("csv_edit_invalid", "Provide the edited CSV filename.");
+        const baseline = (ctx.options["session"] as string | undefined) ?? `${file}.session.json`;
+        let session: unknown;
+        let text: string;
+        try {
+          session = JSON.parse(readFileSync(baseline, "utf8")) as unknown;
+          text = stripBOM(readFileSync(file, "utf8"));
+        } catch {
+          throw new EditRefusal("csv_session_invalid", "Provide a readable CSV and the unchanged checkout session JSON.");
+        }
+        return { ...await applyEditSession(ctx.pm_root, session, parseCSV(text), {
+          author: (ctx.global["author"] as string | undefined) ?? "pm-csv",
+          dryRun: readBoolOption(ctx.options, "dry-run", "dryRun"),
+        }) };
+      },
+    });
+
     // -----------------------------------------------------------------------
     // Command: pm csv import <file>
     // -----------------------------------------------------------------------
@@ -3279,3 +3332,6 @@ export { importCSV };
 export type { CsvExportOptions, CsvImportOptions };
 // `describePmNullStatus` is exported at its declaration above.
 export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };
+
+export { applyEditSession, exportEditSession, parseEditSession, editSessionHeader, EDIT_FIELDS, EditRefusal } from "./roundtrip.ts";
+export type { EditSession, EditSessionRow, EditField, EditReceipt, EditConflict, EditRefusalCode } from "./roundtrip.ts";
