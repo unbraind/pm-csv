@@ -1,0 +1,14 @@
+id: pm-csv-github-2b408bfa2d7f-134
+title: Daily Release workflow is failing
+description: "GH issue #134: https://github.com/unbraind/pm-csv/issues/134 · author @github-actions[bot] · state reason completed · created 2026-09-23T08:54:00Z · updated 2026-09-25T07:52:12Z"
+type: Issue
+status: closed
+priority: 2
+tags[3]: "gh:unbraind/pm-csv#134","github_author:github-actions[bot]",release-failure
+created_at: "2026-10-21T07:48:09.771Z"
+updated_at: "2026-10-21T07:48:09.850Z"
+closed_at: "2026-10-21T07:48:09.846Z"
+completed_at: "2026-09-25T07:52:12.000Z"
+author: pm-github
+close_reason: GitHub issue #134 closed
+body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-csv/actions/runs/35838537739\n- Commit: ccc7765700cc624977a8294adc73c229e83c69d5\n- Date (UTC): 2026-09-23T08:53:58Z\n\n\n---\n\n### GitHub comments (1)\n\n> **@unbraind** (2026-09-25T07:52:12Z)\n>\n> Resolved by hand on 2026-09-25. Run 35838537739 published pm-csv@2026.9.23 to npm with a provenance attestation (gitHead 3002a93 = tag v2026.09.23) and pushed the tag, then bun's registry mirror still answered \"No version matching 2026.9.23\" after 8 attempts (4 minutes), so the job failed before creating the GitHub Release. Verified today: `bun add pm-csv@2026.9.23` resolves, and the Release now exists: https://github.com/unbraind/pm-csv/releases/tag/v2026.09.23 (notes list the four dependency bumps in the tag window; no pm items closed in it). The durable fix (10-minute bun window, Release no longer gated on bun, visible gate step) is already on 12 fleet repos and lands here in the 2026-09-25 wave PR; tracking pm-cli-website-3y5d in the companion hub."

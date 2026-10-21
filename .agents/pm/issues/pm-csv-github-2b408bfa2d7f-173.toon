@@ -1,0 +1,11 @@
+id: pm-csv-github-2b408bfa2d7f-173
+title: Daily Release workflow is failing
+description: "GH issue #173: https://github.com/unbraind/pm-csv/issues/173 · author @github-actions[bot] · created 2026-10-20T09:06:27Z · updated 2026-10-20T09:06:27Z"
+type: Issue
+status: open
+priority: 2
+tags[3]: "gh:unbraind/pm-csv#173","github_author:github-actions[bot]",release-failure
+created_at: "2026-10-21T07:48:09.869Z"
+updated_at: "2026-10-21T07:48:09.916Z"
+author: pm-github
+body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-csv/actions/runs/39395169163\n- Commit: fda9c1fbf5420230cfc7ec6b7dae0796262313f2\n- Date (UTC): 2026-10-20T09:06:24Z"
