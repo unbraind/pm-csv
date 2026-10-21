@@ -2,16 +2,22 @@ id: pm-csv-j60x
 title: Enable the gated GitHub issue sync
 description: Add a SHA-pinned scheduled caller for the audited gated issue import into this package tracker. Keep dependency versions and gate thresholds unchanged.
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[3]: changed,github-sync,maintenance
 created_at: "2026-10-14T11:25:26.412Z"
-updated_at: "2026-10-15T12:28:21.651Z"
+updated_at: "2026-10-21T19:02:37.100Z"
+closed_at: "2026-10-21T19:02:32.764Z"
+completed_at: "2026-10-21T19:02:32.764Z"
 author: codex-agent
-comments[3]{created_at,author,text}:
+resolution: Delivered by the audit-linked mainline implementation.
+expected_result: Enable the gated GitHub issue sync.
+actual_result: "Re-verified unchanged main 1f7e523b6d55: .github/workflows/pm-github-sync.yml retain immutable reusable-workflow pins; runtime scheduled-job success is outside this closure."
+comments[4]{created_at,author,text}:
   "2026-10-14T11:25:42.066Z",codex-agent,"Plan: add the independently authored scheduled thin caller pinned to the audited workflow SHA and matching published extension version. Preserve dependencies, merge-driver scripts, and thresholds. Verify npm and Bun release gates and audits; leave the item open for orchestrator review. No TypeScript functions change, so a function revert regression test does not apply."
   "2026-10-14T11:26:20.236Z",codex-agent,"Before audit: all dependencies 0 vulnerabilities; production 0. No direct fast-glob or jscpd4 devDependency, so dependency manifests stay unchanged. Schedule: 17 2 * * * UTC. Skipped: actionlint is not installed and offline npm fallback is uncached."
   "2026-10-14T12:13:18.669Z",codex-agent,"Verification: npm release:check status passed (tests 283; pass 283; fail 0; skipped 0); Bun release:check status passed (tests 283; pass 283; fail 0; skipped 0). Both use a scratch HOME, cleared PM_PATH and PM_AUTHOR, and disabled global/system Git configuration at unchanged thresholds. After audit: all 0, production 0. npm ls braces empty: True. Skipped: actionlint is not installed and offline npm fallback is uncached. No workflow dispatch, merge, release, or bot requests. Behavioural function revert proof is inapplicable to this caller-only change."
+  "2026-10-21T19:01:53.722Z",codex-agent,"Tracker reconciliation authorized for the audited verdict FIXED-STALE. Re-verified unchanged main 1f7e523b6d55: .github/workflows/pm-github-sync.yml retain immutable reusable-workflow pins; runtime scheduled-job success is outside this closure. Enable the gated GitHub issue sync. The SHA-pinned .github/workflows/pm-github-sync.yml caller is present on main; current package.json also records the adopted toolchain. Runtime workflow failures are a separate concern. Scope: tracker state only; no new runtime certification or deployment claim."
 files[1]{path,scope,note}:
   .github/workflows/pm-github-sync.yml,project,SHA-pinned scheduled caller
 tests[2]{command,scope,timeout_seconds,pm_context_mode,workspace_context_mode,provenance{author,created_at,source_kind,source_ref}}:
@@ -19,4 +25,5 @@ tests[2]{command,scope,timeout_seconds,pm_context_mode,workspace_context_mode,pr
   "env -u PM_PATH -u PM_AUTHOR HOME=$(mktemp -d) GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bun run release:check",project,2400,tracker,source,codex-agent,"2026-10-14T11:26:16.345Z",local_mutation,chore/gated-issue-sync-and-braces-free-gates
 docs[1]{path,scope,note}:
   CHANGELOG.md,project,Regenerated package changelog
+close_reason: "Re-verified unchanged main 1f7e523b6d55: .github/workflows/pm-github-sync.yml retain immutable reusable-workflow pins; runtime scheduled-job success is outside this closure. Audit delivery: Enable the gated GitHub issue sync. The SHA-pinned .github/workflows/pm-github-sync.yml caller is present on main; current package.json also records the adopted toolchain. Runtime workflow failures are a separate concern."
 body: ""

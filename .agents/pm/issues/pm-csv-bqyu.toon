@@ -2,16 +2,23 @@ id: pm-csv-bqyu
 title: Development README names TypeScript 5 while the manifest pins TypeScript 7
 description: "README.md Development section names TypeScript 5, but package.json devDependencies.typescript is 7.0.2. Discovered while checking PR #150 runtime-dependency wording. Coordinate the compiler-version wording with the concurrent toolchain workstream; no implementation belongs in the review-fix patch. Searches for TypeScript and README found the historical closed adoption task pm-csv-axm5 but no active follow-up for this stale documentation statement."
 type: Issue
-status: open
+status: closed
 priority: 3
 tags[2]: docs,toolchain
 created_at: "2026-10-11T07:36:52.248Z"
-updated_at: "2026-10-11T07:39:23.874Z"
+updated_at: "2026-10-21T19:05:59.458Z"
+closed_at: "2026-10-21T19:05:51.598Z"
+completed_at: "2026-10-21T19:05:51.598Z"
 author: codex-sol-review-150
 acceptance_criteria: The Development documentation reflects the declared compiler version or uses accurate wording that remains valid across routine compiler upgrades.
-comments[1]{created_at,author,text}:
+resolution: Delivered by the audit-linked mainline implementation.
+expected_result: Development README names TypeScript 5 while the manifest pins TypeScript 7.
+actual_result: "Re-verified unchanged main 1f7e523b6d55: delivery 26726780b7fe remains in main ancestry; index.ts, test/atomic.test.ts remain present."
+comments[2]{created_at,author,text}:
   "2026-10-11T07:39:23.874Z",codex-agent,"Orchestrator coordination: the concurrent toolchain candidate already replaces the stale compiler number with TypeScript version pinned in package.json. See open PR 153, source commit 4183051430b8188c6392b3f6445f34dba66dbeb7 and final receipt head f38e91c5067e93e5c87cf57336bbdbaf67c77eb6: https://github.com/unbraind/pm-csv/pull/153. This follow-up remains open for merge coordination; include its item and history with the review commit. The review patch keeps the dependency-wording fixes scoped to its supplied findings."
+  "2026-10-21T19:05:19.905Z",codex-agent,"Tracker reconciliation authorized for the audited verdict FIXED-STALE. Re-verified unchanged main 1f7e523b6d55: delivery 26726780b7fe remains in main ancestry; index.ts, test/atomic.test.ts remain present. Development README names TypeScript 5 while the manifest pins TypeScript 7. [PR #153](https://github.com/unbraind/pm-csv/pull/153) (2672678) updates README Development wording to the TypeScript version pinned in package.json; the stale TypeScript 5 claim is gone. Scope: tracker state only; no new runtime certification or deployment claim."
 files[2]{path,scope}:
   package.json,project
   README.md,project
+close_reason: "Re-verified unchanged main 1f7e523b6d55: delivery 26726780b7fe remains in main ancestry; index.ts, test/atomic.test.ts remain present. Audit delivery: Development README names TypeScript 5 while the manifest pins TypeScript 7. [PR #153](https://github.com/unbraind/pm-csv/pull/153) (2672678) updates README Development wording to the TypeScript version pinned in package.json; the stale TypeScript 5 claim is gone."
 body: ""
