@@ -20,8 +20,14 @@ can be saved with CRLF or a BOM. Keep column names/order and digest cells intact
 Rows may be reordered or omitted. Omission never deletes an item. Blank optional
 scalar cells unset that metadata; blank body clears it. Priority must be 0..4,
 and title must be nonblank. Scalar edits must be trimmed. Body uses the host's
-canonical trailing-whitespace normalization. CSV formula evaluation depends on
-the spreadsheet: import all columns as text to preserve values and digests.
+canonical trailing-whitespace normalization. Checkout prefixes editable values
+that start with `=`, `+`, `-`, `@`, tab, carriage return or an apostrophe
+with an apostrophe. Apply removes one recognized display prefix before comparison
+and storage, preserving raw baseline values and digests. Keep these prefixes when
+saving the CSV. For new formula-leading or apostrophe-leading values, use the
+same escape convention (for example, `'=SUM(1,2)` or `''literal`). Import all
+columns as text to preserve the literal CSV strings and digests; spreadsheet
+applications can otherwise change values or strip the display escape.
 
 Checkout writes `planning.csv` and `planning.csv.session.json` exclusively, with
 owner-only file permissions. Existing files are never overwritten. If CSV
@@ -78,7 +84,10 @@ mutations in this attempt; convergence after preflight can reduce `applied`.
 changes. An applied batch also returns its transaction ID. Refusals have stable
 codes (`csv_session_invalid`, `csv_edit_invalid`, `csv_edit_conflict`,
 `csv_edit_apply_failed`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
-`conflicts` and `conflictCount`. Diagnostics show at most twenty item/field keys,
+`conflicts` and `conflictCount`. Transaction refusals retain nested conflict keys
+and expose the original error as `cause`, including interruption and compensation
+failures. Checkout/apply IO and snapshot read refusals also retain their causes.
+Diagnostics show at most twenty item/field keys,
 with the total count, and never include cell values. Command error messages carry
 the same code, remedy and bounded conflicts; the host controls error rendering.
 

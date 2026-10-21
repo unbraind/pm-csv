@@ -83,7 +83,9 @@ async function snapshot(pmRoot: string, id: string): Promise<EditSessionRow> {
     row = await documentRow(pmRoot, id, document);
   } catch (error) {
     if (error instanceof EditRefusal) throw error;
-    throw new EditRefusal("csv_session_invalid", "Verify that every exported item still exists and is readable; export a fresh session after resolving missing items.", [{ id, fields: ["item"] }]);
+    const refusal = new EditRefusal("csv_session_invalid", "Verify that every exported item still exists and is readable; export a fresh session after resolving missing items.", [{ id, fields: ["item"] }]);
+    refusal.cause = error;
+    throw refusal;
   } finally {
     await release();
   }
@@ -111,6 +113,16 @@ export function editSessionHeader(): string[] {
   return ["_session", "id", "_revision", "_item_digest", "status", ...EDIT_FIELDS.flatMap(field => [field, `_digest_${field}`])];
 }
 
+/** Escape formula triggers and literal apostrophes without changing baseline values. */
+function toCell(value: string): string {
+  return /^[=+\-@\t\r']/.test(value) ? `'${value}` : value;
+}
+
+/** Remove only a recognized display escape before comparison and persistence. */
+function fromCell(cell: string): string {
+  return cell.startsWith("'") && /^[=+\-@\t\r']/.test(cell.slice(1)) ? cell.slice(1) : cell;
+}
+
 /** Export explicit stable keys and digests without creating tracker metadata. */
 export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
   if (ids.length > 1000 || new Set(ids).size !== ids.length || ids.some(id => !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id))) {
@@ -122,7 +134,7 @@ export async function exportEditSession(pmRoot: string, ids: readonly string[]):
   const session = { ...base, digest: digest(base) };
   return { session, table: [editSessionHeader(), ...rows.map(row => [
     session.digest, row.id, row.revision, row.itemDigest, row.status,
-    ...EDIT_FIELDS.flatMap(field => [row.values[field], row.digests[field]]),
+    ...EDIT_FIELDS.flatMap(field => [toCell(row.values[field]), row.digests[field]]),
   ])] };
 }
 
@@ -172,7 +184,7 @@ function plans(session: EditSession, table: string[][]): EditPlan[] {
     if (row[4] !== base.status) {
       throw new EditRefusal("csv_edit_invalid", "Status is read-only. Use pm close or pm reopen for lifecycle transitions, then export a fresh session.");
     }
-    const desired = Object.fromEntries(EDIT_FIELDS.map((field, index) => [field, row[5 + index * 2]])) as Record<EditField, string>;
+    const desired = Object.fromEntries(EDIT_FIELDS.map((field, index) => [field, fromCell(row[5 + index * 2])])) as Record<EditField, string>;
     // The host canonical document contract trims trailing body whitespace.
     desired.body = desired.body.trimEnd();
     const fields = EDIT_FIELDS.filter(field => desired[field] !== base.values[field]);
@@ -212,6 +224,21 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
     },
   });
   return result.changedFields.length > 0;
+}
+
+/** Collect conflict keys across cause/aggregate graphs, visiting shared or cyclic errors once. */
+function findConflicts(error: unknown): EditConflict[] {
+  const pending = [error];
+  const seen = new Set<Error>();
+  const found: EditConflict[] = [];
+  for (const current of pending) {
+    if (!(current instanceof Error) || seen.has(current)) continue;
+    seen.add(current);
+    if (current instanceof EditRefusal) found.push(...current.conflicts);
+    pending.push(current.cause);
+    if (current instanceof AggregateError) pending.push(...current.errors);
+  }
+  return found;
 }
 
 /**
@@ -261,8 +288,10 @@ export async function applyEditSession(
   });
   try {
     await commitWorkspaceTransaction({ pmRoot, transactionId: transaction, author: options.author, steps, onTransition: options.onTransition });
-  } catch {
-    throw new EditRefusal("csv_edit_apply_failed", `Inspect and reconcile transaction ${transaction} before retrying. Item guards prevented conflicting overwrites; reverse compensation was attempted and may have refused a concurrent writer.`);
+  } catch (error) {
+    const refusal = new EditRefusal("csv_edit_apply_failed", `Inspect and reconcile transaction ${transaction} before retrying. Item guards prevented conflicting overwrites; reverse compensation was attempted and may have refused a concurrent writer.`, findConflicts(error));
+    refusal.cause = error;
+    throw refusal;
   }
   return { ...receipt, applied, transaction };
 }

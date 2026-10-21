@@ -2945,8 +2945,10 @@ export default {
         try {
           writeFileSync(`${output}.session.json`, JSON.stringify(session), { encoding: "utf8", flag: "wx", mode: 0o600 });
           writeFileSync(output, serializeCSV(table, ",") + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });
-        } catch {
-          throw new EditRefusal("csv_edit_invalid", "Use new writable checkout filenames. Existing files were preserved; an incomplete new baseline may remain if CSV creation failed.");
+        } catch (error) {
+          const refusal = new EditRefusal("csv_edit_invalid", "Use new writable checkout filenames. Existing files were preserved; an incomplete new baseline may remain if CSV creation failed.");
+          refusal.cause = error;
+          throw refusal;
         }
         return { exported: session.rows.length, session: session.digest };
       },
@@ -2968,8 +2970,10 @@ export default {
         try {
           session = JSON.parse(readFileSync(baseline, "utf8")) as unknown;
           text = stripBOM(readFileSync(file, "utf8"));
-        } catch {
-          throw new EditRefusal("csv_session_invalid", "Provide a readable CSV and the unchanged checkout session JSON.");
+        } catch (error) {
+          const refusal = new EditRefusal("csv_session_invalid", "Provide a readable CSV and the unchanged checkout session JSON.");
+          refusal.cause = error;
+          throw refusal;
         }
         return { ...await applyEditSession(ctx.pm_root, session, parseCSV(text), {
           author: (ctx.global["author"] as string | undefined) ?? "pm-csv",

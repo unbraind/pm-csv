@@ -9,7 +9,7 @@ import test from "node:test";
 import { create, getHistoryPath, update, WorkspaceTransactionInterruptedError } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { parseCSV, serializeCSV } from "../index.ts";
-import { applyEditSession, EditRefusal, exportEditSession, parseEditSession } from "../roundtrip.ts";
+import { applyEditSession, EDIT_FIELDS, EditRefusal, exportEditSession, parseEditSession } from "../roundtrip.ts";
 import type { EditSession } from "../roundtrip.ts";
 import { readUpdateDocument, readUpdateSnapshot } from "../atomic-update.ts";
 
@@ -219,7 +219,13 @@ test("missing and history-drifted items refuse with remedies", async () => {
     writeFileSync(item.located.itemPath, item.raw.replace("First", "Unaudited"));
     await assert.rejects(exportEditSession(f.root, f.ids), refusal("csv_session_invalid"));
     rmSync(item.located.itemPath);
-    await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test" }), refusal("csv_session_invalid"));
+    await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test" }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_session_invalid");
+      assert.ok(error.cause instanceof Error);
+      assert.match(error.cause.message, /missing/);
+      return true;
+    });
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -234,7 +240,14 @@ test("a native writer after preflight is checked inside the item lock and prior 
         injected = true;
         await update(f.ids[1], { title: "Native writer wins" }, { pmRoot: f.root });
       }
-    } }), refusal("csv_edit_apply_failed"));
+    } }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_edit_apply_failed");
+      assert.deepEqual(error.conflicts, [{ id: f.ids[1], fields: ["title"] }]);
+      assert.ok(error.cause instanceof EditRefusal);
+      assert.equal(error.cause.code, "csv_edit_conflict");
+      return true;
+    });
     assert.equal(injected, true);
     assert.equal((await readUpdateDocument(f.root, f.ids[0])).metadata.title, "First");
     assert.equal((await readUpdateDocument(f.root, f.ids[1])).metadata.title, "Native writer wins");
@@ -246,9 +259,16 @@ test("interrupted transaction resumes stable row identities when earlier rows al
   try {
     edit(f.table, 1, "sprint", "next");
     edit(f.table, 2, "title", "Terminal retry");
+    const interrupted = new WorkspaceTransactionInterruptedError();
     await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test", onTransition(event) {
-      if (event.transition === "step_applied") throw new WorkspaceTransactionInterruptedError();
-    } }), refusal("csv_edit_apply_failed"));
+      if (event.transition === "step_applied") throw interrupted;
+    } }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_edit_apply_failed");
+      assert.equal(error.cause, interrupted);
+      assert.deepEqual(error.conflicts, []);
+      return true;
+    });
     const result = await applyEditSession(f.root, f.session, f.table, { author: "csv-test" });
     assert.equal(result.applied, 1);
     assert.equal((await readUpdateDocument(f.root, f.ids[0])).metadata.sprint, "next");
@@ -263,7 +283,13 @@ test("command checkout/apply shares the typed protocol and emits compact data", 
     const file = join(f.root, "items.csv");
     await assert.rejects(harness.runCommand({ command: "csv checkout", pmRoot: f.root }), refusal("csv_edit_invalid"));
     await assert.rejects(harness.runCommand({ command: "csv apply", pmRoot: f.root }), refusal("csv_edit_invalid"));
-    await assert.rejects(harness.runCommand({ command: "csv apply", args: [file], pmRoot: f.root }), refusal("csv_session_invalid"));
+    await assert.rejects(harness.runCommand({ command: "csv apply", args: [file], pmRoot: f.root }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_session_invalid");
+      assert.ok(error.cause instanceof Error);
+      assert.equal((error.cause as NodeJS.ErrnoException).code, "ENOENT");
+      return true;
+    });
     const exported = await harness.runCommand({ command: "csv checkout", options: { output: file }, pmRoot: f.root });
     assert.ok(JSON.stringify(exported.result).length < 200);
     const table = parseCSV(readFileSync(file, "utf8"));
@@ -280,7 +306,13 @@ test("command checkout/apply shares the typed protocol and emits compact data", 
     const selection = await harness.runCommand({ command: "csv checkout", options: { ids: f.ids[1], output: selected }, pmRoot: f.root });
     assert.equal((selection.result as Record<string, unknown>).exported, 1);
     // Existing files must never be overwritten by checkout.
-    await assert.rejects(harness.runCommand({ command: "csv checkout", options: { ids: f.ids[1], output: selected }, pmRoot: f.root }), refusal("csv_edit_invalid"));
+    await assert.rejects(harness.runCommand({ command: "csv checkout", options: { ids: f.ids[1], output: selected }, pmRoot: f.root }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_edit_invalid");
+      assert.ok(error.cause instanceof Error);
+      assert.equal((error.cause as NodeJS.ErrnoException).code, "EEXIST");
+      return true;
+    });
   } finally { await harness.deactivate(); rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -355,5 +387,97 @@ test("fully convergent native race reports zero applied rows and appends no patc
     assert.equal(result.changed, 1);
     assert.equal(result.applied, 0);
     assert.equal(readFileSync(getHistoryPath(f.root, f.ids[0]), "utf8"), nativeHistory);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+test("spreadsheet display escapes preserve formula triggers and apostrophes through CSV, no-op and edited apply", async () => {
+  const f = await fixture();
+  try {
+    const values = ["=SUM(1,2)", "+formula", "-formula", "@formula", "\tformula", "\rformula", "'literal", "''two", "ordinary", ""];
+    const ids: string[] = [];
+    for (const [index, body] of values.entries()) {
+      const item = await create({ title: `=row-${index}`, body, assignee: "+owner", sprint: "-sprint", release: "@release" }, { pmRoot: f.root });
+      ids.push(item.item.id);
+    }
+    const { session, table } = await exportEditSession(f.root, ids);
+    const parsed = parseCSV(serializeCSV(table, { delimiter: ",", eol: "\r\n" }));
+    for (const [index, row] of session.rows.entries()) {
+      assert.equal(row.values.body, values[index]);
+      for (const field of EDIT_FIELDS) {
+        const raw = row.values[field];
+        const column = table[0].indexOf(field);
+        const expected = field === "priority" || (field === "body" && index >= 8) ? raw : `'${raw}`;
+        assert.equal(parsed[index + 1][column], expected);
+        assert.equal(parsed[index + 1][column + 1], row.digests[field]);
+      }
+    }
+    const before = await evidence(f.root, ids);
+    assert.equal((await applyEditSession(f.root, session, parsed, { author: "csv-test" })).applied, 0);
+    assert.deepEqual(await evidence(f.root, ids), before);
+    edit(parsed, 1, "body", "'=edited-formula");
+    edit(parsed, 1, "title", "''literal-title");
+    edit(parsed, 1, "assignee", "'ordinary-apostrophe");
+    assert.equal((await applyEditSession(f.root, session, parsed, { author: "csv-test" })).applied, 1);
+    const changed = await readUpdateDocument(f.root, ids[0]);
+    assert.equal(changed.body, "=edited-formula");
+    assert.equal(changed.metadata.title, "'literal-title");
+    assert.equal(changed.metadata.assignee, "'ordinary-apostrophe");
+    const after = await evidence(f.root, ids);
+    assert.equal((await applyEditSession(f.root, session, parsed, { author: "csv-test" })).applied, 0);
+    assert.deepEqual(await evidence(f.root, ids), after);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("transaction failures retain native conflicts and compensation refusal causes without echoing values", async () => {
+  const f = await fixture();
+  try {
+    edit(f.table, 1, "title", "First spreadsheet patch");
+    edit(f.table, 2, "title", "Second spreadsheet patch");
+    let injected = false;
+    await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test", async onTransition(event) {
+      if (event.transition === "step_applied" && !injected) {
+        injected = true;
+        await update(f.ids[0], { title: "Newer first writer" }, { pmRoot: f.root });
+        await update(f.ids[1], { title: "Newer second writer" }, { pmRoot: f.root });
+      }
+    } }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.equal(error.code, "csv_edit_apply_failed");
+      assert.deepEqual(error.conflicts, [{ id: f.ids[1], fields: ["title"] }]);
+      assert.equal(error.conflictCount, 1);
+      assert.ok(error.cause instanceof AggregateError);
+      assert.ok(error.cause.errors[0] instanceof EditRefusal);
+      assert.match(error.cause.errors[1].message, /concurrent writer/);
+      assert.equal(error.cause.cause, error.cause.errors[1]);
+      assert.doesNotMatch(error.message, /Newer|spreadsheet patch/);
+      return true;
+    });
+    assert.equal(injected, true);
+    assert.equal((await readUpdateDocument(f.root, f.ids[0])).metadata.title, "Newer first writer");
+    assert.equal((await readUpdateDocument(f.root, f.ids[1])).metadata.title, "Newer second writer");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("transaction diagnostics traverse nested shared and cyclic causes and tolerate non-Error throws", async () => {
+  const f = await fixture();
+  try {
+    const conflict = new EditRefusal("csv_edit_conflict", "Re-export", [{ id: f.ids[0], fields: ["title"] }]);
+    const wrapper = new Error("wrapped", { cause: conflict });
+    const aggregate = new AggregateError([wrapper, conflict, null], "aggregate", { cause: wrapper });
+    conflict.cause = aggregate;
+    for (const original of [aggregate, "non-error", null]) {
+      const fresh = await exportEditSession(f.root, f.ids);
+      edit(fresh.table, 1, "title", "Pending edit");
+      await assert.rejects(applyEditSession(f.root, fresh.session, fresh.table, { author: "csv-test", onTransition(event) {
+        if (event.transition === "prepared") throw original;
+      } }), error => {
+        assert.ok(error instanceof EditRefusal);
+        assert.equal(error.code, "csv_edit_apply_failed");
+        assert.equal(error.cause, original);
+        assert.deepEqual(error.conflicts, original === aggregate ? [{ id: f.ids[0], fields: ["title"] }] : []);
+        return true;
+      });
+    }
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
