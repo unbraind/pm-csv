@@ -138,7 +138,7 @@ export function parseEditSession(input: unknown): EditSession {
           || !/^[a-f0-9]{64}$/.test(row.revision) || !/^[a-f0-9]{64}$/.test(row.itemDigest)
           || EDIT_FIELDS.some(field => typeof row.values[field] !== "string" || row.digests[field] !== digest([field, row.values[field]]))) throw new Error();
     }
-    return session;
+    return structuredClone(session);
   } catch {
     throw new EditRefusal("csv_session_invalid", "Use the unchanged session JSON from csv checkout; export a fresh session if it was lost or edited.");
   }
@@ -152,6 +152,9 @@ interface EditPlan {
 
 /** Parse all edited rows before reading or writing tracker state. */
 function plans(session: EditSession, table: string[][]): EditPlan[] {
+  if (!Array.isArray(table) || table.some(row => !Array.isArray(row) || row.some(cell => typeof cell !== "string"))) {
+    throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
+  }
   const header = table[0];
   if (JSON.stringify(header) !== JSON.stringify(editSessionHeader())) {
     throw new EditRefusal("csv_edit_invalid", "Keep the checkout column names and order, including all digest columns.");
@@ -226,7 +229,7 @@ export async function applyEditSession(
   const edited = planned.filter(plan => plan.fields.length > 0);
   const found: EditConflict[] = [];
   let concurrent = 0;
-  const pending: EditPlan[] = [];
+  let pending = 0;
   for (const plan of planned) {
     const current = await snapshot(pmRoot, plan.base.id);
     if (current.revision !== plan.base.revision || current.itemDigest !== plan.base.itemDigest) concurrent++;
@@ -236,11 +239,11 @@ export async function applyEditSession(
       for (const field of plan.fields) if (current.values[field] !== plan.desired[field] && !divergent.includes(field)) divergent.push(field);
     }
     if (divergent.length) found.push({ id: plan.base.id, fields: divergent });
-    if (plan.fields.some(field => current.values[field] !== plan.desired[field])) pending.push(plan);
+    if (plan.fields.some(field => current.values[field] !== plan.desired[field])) pending++;
   }
   if (found.length) throw new EditRefusal("csv_edit_conflict", "Export a fresh session and reconcile the reported fields before applying; this preflight wrote zero items.", found);
-  const receipt: EditReceipt = { rows: planned.length, changed: pending.length, unchanged: planned.length - pending.length, concurrent, applied: 0 };
-  if (options.dryRun || !pending.length) return receipt;
+  const receipt: EditReceipt = { rows: planned.length, changed: pending, unchanged: planned.length - pending, concurrent, applied: 0 };
+  if (options.dryRun || !pending) return receipt;
   // Bind the journal to the exact selected rows and edits, independent of file path.
   let applied = 0;
   const steps: WorkspaceTransactionStep[] = edited.map((plan, index) => {

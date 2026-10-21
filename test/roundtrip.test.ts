@@ -172,6 +172,7 @@ test("untrusted session structures and inconsistent field digests fail closed", 
     }
     for (const input of inputs) assert.throws(() => parseEditSession(input), refusal("csv_session_invalid"));
     assert.deepEqual(parseEditSession(f.session), f.session);
+    assert.notEqual(parseEditSession(f.session).rows[0].values, f.session.rows[0].values);
     await assert.rejects(exportEditSession(f.root, [f.ids[0].slice(-4)]), refusal("csv_session_invalid"));
     for (const ids of [[...f.ids, f.ids[0]], ["../invalid"], Array(1001).fill(f.ids[0]) as string[]]) {
       await assert.rejects(exportEditSession(f.root, ids), refusal("csv_session_invalid"));
@@ -183,6 +184,9 @@ test("altered table schema, identity/digests, lifecycle and invalid values cause
   const f = await fixture();
   try {
     const before = await evidence(f.root, f.ids);
+    for (const malformed of [null, {}, [null], [["cell", 42]]]) {
+      await assert.rejects(applyEditSession(f.root, f.session, malformed as unknown as string[][], { author: "csv-test" }), refusal("csv_edit_invalid"));
+    }
     const mutations = [
       (t: string[][]) => { t.length = 0; },
       (t: string[][]) => { t[0][0] = "renamed"; },
