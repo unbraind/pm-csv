@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.20 - 2026-10-20
+
+### Fixed
+
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
+- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
+
 ## 2026.10.12 - 2026-10-12
 
 ### Added
