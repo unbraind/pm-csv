@@ -2,20 +2,26 @@ id: pm-csv-9y0w
 title: Keep toolchain acceptance aligned with built-in merge drivers and shipped history
 description: "Repair Dependabot PR #170. The earlier assertion expected Git built-in merge=text in local driver registrations after pm-cli GH-1460; the branch already filters built-ins. The supplied job now passes all 283 tests and fails changelog:check because pm-changelog 2026.10.14 preserves a reopened item's original shipped entry. Add behavioral negative controls, regenerate the changelog, and certify the dependency branch with both release gates."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags[2]: regression,toolchain
 created_at: "2026-10-20T08:16:10.887Z"
-updated_at: "2026-10-20T08:41:59.141Z"
+updated_at: "2026-10-21T18:55:45.396Z"
+closed_at: "2026-10-21T18:55:41.887Z"
+completed_at: "2026-10-21T18:55:41.887Z"
 author: codex-agent
 estimated_minutes: 60
 acceptance_criteria: Both full release gates pass at unchanged thresholds; regression controls fail with the driver filter or generated changelog reverted; original Dependabot branch is pushed without merging.
-comments[5]{created_at,author,text}:
+resolution: Delivered by the audit-linked mainline implementation.
+expected_result: Keep toolchain acceptance aligned with built-in merge drivers and shipped history.
+actual_result: "Re-verified unchanged main 1f7e523b6d55: delivery 971dcfa03243 remains in main ancestry; package.json, test/prepare-merge-driver.test.ts remain present."
+comments[6]{created_at,author,text}:
   "2026-10-20T08:16:51.360Z",codex-agent,"Classification: intended upstream changes with stale consumer acceptance artifacts. pm-cli CHANGELOG 2026.10.14 GH-1460 (https://github.com/unbraind/pm-cli/blob/v2026.10.15/CHANGELOG.md) declares extension assets with Git's built-in text driver; only custom drivers require local registration. Existing branch commit 1da775a filters those names. Supplied job 118228111725 passes 283/283 and first exits nonzero at changelog:check. pm-changelog CHANGELOG 2026.10.14 (https://github.com/unbraind/pm-changelog/blob/v2026.10.16/CHANGELOG.md) intentionally preserves shipped entries after reopen/close, restoring the original pm-csv-yriu entry under 2026.9.6 alongside its later 2026.9.7 completion. Plan: exercise all three Git built-ins with real Git, assert both shipped entries, regenerate tracked output, prove negative controls, then run isolated npm and Bun release gates. origin/main is already an ancestor; draft state remains false."
   "2026-10-20T08:17:29.906Z",codex-agent,"Revert proof: node --test --test-name-pattern='Git resolves text' test/prepare-merge-driver.test.ts exits 1 with only customDrivers filtering reverted to return all declared drivers: expected local registrations then wrongly include binary/text/union, while real Git resolves all three without them. Restored filter: focused suite 11/11 passes. Independently restored only HEAD:CHANGELOG.md, leaving tests unchanged: node --test test/shipped-changelog.test.ts exits 1 because the 2026.9.6 original shipped entry is absent. Restored generated CHANGELOG.md; both shipped completions pass. These are consumer acceptance/artifact defects exposed by intended upstream behavior; no upstream rollback or history rewrite."
   "2026-10-20T08:30:39.985Z",codex-agent,"Full npm gate passed: env HOME=<temporary-home> GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 npm run release:check. Node 24.19.0/npm 11.17.0: 285 tests passed; failures/cancelled/skipped/todo all zero; measured lines/branches/functions all 100 percent across the unchanged three-source scope. Packed acceptance passed npm-current, bun-current, and npm-minimum (3/3), plus production audit, docstrings, duplicate gate, changelog check, attestation and release-date verification. Full Bun gate is running next on unchanged code. Linked regression run also passed 11/11; pm reports tracking_disabled, so results are recorded here."
   "2026-10-20T08:41:00.086Z",codex-agent,"Full Bun gate passed: env HOME=<temporary-home> GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bun run release:check (Bun 1.3.5), same code as npm. 285/285 tests; zero failures/cancelled/skipped/todo; 100 percent measured lines/branches/functions; 3/3 packed consumers; all static, audit, changelog and release verification stages passed. No thresholds changed. Both negative controls are restored. Item remains in_progress for orchestrator verification; claim released before commit."
   "2026-10-20T08:41:59.141Z",codex-agent,"Additional read-only checks: pm validate reports ok=true with existing advisory metadata/trust warnings. Strict health reports pm-github host-version skew (development host 2026.10.15 versus installed extension host 2026.10.19), plus stale-item advisories. This is separate from the passing release gates and is tracked as an out-of-scope follow-up; no extension or telemetry configuration changed."
+  "2026-10-21T18:55:09.709Z",codex-agent,"Tracker reconciliation authorized for the audited verdict FIXED-STALE. Re-verified unchanged main 1f7e523b6d55: delivery 971dcfa03243 remains in main ancestry; package.json, test/prepare-merge-driver.test.ts remain present. Keep toolchain acceptance aligned with built-in merge drivers and shipped history. [PR #170](https://github.com/unbraind/pm-csv/pull/170) (971dcfa) is merged with built-in-driver filtering/shipped-history acceptance tests. The task is delivered; future merge-driver work is prohibited by the 2026-10-20 contract. Scope: tracker state only; no new runtime certification or deployment claim."
 files[3]{path,scope}:
   .gitattributes,project
   test/prepare-merge-driver.test.ts,project
@@ -24,4 +30,5 @@ tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   node --test test/prepare-merge-driver.test.ts test/shipped-changelog.test.ts,project,codex-agent,"2026-10-20T08:17:43.558Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-ae58a87a51
 docs[1]{path,scope}:
   CHANGELOG.md,project
+close_reason: "Re-verified unchanged main 1f7e523b6d55: delivery 971dcfa03243 remains in main ancestry; package.json, test/prepare-merge-driver.test.ts remain present. Audit delivery: Keep toolchain acceptance aligned with built-in merge drivers and shipped history. [PR #170](https://github.com/unbraind/pm-csv/pull/170) (971dcfa) is merged with built-in-driver filtering/shipped-history acceptance tests. The task is delivered; future merge-driver work is prohibited by the 2026-10-20 contract."
 body: ""
