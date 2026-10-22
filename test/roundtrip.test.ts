@@ -52,7 +52,7 @@ function refusal(code: string) {
   };
 }
 
-test("three-way edits preserve concurrent unedited values and terminal evidence; retries perform zero writes without git", async () => {
+test("three-way edits preserve concurrent unedited values and terminal evidence; retries preserve item/history content without git", async () => {
   const f = await fixture();
   const savedPath = process.env.PATH;
   const ceiling = process.env.GIT_CEILING_DIRECTORIES;
@@ -180,7 +180,7 @@ test("untrusted session structures and inconsistent field digests fail closed", 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test("altered table schema, identity/digests, lifecycle and invalid values cause zero writes", async () => {
+test("altered table schema, identity/digests, lifecycle and invalid values preserve item/history content", async () => {
   const f = await fixture();
   try {
     const before = await evidence(f.root, f.ids);

@@ -470,10 +470,16 @@ editable fields, read-only status, bounded refusals, concurrency and recovery
 boundaries. This edit-session protocol reuses the existing SDK coordinator and
 CSV compensation; legacy keyed import remains a separate command.
 
-Conflict protection depends on the host item lease remaining valid through the
-write. The pinned SDK has no atomic write-time fence: lease expiry and takeover
-after the field check can permit a stale overwrite. This safety gap remains
-blocked on a host SDK fix; see the protocol guide and its standalone reproduction.
+Apply and compensation callbacks refuse with `csv_lease_expired` when their
+monotonic elapsed time reaches the effective item TTL minus a safety margin
+(ten percent, capped at one second). Re-run apply; another writer may have
+changed the item. Checkout and compensation snapshot reads use the same budget.
+The real SDK/CLI takeover regressions now pass in the release suite.
+
+This callback deadline is a mitigation. The host must still atomically fence
+persistence after callback return; arbitrary delays there can exhaust the
+remaining lease. That root fix belongs upstream in
+[pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549).
 
 ## Without git
 

@@ -272,3 +272,11 @@ test("public atomic contracts disclose best-effort compensation and reconciliati
   assert.match(extensionSource, /markers only after closure succeeds/u);
   assert.match(extensionSource, /following non-zero branch rejects ordinary command failures/u);
 });
+
+
+test("public tracker hashes are described as content evidence rather than write evidence", () => {
+  const validation = readFileSync(new URL("../docs/spreadsheet-validation.md", import.meta.url), "utf8");
+  assert.match(validation, /byte\/hash comparisons showing zero content changes/u);
+  assert.doesNotMatch(validation, /proving zero writes|zero-write comparisons/u);
+  assert.match(validation, /do not prove that no physical write occurred/u);
+});

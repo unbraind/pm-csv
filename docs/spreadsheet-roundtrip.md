@@ -64,20 +64,27 @@ Preflight validates the complete table and all selected items before starting a
 transaction. A malformed, changed or conflicting digest causes zero item/history
 writes and creates no transaction journal. A successful dry run is a preview,
 not a reservation: a native writer can change state immediately afterward.
-The patch rechecks each item while holding the SDK item lock. These checks
-require that the host item lease remain valid through persistence. The pinned
-SDK does not atomically verify lock ownership or document revision at write time:
-if a lease expires and another writer takes over after the check, the stale
-mutation can overwrite that writer. Protection against this case remains blocked
-on an SDK write-fencing contract; a package-level preflight or callback check
-cannot close the host's later write window. This is an unresolved safety issue,
-not a guarantee supplied by this protocol.
+The patch rechecks each item while holding the SDK item lock. Every native
+mutation callback used by apply and compensation records a monotonic start time
+and the effective `locks.ttl_seconds`. Before returning (including no-op returns),
+it refuses with typed `csv_lease_expired` when elapsed time reaches the TTL minus
+ten percent, capped at a one-second safety margin. Checkout, prior-document
+capture and representation restoration also check this budget before returning
+or writing. The remedy is: re-run apply; another writer may have changed the item.
 
-Run `node --test test/repros/sdk-lease-overrun.ts` for the standalone real-SDK
-safety assertion. It uses a disposable non-git tracker, a real one-second lease,
-and two native SDK writers. It currently fails because the stale writer commits
-over the newer value. This blocker reproduction is outside the normal release
-suite and is not counted as passing validation.
+Run `node --test test/repros/sdk-lease-overrun.ts` for two passing real-SDK
+regressions. A disposable non-git tracker uses a real one-second lease; a newer
+native SDK writer or separate CLI writer takes over while the first callback is
+suspended. The package guard refuses the stale callback and preserves the newer
+value. These cases also run in the normal release suite through
+`test/lease-guard.test.ts`, alongside actual apply and compensation wiring cases.
+
+The deadline is a package mitigation, not atomic persistence fencing. The SDK
+reads before entering the callback and persists after its return; arbitrary host
+delays in those windows can exhaust the lease despite the margin. A callback
+check cannot atomically close that later write window. The root fix belongs
+upstream in [pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549),
+verified by the owner on SDK 2026.10.22; the package dependency pin is unchanged.
 
 Ordinary failures trigger the existing SDK transaction coordinator and CSV
 full-document compensation; compensation checks for intervening writers before
@@ -100,10 +107,10 @@ mutations in this attempt; convergence after preflight can reduce `applied`.
 `concurrent` includes unedited and convergent concurrent
 changes. An applied batch also returns its transaction ID. Refusals have stable
 codes (`csv_session_invalid`, `csv_edit_invalid`, `csv_edit_conflict`,
-`csv_edit_apply_failed`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
+`csv_edit_apply_failed`, `csv_lease_expired`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
 `conflicts` and `conflictCount`. Transaction refusals retain nested conflict keys
-and expose the original error as `cause`, including interruption and compensation
-failures. Checkout/apply IO and snapshot read refusals also retain their causes.
+and expose the original error as `cause`, including lease expiration, interruption
+and compensation failures. Checkout/apply IO and snapshot read refusals also retain their causes.
 Diagnostics show at most twenty item/field keys,
 with the total count, and never include cell values. Command error messages carry
 the same code, remedy and bounded conflicts; the host controls error rendering.

@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  acquireLock, commitWorkspaceTransaction, getHistoryPath, mutateItem, PmCliError,
+  acquireLock, commitWorkspaceTransaction, getHistoryPath, mutateItem,
   readHistoryEntries, readSettings, verifyHistoryEntries,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep } from "@unbrained/pm-cli/sdk";
+import { EditRefusal } from "./edit-refusal.ts";
+import type { EditConflict } from "./edit-refusal.ts";
+import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
+export { EditRefusal } from "./edit-refusal.ts";
+export type { EditConflict, EditRefusalCode } from "./edit-refusal.ts";
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument } from "./atomic-update.ts";
 
 /** Versioned, deliberately scalar spreadsheet patch surface; status is read-only. */
@@ -26,11 +31,6 @@ export interface EditSession {
   rows: EditSessionRow[];
   digest: string;
 }
-/** Compact diagnostics never echo potentially large/private cell contents. */
-export interface EditConflict {
-  id: string;
-  fields: string[];
-}
 /** Bounded agent receipt for both dry runs and successful application. */
 export interface EditReceipt {
   rows: number;
@@ -40,29 +40,6 @@ export interface EditReceipt {
   applied: number;
   transaction?: string;
 }
-/** Stable refusal taxonomy shared by SDK callers and command errors. */
-export type EditRefusalCode = "csv_session_invalid" | "csv_edit_invalid" | "csv_edit_conflict" | "csv_edit_apply_failed";
-/** Typed refusal with an actionable remedy and at most twenty conflict keys. */
-export class EditRefusal extends PmCliError {
-  /** Stable machine-readable refusal category. */
-  readonly code: EditRefusalCode;
-  /** Next action needed before retrying. */
-  readonly remedy: string;
-  /** First twenty item/field conflicts, without cell contents. */
-  readonly conflicts: EditConflict[];
-  /** Full conflict count before the diagnostic ceiling. */
-  readonly conflictCount: number;
-  constructor(code: EditRefusalCode, remedy: string, conflicts: EditConflict[] = []) {
-    const bounded = conflicts.slice(0, 20);
-    super(`${code}: ${remedy}${bounded.length ? `; conflicts=${JSON.stringify(bounded)}; total=${conflicts.length}` : ""}`, 2,
-      { code, required: remedy, nextSteps: [remedy] });
-    this.code = code;
-    this.remedy = remedy;
-    this.conflicts = bounded;
-    this.conflictCount = conflicts.length;
-  }
-}
-
 /** Hash versioned JSON tuples rather than ambiguous concatenated strings. */
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -77,10 +54,12 @@ function cells(document: ItemDocument): Record<EditField, string> {
 async function snapshot(pmRoot: string, id: string): Promise<EditSessionRow> {
   const settings = await readSettings(pmRoot);
   const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
+  const startedAt = performance.now();
   let row: EditSessionRow;
   try {
     const document = await readUpdateDocument(pmRoot, id);
     row = await documentRow(pmRoot, id, document);
+    assertEditLease(performance.now() - startedAt, settings.locks.ttl_seconds);
   } catch (error) {
     if (error instanceof EditRefusal) throw error;
     const refusal = new EditRefusal("csv_session_invalid", "Verify that every exported item still exists and is readable; export a fresh session after resolving missing items.", [{ id, fields: ["item"] }]);
@@ -207,9 +186,10 @@ function conflicts(plan: EditPlan, current: EditSessionRow): EditField[] {
 
 /** Check and apply a field patch under the host item lease; write-time fencing remains a host prerequisite. */
 async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author: string): Promise<boolean> {
-  const result = await mutateItem({ pmRoot, settings: await readSettings(pmRoot), id: plan.base.id, op: "update", author,
+  const settings = await readSettings(pmRoot);
+  const result = await mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
-    async mutate(document) {
+    mutate: guardEditMutation(settings.locks.ttl_seconds, async document => {
       const current = await documentRow(pmRoot, plan.base.id, document);
       const divergent = conflicts(plan, current);
       if (divergent.length) throw new EditRefusal("csv_edit_conflict", "Re-export and reconcile the edited fields; no conflicting value was overwritten.", [{ id: plan.base.id, fields: divergent }]);
@@ -225,7 +205,7 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
         changedFields.push(field);
       }
       return { changedFields };
-    },
+    }),
   });
   return result.changedFields.length > 0;
 }

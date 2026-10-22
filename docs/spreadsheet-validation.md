@@ -27,15 +27,17 @@ directory and invoke the pinned CLI. CLI PATH contained only Node and pm, and
 | Identical retry | 3 unchanged, 0 applied |
 | Second editor changing an already edited title | `csv_edit_conflict` |
 | Altered revision digest | `csv_edit_invalid` |
-| Whole-corpus byte/hash comparisons proving zero writes | 4 |
+| Whole-corpus byte/hash comparisons showing zero content changes | 4 |
 | Full-table preview JSON / no-op TOON receipt bytes | 89 / 61 |
 | Measured validation duration (single sample) | 31.32 seconds |
 
-The four zero-write comparisons cover unedited import, identical replay,
+The four content comparisons cover unedited import, identical replay,
 conflicting second editor and altered revision digest. Each comparison hashes
 all 118 raw item documents and their immutable history streams, rather than
-trusting command counters. Separate targeted regression tests check that stale
-preflight creates no transaction journal. The original public snapshot and the
+trusting command counters. Matching bytes do not prove that no physical write occurred;
+an identical-content rewrite would remain invisible to these comparisons.
+Separate targeted regression tests check that stale preflight creates no
+transaction journal. The original public snapshot and the
 copy contain real heterogeneous lifecycle states; the three edited rows were
 selected by status rather than fabricated as replacement tracker data.
 
