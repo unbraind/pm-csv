@@ -1,0 +1,22 @@
+id: pm-csv-review-178
+title: Correct delivery evidence in tracker reconciliation PR 178
+description: "Review follow-up for PR 178 thread PRRT_kwDOSYpI8s6vBytl: correct the README delivery receipt and any other copied evidence mismatch. The original documentation issue is delivered and stays closed; this item tracks the distinct tracker-audit correction."
+type: Chore
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-22T11:50:16.318Z"
+updated_at: "2026-10-22T11:53:07.782Z"
+author: codex-agent
+acceptance_criteria: "Current main evidence names the files that establish each affected acceptance criterion; append-only history remains intact; npm ci, changelog check and isolated strict pm health pass; no runtime changes or new item closures."
+comments[2]{created_at,author,text}:
+  "2026-10-22T11:50:39.477Z",codex-agent,"Pulled remote head 191dcf9 and merged origin/main 7b1535434fe90f6125be184c8d450e2228ba0c45 first. Read the single unresolved thread with all comments and complete pagination; latest CodeRabbit review has no Outside diff range findings. Verified all ten original reconciliation records against current main, including five delivery ancestry checks and relevant source/test files. Thread PRRT_kwDOSYpI8s6vBytl is valid: pm-csv-bqyu actual_result and close_reason cite index.ts/test/atomic.test.ts instead of README.md. Whole-PR self-review found the same copied evidence issue in pm-csv-76cu: identify its dedicated test/legacy-import-cli.test.ts and test/commands.test.ts alongside index.ts. Correct both records through the pinned CLI and append corrective comments; preserve all historical records and existing terminal states. npm ci passed with zero vulnerabilities."
+  "2026-10-22T11:52:57.442Z",codex-agent,"Tracker-only evidence proof completed against main 7b1535434fe9: README.md Development uses TypeScript version pinned in package.json and the declared version is 7.0.2; delivery 26726780b7fe is in main ancestry. Both corrected records now name the relevant files in actual_result and close_reason. An in-memory check of the original pre-fix records fails the same evidence assertions for both items (2/2 rejected); corrected records pass 2/2. Terminal status, closed_at and completed_at match the pre-fix records exactly. All 10 existing changed history streams retain both current-main and pre-fix HEAD byte prefixes. The PM-linked git diff --exit-code origin/main -- README.md package.json index.ts test/legacy-import-cli.test.ts test/commands.test.ts passed 1/1 (exit 0), proving runtime/source evidence remains identical to main. A runtime function revert is inapplicable under the tracker-only exception; the original-versus-corrected evidence check is the negative control. Existing test-result persistence is disabled, so counts are recorded here. No new PM CLI/SDK defect was encountered."
+files[2]{path,scope}:
+  .agents/pm/issues/pm-csv-bqyu.toon,project
+  .agents/pm/issues/pm-csv-76cu.toon,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  git diff --exit-code origin/main -- README.md package.json index.ts test/legacy-import-cli.test.ts test/commands.test.ts,project,codex-agent,"2026-10-22T11:51:38.958Z",local_mutation,chore/reconcile-tracker-1021
+docs[1]{path,scope}:
+  README.md,project
+body: ""

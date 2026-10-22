@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.10.22 - 2026-10-22
+## Unreleased
 
 ### Changed
 
@@ -9,9 +9,6 @@
 
 ### Fixed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
-- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 - Development README names TypeScript 5 while the manifest pins TypeScript 7 ([pm-csv-bqyu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bqyu.toon))
 - Harden the release merge wait against mergeStateStatus deadlock ([pm-csv-7izf](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7izf.toon))
 - The changelog gate stamps an untagged version with the current date, so its verdict flips every midnight with no commit ([pm-csv-bv81](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bv81.toon))
@@ -23,6 +20,14 @@
 ### Other
 
 - Certify pm-csv with pm CLI and SDK 2026.9.28 ([pm-csv-3044](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3044.toon))
+
+## 2026.10.22 - 2026-10-22
+
+### Fixed
+
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
+- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 
 ## 2026.10.12 - 2026-10-12
 
