@@ -1,0 +1,18 @@
+id: pm-csv-sdk-write-fence
+title: Host SDK allows stale item writes after lease takeover
+description: "PR 179 thread PRRT_kwDOSYpI8s6vNO6H is valid in pinned pm CLI SDK 2026.10.15. A real non-git tracker reproduction uses one-second item leases and configured automatic stale takeover: a second native writer commits while the first mutateItem callback is suspended; the stale first call then returns successfully and overwrites the second value. mutateItemWithDeferredHistoryContext persists after the callback without an atomic lease-ownership or document-revision fence. Fix belongs to the host SDK; queue rules forbid editing upstream pm-cli in this workstream. This package cannot honestly certify protection after lease expiry until that host contract is fixed."
+type: Issue
+status: open
+priority: 1
+tags: []
+created_at: "2026-10-22T13:46:22.966Z"
+updated_at: "2026-10-22T13:46:22.966Z"
+author: codex-agent
+expected_result: "The host atomically refuses stale item persistence when lease ownership or document revision changed, preserving the newer value and allowing safe transaction reconciliation."
+actual_result: "Standalone node --test test/repros/sdk-lease-overrun.ts: 0 passed / 1 failed, exit 1. takeoverCompleted=true; staleWriterRefused=false; newerValuePreserved=false. The newer committed value was replaced by the stale writer. Synthetic fixture only; no existing tracker data was used."
+files[2]{path,scope}:
+  test/repros/sdk-lease-overrun.ts,project
+  roundtrip.ts,project
+docs[1]{path,scope}:
+  docs/spreadsheet-roundtrip.md,project
+body: ""

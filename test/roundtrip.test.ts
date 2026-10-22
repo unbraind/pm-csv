@@ -449,6 +449,8 @@ test("transaction failures retain native conflicts and compensation refusal caus
       assert.ok(error.cause instanceof AggregateError);
       assert.ok(error.cause.errors[0] instanceof EditRefusal);
       assert.match(error.cause.errors[1].message, /concurrent writer/);
+      assert.match(error.remedy, /host must keep its item lease valid through the write/);
+      assert.doesNotMatch(error.remedy, /prevented conflicting overwrites/);
       assert.equal(error.cause.cause, error.cause.errors[1]);
       assert.doesNotMatch(error.message, /Newer|spreadsheet patch/);
       return true;

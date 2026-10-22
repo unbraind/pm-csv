@@ -64,10 +64,24 @@ Preflight validates the complete table and all selected items before starting a
 transaction. A malformed, changed or conflicting digest causes zero item/history
 writes and creates no transaction journal. A successful dry run is a preview,
 not a reservation: a native writer can change state immediately afterward.
-The patch therefore rechecks each item while holding the SDK item lock. A race
-cannot overwrite a divergent edited field. Ordinary failures trigger the existing
-SDK transaction coordinator and CSV full-document compensation; compensation
-refuses intervening writers rather than restoring over their work. Such a late
+The patch rechecks each item while holding the SDK item lock. These checks
+require that the host item lease remain valid through persistence. The pinned
+SDK does not atomically verify lock ownership or document revision at write time:
+if a lease expires and another writer takes over after the check, the stale
+mutation can overwrite that writer. Protection against this case remains blocked
+on an SDK write-fencing contract; a package-level preflight or callback check
+cannot close the host's later write window. This is an unresolved safety issue,
+not a guarantee supplied by this protocol.
+
+Run `node --test test/repros/sdk-lease-overrun.ts` for the standalone real-SDK
+safety assertion. It uses a disposable non-git tracker, a real one-second lease,
+and two native SDK writers. It currently fails because the stale writer commits
+over the newer value. This blocker reproduction is outside the normal release
+suite and is not counted as passing validation.
+
+Ordinary failures trigger the existing SDK transaction coordinator and CSV
+full-document compensation; compensation checks for intervening writers before
+restoring and depends on the same host lease contract. Such a late
 failure can append history or leave mutations pending reconciliation: it is not a
 database rollback or a promise of zero history writes after application starts.
 Respect the `csv_edit_apply_failed` remedy and inspect the named transaction.

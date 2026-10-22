@@ -205,7 +205,7 @@ function conflicts(plan: EditPlan, current: EditSessionRow): EditField[] {
   return plan.fields.filter(field => current.values[field] !== plan.base.values[field] && current.values[field] !== plan.desired[field]);
 }
 
-/** Apply a patch inside the SDK item lock, preserving unrelated fields and lifecycle evidence. */
+/** Check and apply a field patch under the host item lease; write-time fencing remains a host prerequisite. */
 async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author: string): Promise<boolean> {
   const result = await mutateItem({ pmRoot, settings: await readSettings(pmRoot), id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
@@ -246,10 +246,11 @@ function findConflicts(error: unknown): EditConflict[] {
 }
 
 /**
- * Three-way patch using stable item keys, field-level CAS and the existing SDK
+ * Three-way patch using stable item keys, field-level conflict checks and the existing SDK
  * transaction/CSV compensation. Preflight refusals create no transaction or
- * item/history writes. A later race is guarded under each native item lock;
- * prior rows are compensated, and failure explicitly requires reconciliation.
+ * item/history writes. Field checks run under each native item lease; protection
+ * after lease expiry needs host write fencing. Prior rows are compensated on
+ * ordinary failure, which explicitly requires reconciliation.
  */
 export async function applyEditSession(
   pmRoot: string, input: unknown, table: string[][], options: { author: string; dryRun?: boolean; onTransition?: CommitWorkspaceTransactionOptions["onTransition"] },
@@ -293,7 +294,7 @@ export async function applyEditSession(
   try {
     await commitWorkspaceTransaction({ pmRoot, transactionId: transaction, author: options.author, steps, onTransition: options.onTransition });
   } catch (error) {
-    const refusal = new EditRefusal("csv_edit_apply_failed", `Inspect and reconcile transaction ${transaction} before retrying. Item guards prevented conflicting overwrites; reverse compensation was attempted and may have refused a concurrent writer.`, findConflicts(error));
+    const refusal = new EditRefusal("csv_edit_apply_failed", `Inspect and reconcile transaction ${transaction} before retrying. Item fields were checked before persistence; the host must keep its item lease valid through the write. Reverse compensation was attempted and may have refused a concurrent writer.`, findConflicts(error));
     refusal.cause = error;
     throw refusal;
   }

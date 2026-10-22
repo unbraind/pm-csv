@@ -187,6 +187,11 @@ test("the README points to the manifest and lockfile for exact gate pins", () =>
   assert.doesNotMatch(readme, /gates are pinned to pm CLI\/SDK \d/u);
 });
 
+test("spreadsheet comparison is attributed to apply rather than legacy import", () => {
+  assert.match(readme, /`pm csv apply planning\.csv --json`\. Apply compares baseline, spreadsheet and\s+current tracker values/u);
+  assert.doesNotMatch(readme, /Import compares baseline, spreadsheet/u);
+});
+
 test("the extension manifest declares the same floor enforced by the peer dependency", () => {
   const peer = manifest.peerDependencies?.[HOST_CLI];
   assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency`);

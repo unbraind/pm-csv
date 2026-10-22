@@ -460,7 +460,7 @@ older blunt `pm history-repair --all` remains available as a lower-level primiti
 Use `pm csv checkout --output planning.csv` to export an editable table with
 explicit item/revision/field digests and a baseline JSON file. Edit scalar cells,
 then run `pm csv apply planning.csv --dry-run --json` followed by
-`pm csv apply planning.csv --json`. Import compares baseline, spreadsheet and
+`pm csv apply planning.csv --json`. Apply compares baseline, spreadsheet and
 current tracker values, refuses conflicting changes before application, and
 preserves changes to unedited fields. Identical retries write no item/history
 records, including for terminal keyed items.
@@ -469,6 +469,11 @@ See the [protocol and CLI/typed SDK example](docs/spreadsheet-roundtrip.md) for
 editable fields, read-only status, bounded refusals, concurrency and recovery
 boundaries. This edit-session protocol reuses the existing SDK coordinator and
 CSV compensation; legacy keyed import remains a separate command.
+
+Conflict protection depends on the host item lease remaining valid through the
+write. The pinned SDK has no atomic write-time fence: lease expiry and takeover
+after the field check can permit a stale overwrite. This safety gap remains
+blocked on a host SDK fix; see the protocol guide and its standalone reproduction.
 
 ## Without git
 
