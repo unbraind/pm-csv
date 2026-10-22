@@ -26,6 +26,8 @@ interface AcceptanceReceipt {
   readonly stderr_bytes: number;
   readonly created_fixture_present: true;
   readonly imported_fixture_present: true;
+  readonly lineage_imported: 1;
+  readonly lineage_replayed: 1;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -145,6 +147,17 @@ try {
     if (exported.stderr.includes("deprecated") || exported.stderr.includes("list-all")) {
       throw new Error(`${scenario.name} pm csv export emitted a deprecated-command diagnostic: ${exported.stderr.trim()}`);
     }
+    const bundleInput = join(scenarioRoot, "lineage.csv");
+    writeFileSync(bundleInput, "title,priority,excluded\nPacked lineage,2,omit\n,9,omit\n");
+    const firstBundle = join(scenarioRoot, "lineage-first");
+    const bundleOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority", "--output", firstBundle]);
+    const receipt = JSON.parse(bundleOutput.stdout) as Record<string, unknown>;
+    if (receipt.imported !== 1 || receipt.rejected !== 1 || receipt.replayed !== 0) throw new Error(`${scenario.name} lineage import counts differ`);
+    const manifest = readFileSync(join(firstBundle, "manifest.json"), "utf8");
+    if (manifest.includes("excluded") || manifest.includes('"omit"')) throw new Error(`${scenario.name} lineage disclosed excluded cells`);
+    const retryOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority", "--output", join(scenarioRoot, "lineage-replay")]);
+    const replay = JSON.parse(retryOutput.stdout) as Record<string, unknown>;
+    if (replay.imported !== 0 || replay.replayed !== 1 || replay.rejected !== 1) throw new Error(`${scenario.name} lineage replay duplicated an import`);
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -152,6 +165,8 @@ try {
       stderr_bytes: Buffer.byteLength(exported.stderr),
       created_fixture_present: true,
       imported_fixture_present: true,
+      lineage_imported: 1,
+      lineage_replayed: 1,
     });
   }
 

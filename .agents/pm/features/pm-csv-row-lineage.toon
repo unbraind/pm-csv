@@ -1,0 +1,29 @@
+id: pm-csv-row-lineage
+title: Import CSV values with portable cell lineage and corrected-row retry bundles
+description: ""
+type: Feature
+status: in_progress
+priority: 2
+tags[3]: added,csv,lineage
+created_at: "2026-10-22T19:32:53.296Z"
+updated_at: "2026-10-22T19:42:32.005Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: Corrected rejected rows can be replayed without reapplying successful rows; diagnostic exports exclude disallowed columns and include checksums.
+comments[2]{created_at,author,text}:
+  "2026-10-22T19:35:31.380Z",codex-agent,"Implementation uses native SDK explicit-ID creates, schema validation, locking and append-only history rather than a parallel item store. Portable JSON manifests hash permitted source cells and observed destination values with source row/column and a mapping revision. Retry CSVs retain stable keys and exclude successful rows and disallowed columns. Structural and output failures use typed remedies; row failures carry bounded codes. Tests exercise real non-git trackers with PATH excluding git, concurrent creates, retry history preservation and exact-byte artifact checksums. Current CLI registry version was verified as 2026.10.22; tracker writes use the unchanged repo pin 2026.10.15."
+  "2026-10-22T19:42:04.586Z",codex-agent,"Public-data validation: immutable non-git copy of public main d5dbdb0a52e3e25ee79d95b98cf0b7585cd5602d, 120 certified items; selected 24 rows, imported 20 and rejected 4, corrected all 4, replayed all 4 with zero new creates. All 20 original successful histories and the complete read-only source snapshot stayed byte-identical. Verified 40 initial cell records, 1 excluded column, 2 exact-byte checksums, a 129-byte receipt and 10166 ms measured validation. Behavioral revert proof: changing only importLineage to include successful rows in rejects failed the count assertion; changing only its permitted-column projection to raw rows failed the disallowed-cell sentinel assertion. Both mutations restored. Targeted coverage reached 100 percent lines, branches and functions for lineage.ts. See docs/row-lineage-validation.md for reproduction."
+files[5]{path,scope}:
+  index.ts,project
+  lineage.ts,project
+  scripts/accept-packed.ts,project
+  scripts/validate-row-lineage.ts,project
+  test/lineage.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/lineage.test.ts,project,codex-agent,"2026-10-22T19:36:49.270Z",local_mutation,feat/row-lineage
+docs[3]{path,scope}:
+  docs/row-lineage-validation.md,project
+  docs/row-lineage.md,project
+  README.md,project
+body: "Overlap recheck: core SDK history, mutation locking, schema validation and explicit-ID creates remain authoritative. Existing CSV validation, atomic import and spreadsheet sessions do not provide a portable row/column mapping manifest plus a rejected-row correction artifact. Targeted SDK contract and sibling Jira, Linear, ADO and TODO importer searches found source-level provenance but no equivalent table-cell retry bundle. Scope adds durable artifact provenance and retry, not general telemetry or hosted export. Implement typed SDK and native CLI command with bounded receipts, typed remedies, native SDK creates and non-git operation. Validate public tracker copies read-only and use CI npm plus Bun release gates at unchanged thresholds."

@@ -1,9 +1,12 @@
 import type { CommandDefinition, ExtensionApi, ExtensionModule } from "@unbrained/pm-cli/sdk/authoring";
-import { readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { certifyCompleteListResult, inspectCompleteListResult, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+
+import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts";
+import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
 
@@ -2928,6 +2931,44 @@ export default {
     ]);
 
     api.registerCommand({
+      name: "csv bundle",
+      description: "Import with portable cell lineage and a minimal rejected-row retry CSV (maximum 1000 rows).",
+      arguments: [{ name: "file", required: true, description: "UTF-8 CSV input" }],
+      flags: [
+        { long: "--output", value_name: "directory", description: "New private bundle directory" },
+        { long: "--columns", value_name: "fields", description: "Explicit permitted import and diagnostic fields, including title" },
+        { long: "--map", value_name: "mapping", description: "Source=target pairs, for example Summary=title" },
+      ],
+      async run(ctx) {
+        const output = ctx.options["output"] as string | undefined;
+        const columns = ctx.options["columns"] as string | undefined;
+        if (!output || !columns || !ctx.args[0]) throw new LineageRefusal("csv_lineage_invalid", "Provide input.csv --output new-bundle --columns title,priority; only explicitly selected fields can be imported or exported.");
+        let table: string[][];
+        try {
+          table = parseCSV(stripBOM(readFileSync(ctx.args[0], "utf8")));
+          mkdirSync(output, { mode: 0o700 });
+        } catch {
+          throw new LineageRefusal("csv_bundle_io", "Provide readable UTF-8 input and a new writable output directory; existing bundles are preserved.");
+        }
+        let fieldMap: Record<string, LineageField>;
+        try {
+          const parsed = parseFieldMap(ctx.options["map"] as string | undefined);
+          fieldMap = Object.fromEntries(Object.entries(parsed).map(([header, field]) => [
+            table[0]?.find(source => source.trim().toLowerCase() === header) ?? header, field as LineageField,
+          ]));
+        } catch {
+          throw new LineageRefusal("csv_lineage_invalid", "Use --map Source=title,Rank=priority; map only permitted fields.");
+        }
+        const bundle = await importLineage(ctx.pm_root, table, {
+          columns: columns.split(",").map(field => field.trim()) as LineageField[],
+          fieldMap,
+          author: (ctx.global["author"] as string | undefined) ?? "pm-csv",
+        });
+        writeLineageBundle(output, bundle);
+        return bundle.receipt;
+      },
+    });
+    api.registerCommand({
       name: "csv checkout",
       description: "Export a conflict-aware CSV edit session and immutable baseline JSON (maximum 1000 items).",
       flags: [
@@ -3339,3 +3380,6 @@ export type { ParsedRow, ImportRowFilter, DiscoveredField, AutoFieldMapping };
 
 export { applyEditSession, exportEditSession, parseEditSession, editSessionHeader, EDIT_FIELDS, EditRefusal } from "./roundtrip.ts";
 export type { EditSession, EditSessionRow, EditField, EditReceipt, EditConflict, EditRefusalCode } from "./roundtrip.ts";
+
+export { importLineage, writeLineageBundle, lineageDigest, LINEAGE_FIELDS, LineageRefusal } from "./lineage.ts";
+export type { LineageField, LineageOptions, CellLineage, RowLineage, LineageManifest, LineageBundle } from "./lineage.ts";
