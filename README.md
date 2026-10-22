@@ -454,3 +454,35 @@ itself lists each affected stream in its output; `pm history --verify <id>` spot
 content, so `reconcile` only re-greens the hash chain (no data loss) — see the authoritative
 [pm-cli merge-safety guide](https://github.com/unbraind/pm-cli/blob/main/docs/MERGE_SAFETY.md). The
 older blunt `pm history-repair --all` remains available as a lower-level primitive.
+
+## Conflict-aware spreadsheet round trips
+
+Use `pm csv checkout --output planning.csv` to export an editable table with
+explicit item/revision/field digests and a baseline JSON file. Edit scalar cells,
+then run `pm csv apply planning.csv --dry-run --json` followed by
+`pm csv apply planning.csv --json`. Apply compares baseline, spreadsheet and
+current tracker values, refuses conflicting changes before application, and
+preserves changes to unedited fields. Identical retries write no item/history
+records, including for terminal keyed items.
+
+See the [protocol and CLI/typed SDK example](docs/spreadsheet-roundtrip.md) for
+editable fields, read-only status, bounded refusals, concurrency and recovery
+boundaries. This edit-session protocol reuses the existing SDK coordinator and
+CSV compensation; legacy keyed import remains a separate command.
+
+Apply and compensation callbacks refuse with `csv_lease_expired` when their
+monotonic elapsed time reaches the effective item TTL minus a safety margin
+(ten percent, capped at one second). Re-run apply; another writer may have
+changed the item. Checkout and compensation snapshot reads use the same budget.
+The real SDK/CLI takeover regressions now pass in the release suite.
+
+This callback deadline is a mitigation. The host must still atomically fence
+persistence after callback return; arbitrary delays there can exhaust the
+remaining lease. That root fix belongs upstream in
+[pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549).
+
+## Without git
+
+CSV import, export, validation, checkout and three-way application work in a plain
+tracker initialized with `pm init`. None requires a Git repository. GitHub sync
+and Git-derived changelog provenance are separate host/tooling features.
