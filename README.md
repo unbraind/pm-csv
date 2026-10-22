@@ -483,6 +483,17 @@ remaining lease. That root fix belongs upstream in
 
 ## Without git
 
-CSV import, export, validation, checkout and three-way application work in a plain
+CSV import, export, validation, lineage bundles, checkout and three-way application work in a plain
 tracker initialized with `pm init`. None requires a Git repository. GitHub sync
 and Git-derived changelog provenance are separate host/tooling features.
+
+## Cell lineage and rejected-row bundles
+
+Use `pm csv bundle input.csv --columns title,priority --output import-bundle`
+to import with a portable cell manifest and a minimal correction/retry CSV.
+Only explicitly permitted fields leave the source. Correct the rejected file
+and import it into a fresh bundle: successful rows are excluded, and stable
+keys make unchanged retries idempotent. The compact TOON/JSON receipt reports
+counts; artifacts include SHA-256 checksums. See the [protocol and worked
+example](docs/row-lineage.md) for the typed SDK, mapping revisions, refusals,
+privacy policy and recovery behavior.

@@ -117,6 +117,7 @@
       "README.md",
       "docs/atomic-compensation.md",
       "docs/spreadsheet-roundtrip.md",
+      "docs/row-lineage.md",
       "CHANGELOG.md"
     ],
     "examples": [
