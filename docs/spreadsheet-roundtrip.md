@@ -16,7 +16,10 @@ For a selection, pass `--ids item-a,item-b` to checkout. The default is a certif
 complete tracker read. A checkout accepts up to 1000 distinct canonical item IDs;
 split larger selections. These examples use illustrative IDs; use IDs from your
 tracker. Files are UTF-8 comma-separated CSV, with quoted multiline cells, and
-can be saved with CRLF or a BOM. Keep column names/order and digest cells intact.
+can be saved with CRLF or a BOM. Newline-only LF/CRLF conversions in editable
+cells count as unchanged and retain the exact baseline value, including when a
+concurrent writer has changed that field. Genuine content edits retain their
+normal conflict checks. Keep column names/order and digest cells intact.
 Rows may be reordered or omitted. Omission never deletes an item. Blank optional
 scalar cells unset that metadata; blank body clears it. Priority must be 0..4,
 and title must be nonblank. Scalar edits must be trimmed. Body uses the host's

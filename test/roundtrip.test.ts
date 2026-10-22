@@ -481,3 +481,52 @@ test("transaction diagnostics traverse nested shared and cyclic causes and toler
     }
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
+
+
+test("newline-only spreadsheet conversions preserve exact baselines and concurrent unedited fields", async () => {
+  const f = await fixture();
+  try {
+    for (const baselineEol of ["\n", "\r\n"]) {
+      const value = `First${baselineEol}second`;
+      await update(f.ids[0], { title: value, body: value, assignee: value, sprint: value, release: value }, { pmRoot: f.root });
+      const { session, table } = await exportEditSession(f.root, f.ids);
+      const editorEol = baselineEol === "\n" ? "\r\n" : "\n";
+      const converted = parseCSV(serializeCSV(table, ",").replace(/\r?\n/g, editorEol));
+      const before = await evidence(f.root, f.ids);
+      const unchanged = await applyEditSession(f.root, session, converted, { author: "csv-test" });
+      assert.equal(unchanged.changed, 0);
+      assert.equal(unchanged.applied, 0);
+      assert.deepEqual(await evidence(f.root, f.ids), before);
+      assert.equal(existsSync(join(f.root, "transactions", "sdk")), false);
+      await update(f.ids[0], { body: "Concurrent body\nretained" }, { pmRoot: f.root });
+      const concurrent = await evidence(f.root, f.ids);
+      assert.equal((await applyEditSession(f.root, session, converted, { author: "csv-test", dryRun: true })).changed, 0);
+      const result = await applyEditSession(f.root, session, converted, { author: "csv-test" });
+      assert.equal(result.concurrent, 1);
+      assert.equal(result.applied, 0);
+      assert.deepEqual(await evidence(f.root, f.ids), concurrent);
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("CRLF conversion retains genuine multiline edits and their conflict protection", async () => {
+  const f = await fixture();
+  try {
+    edit(f.table, 1, "body", "Edited\nspreadsheet body");
+    const converted = parseCSV(serializeCSV(f.table, ",").replace(/\n/g, "\r\n"));
+    await update(f.ids[0], { body: "Concurrent body" }, { pmRoot: f.root });
+    const before = await evidence(f.root, f.ids);
+    await assert.rejects(applyEditSession(f.root, f.session, converted, { author: "csv-test" }), error => {
+      assert.ok(error instanceof EditRefusal);
+      assert.deepEqual(error.conflicts, [{ id: f.ids[0], fields: ["body"] }]);
+      return refusal("csv_edit_conflict")(error);
+    });
+    assert.deepEqual(await evidence(f.root, f.ids), before);
+    await update(f.ids[0], { body: f.session.rows[0].values.body }, { pmRoot: f.root });
+    assert.equal((await applyEditSession(f.root, f.session, converted, { author: "csv-test" })).applied, 1);
+    assert.equal((await readUpdateDocument(f.root, f.ids[0])).body, "Edited\r\nspreadsheet body");
+    const applied = await evidence(f.root, f.ids);
+    assert.equal((await applyEditSession(f.root, f.session, converted, { author: "csv-test" })).applied, 0);
+    assert.deepEqual(await evidence(f.root, f.ids), applied);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});

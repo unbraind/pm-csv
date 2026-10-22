@@ -185,6 +185,10 @@ function plans(session: EditSession, table: string[][]): EditPlan[] {
       throw new EditRefusal("csv_edit_invalid", "Status is read-only. Use pm close or pm reopen for lifecycle transitions, then export a fresh session.");
     }
     const desired = Object.fromEntries(EDIT_FIELDS.map((field, index) => [field, fromCell(row[5 + index * 2])])) as Record<EditField, string>;
+    // Spreadsheet saves may convert embedded newlines in either direction.
+    for (const field of EDIT_FIELDS) {
+      if (desired[field].replace(/\r\n/g, "\n") === base.values[field].replace(/\r\n/g, "\n")) desired[field] = base.values[field];
+    }
     // The host canonical document contract trims trailing body whitespace.
     desired.body = desired.body.trimEnd();
     const fields = EDIT_FIELDS.filter(field => desired[field] !== base.values[field]);
