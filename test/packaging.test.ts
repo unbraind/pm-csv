@@ -187,6 +187,11 @@ test("the README points to the manifest and lockfile for exact gate pins", () =>
   assert.doesNotMatch(readme, /gates are pinned to pm CLI\/SDK \d/u);
 });
 
+test("spreadsheet comparison is attributed to apply rather than legacy import", () => {
+  assert.match(readme, /`pm csv apply planning\.csv --json`\. Apply compares baseline, spreadsheet and\s+current tracker values/u);
+  assert.doesNotMatch(readme, /Import compares baseline, spreadsheet/u);
+});
+
 test("the extension manifest declares the same floor enforced by the peer dependency", () => {
   const peer = manifest.peerDependencies?.[HOST_CLI];
   assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency`);
@@ -266,4 +271,12 @@ test("public atomic contracts disclose best-effort compensation and reconciliati
   assert.match(publicContract, /inspect and reconcile/u);
   assert.match(extensionSource, /markers only after closure succeeds/u);
   assert.match(extensionSource, /following non-zero branch rejects ordinary command failures/u);
+});
+
+
+test("public tracker hashes are described as content evidence rather than write evidence", () => {
+  const validation = readFileSync(new URL("../docs/spreadsheet-validation.md", import.meta.url), "utf8");
+  assert.match(validation, /byte\/hash comparisons showing zero content changes/u);
+  assert.doesNotMatch(validation, /proving zero writes|zero-write comparisons/u);
+  assert.match(validation, /do not prove that no physical write occurred/u);
 });

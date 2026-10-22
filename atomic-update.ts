@@ -5,6 +5,7 @@ import {
 import type { ItemDocument, WorkspaceTransactionStepInspection, WorkspaceTransactionJsonValue } from "@unbrained/pm-cli/sdk";
 import { decode, encode } from "@toon-format/toon";
 import { createHash } from "node:crypto";
+import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
 
 /** Version of CSV prior-document compensation; also bound into every step id. */
 export const UPDATE_COMPENSATION_VERSION = 2;
@@ -61,12 +62,14 @@ export async function captureUpdateCompensation(
 ): Promise<WorkspaceTransactionJsonValue> {
   const settings = await readSettings(pmRoot);
   const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
+  const startedAt = performance.now();
   try {
     const { document, raw, located } = await readUpdateSnapshot(pmRoot, id);
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
     if (!verifyHistoryEntries(history, document).ok) {
       throw new Error(`Atomic update item ${id} has unverified history; reconcile before retrying.`);
     }
+    assertEditLease(performance.now() - startedAt, settings.locks.ttl_seconds);
     return {
       version: UPDATE_COMPENSATION_VERSION, id, marker,
       prior: JSON.stringify(document), raw, format: located.item_format, historyLength: history.length, historyHash: journalHash(history),
@@ -96,8 +99,9 @@ function parsePriorDocument(raw: string, id: string): ItemDocument {
 
 /**
  * Restore the captured document through an append-only SDK mutation. History
- * verification and writer detection occur INSIDE the item lock, so another
- * agent cannot write between the guard and restoration. Refuse any intervening
+ * verification and writer detection occur inside the item lock. Callback and
+ * representation deadlines refuse exhausted leases; atomic persistence fencing
+ * still belongs to the host SDK. Refuse any intervening
  * history outside this batch, including edits to unrelated fields. A durable
  * compensation message makes a crash after restoration safe to replay.
  */
@@ -123,7 +127,7 @@ export async function compensateUpdate(
   await mutateItem({
     pmRoot, settings, id, op: "restore", author, message: restoreMessage,
     skipNoop: true,
-    async mutate(document) {
+    mutate: guardEditMutation(settings.locks.ttl_seconds, async document => {
       const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
       if (!verifyHistoryEntries(history, document).ok
           || journalHash(history.slice(0, historyLength)) !== historyHash
@@ -146,7 +150,7 @@ export async function compensateUpdate(
       document.metadata = structuredClone(prior.metadata);
       document.body = prior.body;
       return { changedFields };
-    },
+    }),
   });
   if (completed) return;
   await onPhase("canonical_restored");
@@ -154,6 +158,7 @@ export async function compensateUpdate(
   // prior representation in a second, guarded, resumable phase. It has exactly
   // the same canonical hash as the SDK restore, so the derived index is valid.
   const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
+  const representationStartedAt = performance.now();
   try {
     const current = await readUpdateSnapshot(pmRoot, id);
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
@@ -163,6 +168,7 @@ export async function compensateUpdate(
         || !verifyHistoryEntries(history, represented).ok) {
       throw new Error(`Atomic update item ${id} changed during representation restoration; refusing compensation.`);
     }
+    assertEditLease(performance.now() - representationStartedAt, settings.locks.ttl_seconds);
     await writeFileAtomic(current.located.itemPath, contents);
     await onPhase("representation_written");
     await appendHistoryEntry(getHistoryPath(pmRoot, id), createHistoryEntry({
