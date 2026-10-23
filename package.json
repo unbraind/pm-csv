@@ -118,10 +118,12 @@
       "docs/atomic-compensation.md",
       "docs/spreadsheet-roundtrip.md",
       "docs/row-lineage.md",
+      "docs/table-schema.md",
       "CHANGELOG.md"
     ],
     "examples": [
-      "README.md"
+      "README.md",
+      "docs/table-schema.md"
     ]
   },
   "publishConfig": {

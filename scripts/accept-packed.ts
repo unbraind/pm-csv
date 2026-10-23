@@ -28,6 +28,9 @@ interface AcceptanceReceipt {
   readonly imported_fixture_present: true;
   readonly lineage_imported: 1;
   readonly lineage_replayed: 1;
+  readonly schema_rows: 1;
+  readonly schema_imported: 1;
+  readonly schema_dry_run_imported: 0;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -158,6 +161,17 @@ try {
     const retryOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority", "--output", join(scenarioRoot, "lineage-replay")]);
     const replay = JSON.parse(retryOutput.stdout) as Record<string, unknown>;
     if (replay.imported !== 0 || replay.replayed !== 1 || replay.rejected !== 1) throw new Error(`${scenario.name} lineage replay duplicated an import`);
+    const schemaInput = join(scenarioRoot, "negotiated.csv");
+    const schemaOutput = join(scenarioRoot, "table.schema.json");
+    const negotiatedTitle = `Negotiated; ${scenario.name}`;
+    writeFileSync(schemaInput, `\uFEFFSummary;priority\r\n"${negotiatedTitle}";2\r\n`);
+    runPm(scenario, scenarioRoot, ["csv", "schema", "describe", schemaInput, "--delimiter", "semicolon", "--auto-map", "--output", schemaOutput, "--json"]);
+    const schemaPreview = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "schema", "preview", schemaInput, "--schema", schemaOutput, "--json"]).stdout) as Record<string, unknown>;
+    const schemaDryRun = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "schema", "import", schemaInput, "--schema", schemaOutput, "--dry-run", "--json"]).stdout) as Record<string, unknown>;
+    const afterPreview = runPm(scenario, scenarioRoot, ["csv", "export", "--columns", "title", "--json"]);
+    if (schemaPreview.rows !== 1 || schemaDryRun.imported !== 0 || afterPreview.stdout.includes(negotiatedTitle)) throw new Error(`${scenario.name} schema preview mutated the tracker or returned incorrect counts`);
+    const schemaImport = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "schema", "import", schemaInput, "--schema", schemaOutput, "--json"]).stdout) as Record<string, unknown>;
+    if (schemaImport.imported !== 1) throw new Error(`${scenario.name} negotiated import failed`);
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -167,6 +181,9 @@ try {
       imported_fixture_present: true,
       lineage_imported: 1,
       lineage_replayed: 1,
+      schema_rows: 1,
+      schema_imported: 1,
+      schema_dry_run_imported: 0,
     });
   }
 

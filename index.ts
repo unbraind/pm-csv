@@ -9,6 +9,7 @@ import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts"
 import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+import { registerTableSchemaCommands } from "./table-schema.ts";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
@@ -1491,6 +1492,18 @@ function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOpti
   return result;
 }
 
+/** Import an already captured table through the existing mapping, upsert and mutation core.
+ * Callers own structural/strict validation; this entry never rereads a mutable input file.
+ */
+export function importParsedCSV(pmRoot: string, table: string[][], opts: Pick<CsvImportOptions, "delimiter" | "fieldMap" | "dryRun" | "keyField">): ImportResult {
+  const resolved = resolveImportHeaders(table[0], opts);
+  const result = createImportResult();
+  result.fieldMapWarnings = resolved.fieldMapWarnings;
+  result.autoMappings = resolved.autoMappings;
+  processImportRows(pmRoot, table.slice(1), resolved.headers, opts, result);
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Atomic import (pm-cli >= 2026.7.19 commitWorkspaceTransaction)
 // ---------------------------------------------------------------------------
@@ -2924,6 +2937,7 @@ export default {
   version: "2026.10.23",
 
   activate(api: ExtensionApi) {
+    registerTableSchemaCommands(api);
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
@@ -3332,6 +3346,7 @@ export default {
 // ---------------------------------------------------------------------------
 export {
   parseCSV,
+  readBoolOption,
   serializeCSV,
   serializeField,
   stripBOM,
@@ -3388,3 +3403,6 @@ export type { EditSession, EditSessionRow, EditField, EditReceipt, EditConflict,
 
 export { importLineage, writeLineageBundle, lineageDigest, LINEAGE_FIELDS, LineageRefusal } from "./lineage.ts";
 export type { LineageField, LineageOptions, CellLineage, RowLineage, LineageManifest, LineageBundle } from "./lineage.ts";
+
+export { describeTable, previewTable, parseTableSchema, importNegotiatedTable, TableSchemaRefusal } from "./table-schema.ts";
+export type { TableSchema, TableDomain, TableField, TableRefusalCode, TableReceipt, TableDescription, DescribeTableOptions } from "./table-schema.ts";

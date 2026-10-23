@@ -1,0 +1,30 @@
+id: pm-csv-schema-negotiation
+title: Refuse changed tables before reusing saved CSV mappings
+description: "Reusable versioned input-table contracts describe dialect, ordered columns, value domains and proposed pm mappings. Reuse refuses structural or semantic drift before writes."
+type: Feature
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-23T16:46:45.701Z"
+updated_at: "2026-10-23T17:02:55.967Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: A renamed column invalidates a saved mapping; quoting/BOM/delimiter fixtures round-trip; preview does not mutate the tracker.
+comments[4]{created_at,author,text}:
+  "2026-10-23T16:46:57.660Z",codex-agent,"Overlap recheck: current registry host is 2026.10.23; this branch retains the pinned 2026.10.20 SDK. Existing csv import flags, alias and status mappings, strict validation, complete-list certification and row mutation core remain implementation primitives. Core schema APIs and schema evolution describe pm tracker fields, not source table contracts. pm-beads handles JSONL reconciliation. Existing spreadsheet sessions and lineage describe edits and cell provenance rather than reusable dialect/column/domain negotiation. No duplicate item found by schema and negotiation searches. Plan: versioned bounded artifacts, exact header/dialect checks, SDK-resolved target types/statuses, compact read-only preview and negotiated import, real non-git fixtures and public tracker copy; targeted local checks and full npm/Bun CI gates."
+  "2026-10-23T16:54:53.517Z",codex-agent,"Initial targeted regression run: 8 passed, 0 failed. Exact-header/dialect and lexical-domain refusals are checked before import; malformed/tampered schemas have typed remedies. Sixteen quoting/BOM/delimiter combinations preserve parsed cells. Real non-git tracker snapshot hashes prove describe, preview, dry-run and refused drift leave all tracker files unchanged. Imports reuse the existing parser, alias and strict-validation helpers, SDK workspace contracts and existing create/upsert core, with one captured table to avoid rereading mutable input. Full release gates are delegated to CI because the host is saturated."
+  "2026-10-23T17:00:35.117Z",codex-agent,"Public-source validation: verified unbraind/pm-csv is PUBLIC and copied only the committed tracker at main 577f325c192d3818bdd785d34e7f65103d3c8fe0 into a non-git scratch directory. All source files/directories were read-only. Native SDK complete-list certification read 124 items. Measured: 124 rows, 6 columns, 5 mapped, 1 ignored; CSV 32540 bytes, schema 809 bytes, receipt 137 bytes. Sixteen delimiter/BOM/LF-CRLF fixtures round-tripped 11904 cells; 3 structural/dialect changes refused; 0 tracker writes, full source fingerprint unchanged, no git executable available. Measured negotiation/fixture time 3957 ms. Reproduction script: scripts/validate-table-schema.ts with a read-only public tracker copy. Static typecheck, test typecheck, lint, docstrings and duplicate checks pass. The linked test runner hit its default 120-second timeout on the saturated host; retry uses a 600-second timeout. Initial local coverage measured every line/function; one unreachable delimiter catch was removed, retaining unchanged 100 percent thresholds. Packed npm/Bun/minimum-host acceptance now exercises actual schema CLI describe, preview, dry-run and import."
+  "2026-10-23T17:02:55.925Z",codex-agent,"Regression sensitivity proof: temporarily disabled only the exact header/dialect check in previewTable (rest of implementation unchanged). Running node --test --test-name-pattern=\"saved mapping rejects\" test/table-schema.test.ts failed with Missing expected rejection on the renamed-column case. Restored the guard immediately. The linked runner retry with --timeout 600 passed all 8 tests; its initial 120-second timeout was infrastructure load, not a failed assertion. Final build, test typecheck, lint, docstring and duplicate checks pass. Source-domain and target-schema negotiation stays read-only; native mutation failures retain existing partial-write semantics and report counts. CI will certify the unchanged full 100 percent release thresholds on npm and Bun."
+files[5]{path,scope}:
+  index.ts,project
+  scripts/accept-packed.ts,project
+  scripts/validate-table-schema.ts,project
+  table-schema.ts,project
+  test/table-schema.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/table-schema.test.ts,project,codex-agent,"2026-10-23T16:54:29.206Z",local_mutation,feat/schema-negotiation
+docs[2]{path,scope}:
+  docs/table-schema.md,project
+  README.md,project
+body: ""
