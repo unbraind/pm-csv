@@ -2,19 +2,22 @@ id: pm-csv-compat-177
 title: Preserve CSV refusal and full-row evidence on pm-cli 2026.10.20
 description: "Diagnose Dependabot PR 177 failures against pm-cli 2026.10.15 and 2026.10.20; preserve pre-mutation journal refusal, complete CSV reads and partial-import error guarantees. Verify npm and Bun release gates and assess upstream lease fencing without changing dependency pins."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags[2]: compatibility,"gh:unbraind/pm-csv#177"
 created_at: "2026-10-23T11:07:27.965Z"
-updated_at: "2026-10-23T11:26:51.626Z"
+updated_at: "2026-10-23T15:29:51.749Z"
+closed_at: "2026-10-23T15:29:50.937Z"
+completed_at: "2026-10-23T15:29:50.937Z"
 author: codex-agent
-comments[6]{created_at,author,text}:
+comments[7]{created_at,author,text}:
   "2026-10-23T11:07:30.164Z",codex-agent,"Initial CI reproduction: malformed schemaVersion journal is refused by the SDK with a changed diagnostic; two partial-import tests read priority from default brief list rows. Invalid priority 99 errors are intentional injected failures. Reviewing all package complete-list and recovery paths before adapting code. Release v2026.10.16 does not exist; v2026.10.17 spans v2026.10.15 onward. No dependency pins will change."
   "2026-10-23T11:12:26.282Z",codex-agent,"Root causes confirmed with real 2026.10.15 and 2026.10.20 hosts: brief list projection omits priority only on the latter; full rows preserve priority 2 on both; invalid priority 99 refuses with exit 2 on both. SDK commit 94757af3016420bfda6b6fc1905be7814ee2ea1d intentionally separates invalid journals from plan mismatches. Added package schema/transaction preflight with typed refusal before coordinator entry. Reverting only loadAtomicBindings and rebuilding fails the behavioral coordinator-entry assertion (0/1); restored focused tests pass 3/3. No upstream regression or issue draft established. See docs/compatibility-2026.10.20.md."
   "2026-10-23T11:12:35.603Z",codex-agent,"The linked focused command was executed through pm test --run --progress. Full npm/Bun release checks will run directly with the package-pinned pm on PATH; linked test result tracking is disabled by project policy, so immutable comments and the PR-head CI run retain the evidence."
   "2026-10-23T11:14:49.416Z",codex-agent,Clean-HOME strict package health passes with all ten checks non-failing; the ambient global pm-github 2026.10.23 skew on host 2026.10.20 is outside committed package state and already tracked by pm-csv-sdyz. Linked focused tests pass 3/3. Dependabot auto-merge was enabled; disabled it to honor the owner no-merge boundary and will verify again after the push workflow.
   "2026-10-23T11:17:34.233Z",codex-agent,"npm run release:check passed: 319 tests, 0 failed/cancelled/skipped/todo, unchanged 100 percent lines/branches/functions across seven measured source files, zero production audit vulnerabilities, all three packed scenarios (npm-current, bun-current, npm-minimum), changelog and attestation gates green. Running the mandatory clean-HOME/no-global-git-identity npm reproduction and Bun release gate next; pins unchanged."
   "2026-10-23T11:26:50.842Z",codex-agent,"Final local gates passed: npm run release:check, the same npm gate with clean HOME/GIT_CONFIG_GLOBAL=/dev/null/GIT_CONFIG_NOSYSTEM=1, and bun run release:check each passed 319/319 tests with 0 failures/cancellations/skips/todos. Each retained 100 percent measured lines/branches/functions across seven source files, zero production audit vulnerabilities, all three packed npm-current/bun-current/npm-minimum scenarios, changelog, provenance and date checks. Strict clean-HOME health passes. Behavioral revert proof and version/lease probes are documented in docs/compatibility-2026.10.20.md. No upstream issue drafts needed. Release claim without closure; exact-head Node 22/26 CI results will be attached to PR 177 before handoff."
+  "2026-10-23T15:29:38.628Z",codex-agent,"DELIVERED: merged PR #177 (7e030292010e5764bf8cc79bf384bd151c45b3f9) is an ancestor of audited main cca10876ae5a4fcb505ffe533e00211941659ecc. Inspected on main: docs/compatibility-2026.10.20.md, test/legacy-import-cli.test.ts, test/commands.test.ts. Compatibility correction preserves structured refusals and full rows on the pinned host; version/lease probes and all three local release gates retain 319 passing tests and packed current/minimum npm/Bun acceptance. This tracker audit inspected existing tests/files; it does not claim a new full product test run."
 files[4]{path,scope}:
   index.ts,project
   test/atomic-update.test.ts,project
@@ -26,4 +29,5 @@ tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,
   "bun run release:check",project,1800,codex-agent,"2026-10-23T11:14:47.680Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-da04f49594
 docs[1]{path,scope}:
   docs/compatibility-2026.10.20.md,project
+close_reason: "DELIVERED: merged PR #177 (7e030292010e5764bf8cc79bf384bd151c45b3f9) is an ancestor of audited main cca10876ae5a4fcb505ffe533e00211941659ecc. Inspected on main: docs/compatibility-2026.10.20.md, test/legacy-import-cli.test.ts, test/commands.test.ts. Compatibility correction preserves structured refusals and full rows on the pinned host; version/lease probes and all three local release gates retain 319 passing tests and packed current/minimum npm/Bun acceptance. This tracker audit inspected existing tests/files; it does not claim a new full product test run."
 body: ""

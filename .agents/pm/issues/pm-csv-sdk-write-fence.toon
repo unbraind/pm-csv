@@ -2,17 +2,18 @@ id: pm-csv-sdk-write-fence
 title: Host SDK allows stale item writes after lease takeover
 description: "PR 179 thread PRRT_kwDOSYpI8s6vNO6H identifies missing atomic lease/revision fencing in the host SDK. The original real non-git reproduction demonstrates lost updates on lease takeover. The owner authorized a pm-csv callback deadline mitigation: refuse elapsed callbacks at effective TTL minus margin, preserving newer SDK/CLI writes in passing regressions. The root atomic persistence fix belongs upstream in https://github.com/unbraind/pm-cli/issues/1549. This follow-up remains open for upstream verification; callback deadlines alone cannot protect arbitrary SDK delays outside the callback."
 type: Issue
-status: in_progress
+status: open
 priority: 1
 tags[1]: "gh:unbraind/pm-cli#1549"
 created_at: "2026-10-22T13:46:22.966Z"
-updated_at: "2026-10-23T11:16:27.156Z"
+updated_at: "2026-10-23T15:31:55.822Z"
 author: codex-agent
 expected_result: "The host atomically refuses stale item persistence when lease ownership or document revision changed, preserving the newer value and allowing safe transaction reconciliation."
 actual_result: "Original unguarded SDK reproduction loses the newer value. Package mitigation now refuses an over-budget callback before returning: real SDK and separate CLI takeover cases pass 2/2; reverting only guardEditMutation fails 0/2 and overwrites newer values. Integration guards also pass. This is not an atomic persistence fence: SDK delays before callback entry or after return remain upstream in https://github.com/unbraind/pm-cli/issues/1549, verified by the owner on 2026.10.22. No upstream edit or dependency bump."
-comments[2]{created_at,author,text}:
+comments[3]{created_at,author,text}:
   "2026-10-22T16:12:05.186Z",codex-agent,"Owner-authorized callback deadline mitigation is implemented and covered in the normal suite. pm test pm-csv-sdk-write-fence --run --progress --timeout 600 passed 2/2 real takeover regressions, preserving newer SDK and separate CLI values with typed csv_lease_expired. Restoring only guardEditMutation fails both cases (0/2, exit 1, newer values overwritten), then restored fixed bytes pass. Both full npm and Bun release gates pass 315/315 and unchanged 100/100/100 coverage across six sources. Atomic persistence fencing still belongs upstream in https://github.com/unbraind/pm-cli/issues/1549; arbitrary SDK delays outside the callback remain unprotected. Retain this item in progress for orchestrator/upstream verification and release the claim."
   "2026-10-23T11:12:27.825Z",codex-agent,"PR 177 compatibility assessment: pm-cli 2026.10.23 release and PR 1550 implement GH-1549 native lease/revision fencing. Real unguarded SDK takeover probe loses the newer title on 2026.10.20 but refuses stale persistence and preserves the newer title on 2026.10.23. A future supported-host-floor upgrade can replace callback-only csv_lease_expired guards on native paths with host lock_lost/stale_revision refusal coverage; extension lock overrides remain provider-owned. No pins or mitigation changed in this PR. Evidence: docs/compatibility-2026.10.20.md."
+  "2026-10-23T15:31:43.780Z",codex-agent,"STALE-CLAIM: audited main cca10876ae5a4fcb505ffe533e00211941659ecc; no open PR or recently pushed live branch references this record. Inspected: docs/compatibility-2026.10.20.md, lease-guard.ts. Remaining: Upstream 2026.10.23 fencing is recorded, but this repo retains the older supported host and callback mitigation. Supported-floor migration and native lock_lost/stale_revision coverage remain; an upstream fix alone is not delivery here. Release historical contention and retain real work as open; no delivery/cancellation is claimed."
 files[4]{path,scope}:
   lease-guard.ts,project
   roundtrip.ts,project
