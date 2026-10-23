@@ -1559,7 +1559,8 @@ function atomicStepId(rowIndex: number, existingId: string | undefined): string 
  * Recover the original plan's update targets and create roles from SDK journal
  * step identities. Mutable CSV key tags cannot retarget an interrupted update
  * or turn a previously planned create into an update. Incompatible identities
- * refuse replay before any mutation; the SDK validates the remaining journal.
+ * refuse replay before any mutation. Check the journal's schema and transaction
+ * identity before trusting its bindings; the SDK validates the remaining journal.
  * The public read-only inventory supplies the path, including after SDK layout
  * changes. Infinite retention and dry-run prevent recovery receipts being pruned.
  */
@@ -1572,12 +1573,16 @@ async function loadAtomicBindings(pmRoot: string, transactionId: string): Promis
   if (journal === null || typeof journal !== "object" || Array.isArray(journal)
       || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
       || !journal.stepIds.every((id: unknown) => typeof id === "string")) {
-    throw new Error(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
+    throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
+  }
+  if (!("schemaVersion" in journal) || journal.schemaVersion !== 1
+      || !("transactionId" in journal) || journal.transactionId !== transactionId) {
+    throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV journal identity. Refusing before transaction coordination.`);
   }
   const pattern = new RegExp(String.raw`^csv-import-v${UPDATE_COMPENSATION_VERSION}-(?:create|update-(.+))-row-(\d+)$`);
   for (const id of journal.stepIds) {
     const match = pattern.exec(id);
-    if (!match) throw new Error(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
+    if (!match) throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
     bindings.set(Number(match[2]), match[1]);
   }
   return bindings;
