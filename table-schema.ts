@@ -187,7 +187,7 @@ export function parseTableSchema(value: unknown): TableSchema {
   if (new Set(columns.map(column => column.name.trim().toLowerCase())).size !== columns.length ||
       new Set(fields).size !== fields.length || !fields.includes("title")) throw invalid;
   const base = { version: 1 as const, dialect: { delimiter: dialect.delimiter, quote: '"' as const, bom: dialect.bom, eol: dialect.eol as TableSchema["dialect"]["eol"] },
-    columns, target: { types: target.types as string[], statuses: target.statuses as string[] } };
+    columns, target: { types: [...target.types] as string[], statuses: [...target.statuses] as string[] } };
   if (revision(base) !== value.revision) throw invalid;
   return { ...base, revision: value.revision };
 }
@@ -217,11 +217,12 @@ export async function previewTable(pmRoot: string, text: string, saved: unknown)
  * Preview never runs mutation hooks. Import retains legacy partial-write semantics on row failures.
  */
 export async function importNegotiatedTable(pmRoot: string, text: string, saved: unknown, options: { dryRun?: boolean; keyField?: TableField } = {}): Promise<TableReceipt & { imported: number; updated: number; skipped: number }> {
-  const summary = await previewTable(pmRoot, text, saved);
-  if (options.dryRun) return { ...summary, imported: 0, updated: 0, skipped: 0 };
   const schema = parseTableSchema(saved);
+  const { dryRun, keyField } = options;
+  const summary = await previewTable(pmRoot, text, schema);
+  if (dryRun) return { ...summary, imported: 0, updated: 0, skipped: 0 };
   const { table } = readTable(text, schema.dialect.delimiter);
-  const result = importParsedCSV(pmRoot, mappedTable(table, schema.columns), { delimiter: schema.dialect.delimiter, fieldMap: {}, dryRun: false, keyField: options.keyField });
+  const result = importParsedCSV(pmRoot, mappedTable(table, schema.columns), { delimiter: schema.dialect.delimiter, fieldMap: {}, dryRun: false, keyField });
   if (result.errors.length) throw new TableSchemaRefusal("csv_table_import_failed", `Inspect tracker state and import policies before retrying: imported=${result.imported}, updated=${result.updated}, skipped=${result.skipped}, errors=${result.errors.length}. Use csv import --atomic when rollback is required.`);
   return { ...summary, imported: result.imported, updated: result.updated, skipped: result.skipped };
 }

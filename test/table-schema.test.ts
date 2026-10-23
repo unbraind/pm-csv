@@ -181,9 +181,18 @@ test("negotiated import uses native create/upsert and ignores excluded canonical
     assert.equal((await importNegotiatedTable(root, text.replace("Native negotiated item", "No priority").replace(",2,", ",4,"), ignored)).imported, 1);
     const files = readdirSync(join(root, "tasks")).filter(name => name.endsWith(".toon"));
     assert.ok(files.some(name => readFileSync(join(root, "tasks", name), "utf8").includes("No priority")));
-    const omitted = (await listAllComplete({}, { pmRoot: root })).items.find(item => item.title === "No priority");
+    const capturedText = "title,body\nCaptured contract,Original body";
+    const proposed = await describeTable(root, capturedText);
+    const importing = importNegotiatedTable(root, capturedText, proposed.schema);
+    proposed.schema.columns[0].field = "body";
+    proposed.schema.columns[1].field = "title";
+    proposed.schema.revision = signed(proposed.schema).revision;
+    assert.equal((await importing).imported, 1);
+    const all = (await listAllComplete({ includeBody: true }, { pmRoot: root })).items;
+    const omitted = all.find(item => item.title === "No priority");
     assert.ok(omitted);
     assert.notEqual(omitted.priority, 4, "ignored canonical-looking priority must not reach the mutation core");
+    assert.equal(all.find(item => item.title === "Captured contract")?.body, "Original body", "mutating a caller-owned schema during SDK reads must not change the captured mapping");
     const noType = "title\nRequires type";
     const contract = await describeTable(root, noType);
     // SDK mutation policies remain authoritative, beyond the table contract.

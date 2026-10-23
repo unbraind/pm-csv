@@ -108,7 +108,8 @@ or settings and need no git. Preview checks the table contract and pm field
 values; it does not plan dedup outcomes or execute per-item mutation hooks.
 Import negotiates the complete captured text before calling the existing CSV
 create/update core, so changing the source file afterward cannot change that
-operation's input. Native history, locking, schema validation, key semantics and
+operation's input. The SDK also captures caller-owned schemas and options before
+asynchronous tracker reads. Native history, locking, schema validation, key semantics and
 mutation policies remain authoritative. Negotiation is not a target-schema
 lock: a concurrent policy change can still refuse a row during import.
 
