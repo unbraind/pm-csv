@@ -133,6 +133,66 @@ test("malformed CSV, unsupported mappings and invalid pm values refuse with type
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("table schema: final empty records refuse before writes for LF and CRLF", async () => {
+  const root = fixture();
+  const savedPath = process.env.PATH;
+  const savedCeiling = process.env.GIT_CEILING_DIRECTORIES;
+  try {
+    await create({ title: "Existing item before EOF refusal" }, { pmRoot: root });
+    process.env.PATH = "";
+    process.env.GIT_CEILING_DIRECTORIES = dirname(root);
+    const before = snapshot(root);
+    for (const eol of ["\n", "\r\n"]) {
+      const prefix = `title,priority${eol}Task,2${eol}`;
+      const { schema } = await describeTable(root, prefix);
+      assert.equal((await previewTable(root, prefix, schema)).rows, 1, "a terminating newline is valid");
+      for (const ending of ['""', `""${eol}`, eol]) {
+        const invalid = prefix + ending;
+        await assert.rejects(describeTable(root, invalid), refusal("csv_table_invalid"));
+        await assert.rejects(previewTable(root, invalid, schema), refusal("csv_table_invalid"));
+        await assert.rejects(importNegotiatedTable(root, invalid, schema, { dryRun: true }), refusal("csv_table_invalid"));
+        await assert.rejects(importNegotiatedTable(root, invalid, schema), refusal("csv_table_invalid"));
+        assert.equal(snapshot(root), before, "ragged final records must refuse before any preceding row writes");
+      }
+    }
+  } finally {
+    process.env.PATH = savedPath;
+    if (savedCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES; else process.env.GIT_CEILING_DIRECTORIES = savedCeiling;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native schema commands: final quoted empty records refuse without tracker writes", async () => {
+  const root = fixture();
+  const harness = await createExtensionTestHarness(extension, { name: "pm-csv", capabilities: ["commands", "importers", "schema"] });
+  const savedPath = process.env.PATH;
+  const savedCeiling = process.env.GIT_CEILING_DIRECTORIES;
+  try {
+    process.env.PATH = "";
+    process.env.GIT_CEILING_DIRECTORIES = dirname(root);
+    const file = join(root, "eof.csv");
+    const output = join(root, "eof.schema.json");
+    for (const eol of ["\n", "\r\n"]) {
+      const prefix = `title,priority${eol}Task,2${eol}`;
+      const { schema } = await describeTable(root, prefix);
+      writeFileSync(output, JSON.stringify(schema));
+      for (const ending of ['""', `""${eol}`, eol]) {
+        writeFileSync(file, prefix + ending);
+        const before = snapshot(root);
+        for (const command of ["csv schema describe", "csv schema preview", "csv schema import"]) {
+          await assert.rejects(harness.runCommand({ command, pmRoot: root, args: [file], options: { schema: output } }), refusal("csv_table_invalid"));
+          assert.equal(snapshot(root), before);
+        }
+      }
+    }
+  } finally {
+    process.env.PATH = savedPath;
+    if (savedCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES; else process.env.GIT_CEILING_DIRECTORIES = savedCeiling;
+    await harness.deactivate();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("schema reader rejects unknown versions, malformed nested fields, ambiguous mappings and tampered revisions", async () => {
   const root = fixture();
   try {

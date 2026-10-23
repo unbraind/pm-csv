@@ -100,6 +100,9 @@ headers of at most 128 characters) and 10000 data rows. It rejects malformed
 quotes, mixed LF/CRLF record separators, bare CR, blank records, ragged rows,
 unknown statuses and invalid priorities. Embedded line endings inside quoted
 cells are preserved by parsing/serialization and do not define record dialect.
+The shared import parser retains an explicit final `""` record even without a
+trailing newline. Quoted and unquoted empty records are validated and refused;
+a single terminating LF or CRLF does not invent an additional record.
 Delimiter aliases are comma, semicolon, tab and pipe. Quoting style may change
 between equivalent valid encodings; escaping rules remain fixed.
 

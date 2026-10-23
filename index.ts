@@ -144,16 +144,19 @@ type SupportedEncoding = (typeof SUPPORTED_ENCODINGS)[number];
  *  - Escaped quotes ("" inside a quoted field → single ")
  *  - Custom delimiter
  *  - CRLF and LF line endings
+ *  - Explicit quoted empty records at EOF, without inventing a row after a final newline
  */
 function parseCSV(text: string, delimiter: string = ","): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
   let inQuotes = false;
+  let recordStarted = false;
   let i = 0;
 
   while (i < text.length) {
     const ch = text[i];
+    recordStarted = true;
 
     if (inQuotes) {
       if (ch === '"') {
@@ -193,6 +196,7 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
       field = "";
       rows.push(row);
       row = [];
+      recordStarted = false;
       i += 2;
       continue;
     }
@@ -202,6 +206,7 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
       field = "";
       rows.push(row);
       row = [];
+      recordStarted = false;
       i++;
       continue;
     }
@@ -210,8 +215,8 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
     i++;
   }
 
-  // Flush last field / row
-  if (field !== "" || row.length > 0) {
+  // An explicit quoted empty field starts a record even though its value is empty.
+  if (recordStarted) {
     row.push(field);
     rows.push(row);
   }
@@ -285,6 +290,7 @@ class StreamingCSVParser {
   private field = "";
   private row: string[] = [];
   private inQuotes = false;
+  private recordStarted = false;
   private pendingBoundaryChar = "";
 
   constructor(delimiter: string, onRow: (row: string[]) => void) {
@@ -298,6 +304,7 @@ class StreamingCSVParser {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
+      this.recordStarted = true;
       if (this.inQuotes) {
         if (ch === '"') {
           if (i + 1 === text.length) {
@@ -333,6 +340,7 @@ class StreamingCSVParser {
         this.field = "";
         this.onRow(this.row);
         this.row = [];
+        this.recordStarted = false;
         i += 2;
         continue;
       }
@@ -345,6 +353,7 @@ class StreamingCSVParser {
         this.field = "";
         this.onRow(this.row);
         this.row = [];
+        this.recordStarted = false;
         i++;
         continue;
       }
@@ -360,11 +369,12 @@ class StreamingCSVParser {
       this.field += this.pendingBoundaryChar;
     }
     this.pendingBoundaryChar = "";
-    if (this.field !== "" || this.row.length > 0) {
+    if (this.recordStarted) {
       this.row.push(this.field);
       this.onRow(this.row);
       this.field = "";
       this.row = [];
+      this.recordStarted = false;
     }
   }
 }
