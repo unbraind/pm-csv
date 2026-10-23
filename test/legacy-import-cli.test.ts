@@ -65,7 +65,7 @@ test("legacy CSV CLI shares native input, flags, errors and dry-run without git"
     const repeated = pm(["csv", "import", ...flags, "--json"]);
     assert.equal(repeated.status, 0, repeated.stdout + repeated.stderr);
     assert.equal(JSON.parse(repeated.stdout).updated, 1);
-    const items = pm(["list", "--all", "--json"]);
+    const items = pm(["list", "--all", "--full", "--json"]);
     assert.equal(items.status, 0, items.stderr);
     assert.match(items.stdout, /Legacy fixture/u);
     const after = snapshot(tracker);
@@ -85,7 +85,7 @@ test("legacy CSV CLI shares native input, flags, errors and dry-run without git"
         assert.match(failed.stderr, /Row 2: update failed/u);
         assert.match(failed.stderr, /Row 4: create failed/u);
         assert.doesNotMatch(failed.stdout, /"imported"/u, "failed imports must not emit a success receipt");
-        const listed = pm(["list", "--all", "--json"]);
+        const listed = pm(["list", "--all", "--full", "--json"]);
         assert.equal(listed.status, 0, listed.stderr);
         const rows = (JSON.parse(listed.stdout) as { items: Array<{ title: string; priority: number }> }).items;
         assert.ok(rows.some((item) => item.title === title), "valid rows after failures still import");
