@@ -2,9 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Apply edited spreadsheet exports without overwriting concurrent tracker changes ([pm-csv-bwrv](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-bwrv.toon))
+- Import CSV values with portable cell lineage and corrected-row retry bundles ([pm-csv-row-lineage](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-row-lineage.toon))
+
 ### Fixed
 
 - Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
+- Preserve CSV refusal and full-row evidence on pm-cli 2026.10.20 ([pm-csv-compat-177](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-compat-177.toon))
+
+### Other
+
+- Correct delivery evidence in tracker reconciliation PR 178 ([pm-csv-review-178](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-review-178.toon))
 
 ## 2026.10.23 - 2026-10-23
 
