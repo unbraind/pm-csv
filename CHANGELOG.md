@@ -16,6 +16,7 @@
 - Make legacy CSV importer accept file input and native flags ([pm-csv-76cu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-76cu.toon))
 - The release job authenticated with a stored npm token that expired, so publishing stopped while every other gate stayed green ([pm-csv-65ev](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-65ev.toon))
 - A release run bumped and committed a new version every night while publishing was impossible, because the only externally-failable step runs last ([pm-csv-545f](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-545f.toon))
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
 
 ### Other
 
