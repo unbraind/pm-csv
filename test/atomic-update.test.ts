@@ -13,7 +13,7 @@ import {
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionJsonValue, WorkspaceTransactionTransition } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import sourceExtension, { atomicTransactionId } from "../index.ts";
+import sourceExtension, { atomicTransactionId, CommandError } from "../index.ts";
 import builtExtension from "../dist/index.js";
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, priorRepresentation, readUpdateDocument, readUpdateSnapshot } from "../atomic-update.ts";
 
@@ -241,11 +241,32 @@ test("malformed SDK journal step identities refuse before any tracker mutation",
       }
       assert.deepEqual(fixtureBytes(f.root), before, "refusal must leave every fixture byte unchanged");
     }
-    // Shape narrowing must still defer the rest of the format to SDK validation.
-    writeFileSync(file, JSON.stringify({ ...original, schemaVersion: 99 }));
-    const before = fixtureBytes(f.root);
-    await assert.rejects(importBatch(f.root, f.file), /journal does not match the supplied plan/);
-    assert.deepEqual(fixtureBytes(f.root), before);
+    // Bindings must never be trusted from an unknown schema or another transaction.
+    const missingSchema = { ...original };
+    const missingTransaction = { ...original };
+    Reflect.deleteProperty(missingSchema, "schemaVersion");
+    Reflect.deleteProperty(missingTransaction, "transactionId");
+    for (const value of [missingSchema, { ...original, schemaVersion: 99 },
+      missingTransaction, { ...original, transactionId: "csv-import-other" }]) {
+      writeFileSync(file, JSON.stringify(value));
+      const before = fixtureBytes(f.root);
+      for (const built of [false, true]) {
+        let coordinated = false;
+        await assert.rejects(importBatch(f.root, f.file, options => {
+          coordinated = true;
+          return options;
+        }, built), (error: unknown) => {
+          assert.equal(coordinated, false, "invalid journal identity must refuse before coordinator entry");
+          assert.ok(error instanceof Error);
+          assert.equal(error.name, CommandError.name);
+          assert.match(error.message, /journal does not match the supplied plan: incompatible CSV journal identity\./u);
+          assert.doesNotMatch(error.message, /compensation/u);
+          return true;
+        });
+        assert.equal(coordinated, false, "invalid journal identity must refuse before coordinator entry");
+      }
+      assert.deepEqual(fixtureBytes(f.root), before, "refusal must leave every fixture byte unchanged");
+    }
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 

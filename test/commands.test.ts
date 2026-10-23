@@ -50,7 +50,7 @@ test("CSV commands and configured importers reject partial create/update failure
           assert.match(error.message, /Row 4: create failed/u);
           return true;
         });
-        const listed = spawnSync("pm", ["--path", root, "list", "--all", "--json"], { encoding: "utf8" });
+        const listed = spawnSync("pm", ["--path", root, "list", "--all", "--full", "--json"], { encoding: "utf8" });
         assert.equal(listed.status, 0, listed.stderr);
         const items = (JSON.parse(listed.stdout) as { items: Array<{ title: string; priority: number }> }).items;
         assert.ok(items.some((item) => item.title === title), "valid rows after failures still import");
