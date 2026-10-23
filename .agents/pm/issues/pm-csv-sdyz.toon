@@ -6,8 +6,10 @@ status: open
 priority: 2
 tags[2]: follow-up,toolchain
 created_at: "2026-10-20T08:41:55.486Z"
-updated_at: "2026-10-20T08:41:55.486Z"
+updated_at: "2026-10-23T17:10:23.583Z"
 author: codex-agent
 estimated_minutes: 30
 acceptance_criteria: Strict health no longer reports the pm-github host-version skew; both release gates remain green.
+comments[1]{created_at,author,text}:
+  "2026-10-23T17:10:23.582Z",codex-agent,"Schema-negotiation validation reproduced this existing default-profile health mismatch with pinned host 2026.10.20 and installed pm-github 2026.10.23. Strict health passed with a disposable isolated global profile, and fresh CI tracker-health jobs passed on Node 22 and 26. No SDK pin, global extension, history or telemetry configuration was changed. The existing toolchain follow-up remains open."
 body: ""

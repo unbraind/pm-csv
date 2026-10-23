@@ -43,6 +43,26 @@ tracker without a Git repository. None of these commands requires Git.
 | `pm csv-import import <file>` | Same required file, flags, implementation and results as `csv import`. |
 | `pm csv validate <file>` | Validate a CSV file without writes. |
 | `pm csv export` / `pm csv-export export` | Export tracker items as CSV. |
+| `pm csv schema describe <file>` | Propose a reusable versioned table schema with `--output schema.json`. |
+| `pm csv schema preview <file> --schema schema.json` | Refuse changed dialect, columns, domains or target contracts without writes. |
+| `pm csv schema import <file> --schema schema.json` | Negotiate before importing through the existing mutation core; `--dry-run` is read-only. |
+
+### Versioned table schema negotiation
+
+Save a reviewed mapping once and reuse it without silently reinterpreting a
+changed spreadsheet. Renamed/reordered columns, dialect changes and widened
+value domains refuse with typed remedies. Quoting, BOM and delimiter information
+is retained in a version 1 JSON artifact; agent receipts contain compact counts
+and a revision hash, with native TOON/JSON output.
+
+```bash
+pm csv schema describe backlog.csv --delimiter semicolon --auto-map --output backlog.schema.json
+pm csv schema preview backlog.csv --schema backlog.schema.json --json
+pm csv schema import backlog.csv --schema backlog.schema.json --key title --json
+```
+
+These commands work without git. See the [protocol and typed SDK example](docs/table-schema.md)
+for domain rules, artifact review, size limits, refusals and partial-write boundaries.
 
 ### `pm csv import <file>`
 

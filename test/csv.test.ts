@@ -108,6 +108,19 @@ test("parseCSV: quoted empty field", () => {
   ]);
 });
 
+test("parseCSV: explicit empty EOF records match terminated LF and CRLF records", () => {
+  assert.deepEqual(parseCSV('""'), [[""]]);
+  assert.deepEqual(parseCSV(""), []);
+  for (const eol of ["\n", "\r\n"]) {
+    const prefix = `title,priority${eol}Task,2${eol}`;
+    const records = [["title", "priority"], ["Task", "2"]];
+    assert.deepEqual(parseCSV(prefix), records, "a terminating newline must not add a record");
+    for (const ending of ['""', `""${eol}`, eol]) {
+      assert.deepEqual(parseCSV(prefix + ending), [...records, [""]], "explicit quoted or unquoted empty records must survive parsing");
+    }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // BOM handling
 // ---------------------------------------------------------------------------
@@ -622,6 +635,26 @@ test("StreamingCSVParser: matches parseCSV for simple rows", () => {
     ["a", "b", "c"],
     ["1", "2", "3"],
   ]);
+});
+
+test("StreamingCSVParser: explicit empty EOF records survive every chunk split", () => {
+  for (const eol of ["\n", "\r\n"]) {
+    const prefix = `title,priority${eol}Task,2${eol}`;
+    for (const ending of ['""', `""${eol}`, eol, ""]) {
+      const text = prefix + ending;
+      const expected = [["title", "priority"], ["Task", "2"], ...(ending ? [[""]] : [])];
+      for (let split = 0; split <= text.length; split++) {
+        const records: string[][] = [];
+        const parser = new StreamingCSVParser(",", row => records.push(row));
+        parser.push(text.slice(0, split));
+        parser.push(text.slice(split));
+        parser.end();
+        parser.end();
+        assert.deepEqual(records, expected, "chunk boundaries and repeated end calls must preserve exact records");
+        assert.deepEqual(records, parseCSV(text));
+      }
+    }
+  }
 });
 
 test("StreamingCSVParser: handles quoted fields with embedded delimiters and newlines", () => {

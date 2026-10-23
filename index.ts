@@ -9,6 +9,7 @@ import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts"
 import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+import { registerTableSchemaCommands } from "./table-schema.ts";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
@@ -143,16 +144,19 @@ type SupportedEncoding = (typeof SUPPORTED_ENCODINGS)[number];
  *  - Escaped quotes ("" inside a quoted field → single ")
  *  - Custom delimiter
  *  - CRLF and LF line endings
+ *  - Explicit quoted empty records at EOF, without inventing a row after a final newline
  */
 function parseCSV(text: string, delimiter: string = ","): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
   let inQuotes = false;
+  let recordStarted = false;
   let i = 0;
 
   while (i < text.length) {
     const ch = text[i];
+    recordStarted = true;
 
     if (inQuotes) {
       if (ch === '"') {
@@ -192,6 +196,7 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
       field = "";
       rows.push(row);
       row = [];
+      recordStarted = false;
       i += 2;
       continue;
     }
@@ -201,6 +206,7 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
       field = "";
       rows.push(row);
       row = [];
+      recordStarted = false;
       i++;
       continue;
     }
@@ -209,8 +215,8 @@ function parseCSV(text: string, delimiter: string = ","): string[][] {
     i++;
   }
 
-  // Flush last field / row
-  if (field !== "" || row.length > 0) {
+  // An explicit quoted empty field starts a record even though its value is empty.
+  if (recordStarted) {
     row.push(field);
     rows.push(row);
   }
@@ -284,6 +290,7 @@ class StreamingCSVParser {
   private field = "";
   private row: string[] = [];
   private inQuotes = false;
+  private recordStarted = false;
   private pendingBoundaryChar = "";
 
   constructor(delimiter: string, onRow: (row: string[]) => void) {
@@ -297,6 +304,7 @@ class StreamingCSVParser {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
+      this.recordStarted = true;
       if (this.inQuotes) {
         if (ch === '"') {
           if (i + 1 === text.length) {
@@ -332,6 +340,7 @@ class StreamingCSVParser {
         this.field = "";
         this.onRow(this.row);
         this.row = [];
+        this.recordStarted = false;
         i += 2;
         continue;
       }
@@ -344,6 +353,7 @@ class StreamingCSVParser {
         this.field = "";
         this.onRow(this.row);
         this.row = [];
+        this.recordStarted = false;
         i++;
         continue;
       }
@@ -359,11 +369,12 @@ class StreamingCSVParser {
       this.field += this.pendingBoundaryChar;
     }
     this.pendingBoundaryChar = "";
-    if (this.field !== "" || this.row.length > 0) {
+    if (this.recordStarted) {
       this.row.push(this.field);
       this.onRow(this.row);
       this.field = "";
       this.row = [];
+      this.recordStarted = false;
     }
   }
 }
@@ -1488,6 +1499,18 @@ function importCSVInMemory(pmRoot: string, filePath: string, opts: CsvImportOpti
   result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
   result.autoMappings = resolvedHeaders.autoMappings;
   processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
+  return result;
+}
+
+/** Import an already captured table through the existing mapping, upsert and mutation core.
+ * Callers own structural/strict validation; this entry never rereads a mutable input file.
+ */
+export function importParsedCSV(pmRoot: string, table: string[][], opts: Pick<CsvImportOptions, "delimiter" | "fieldMap" | "dryRun" | "keyField">): ImportResult {
+  const resolved = resolveImportHeaders(table[0], opts);
+  const result = createImportResult();
+  result.fieldMapWarnings = resolved.fieldMapWarnings;
+  result.autoMappings = resolved.autoMappings;
+  processImportRows(pmRoot, table.slice(1), resolved.headers, opts, result);
   return result;
 }
 
@@ -2924,6 +2947,7 @@ export default {
   version: "2026.10.23",
 
   activate(api: ExtensionApi) {
+    registerTableSchemaCommands(api);
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
@@ -3332,6 +3356,7 @@ export default {
 // ---------------------------------------------------------------------------
 export {
   parseCSV,
+  readBoolOption,
   serializeCSV,
   serializeField,
   stripBOM,
@@ -3388,3 +3413,6 @@ export type { EditSession, EditSessionRow, EditField, EditReceipt, EditConflict,
 
 export { importLineage, writeLineageBundle, lineageDigest, LINEAGE_FIELDS, LineageRefusal } from "./lineage.ts";
 export type { LineageField, LineageOptions, CellLineage, RowLineage, LineageManifest, LineageBundle } from "./lineage.ts";
+
+export { describeTable, previewTable, parseTableSchema, importNegotiatedTable, TableSchemaRefusal } from "./table-schema.ts";
+export type { TableSchema, TableDomain, TableField, TableRefusalCode, TableReceipt, TableDescription, DescribeTableOptions } from "./table-schema.ts";
