@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Refuse changed tables before reusing saved CSV mappings ([pm-csv-schema-negotiation](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-schema-negotiation.toon))
+
+### Other
+
+- Reconcile stale in-progress tracker records (2026-10-23) ([pm-csv-reconcile-1023](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-reconcile-1023.toon))
+
 ## 2026.10.24 - 2026-10-24
 
 ### Added

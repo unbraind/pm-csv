@@ -2,13 +2,18 @@ id: pm-csv-schema-negotiation
 title: Refuse changed tables before reusing saved CSV mappings
 description: "Reusable versioned input-table contracts describe dialect, ordered columns, value domains and proposed pm mappings. Reuse refuses structural or semantic drift before writes."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-10-23T16:46:45.701Z"
-updated_at: "2026-10-23T17:31:03.401Z"
+updated_at: "2026-10-24T23:10:36.751Z"
+closed_at: "2026-10-24T21:45:35.213Z"
+completed_at: "2026-10-23T17:47:11.000Z"
 author: codex-agent
 acceptance_criteria: A renamed column invalidates a saved mapping; quoting/BOM/delimiter fixtures round-trip; preview does not mutate the tracker.
+resolution: "Saved schema/mapping contracts refuse renamed or drifted columns before reuse, preserve quoting/BOM/delimiter behavior, and keep preview read-only."
+expected_result: A renamed column invalidates a saved mapping; quoting/BOM/delimiter fixtures round-trip; preview does not mutate the tracker.
+actual_result: "https://github.com/unbraind/pm-csv/pull/186, merged 2026-10-23T17:47:11Z, merge 750aaf1af1804ce7ff4fc5f1765ab413e8487007: Saved schema/mapping contracts refuse renamed or drifted columns before reuse, preserve quoting/BOM/delimiter behavior, and keep preview read-only."
 comments[7]{created_at,author,text}:
   "2026-10-23T16:46:57.660Z",codex-agent,"Overlap recheck: current registry host is 2026.10.23; this branch retains the pinned 2026.10.20 SDK. Existing csv import flags, alias and status mappings, strict validation, complete-list certification and row mutation core remain implementation primitives. Core schema APIs and schema evolution describe pm tracker fields, not source table contracts. pm-beads handles JSONL reconciliation. Existing spreadsheet sessions and lineage describe edits and cell provenance rather than reusable dialect/column/domain negotiation. No duplicate item found by schema and negotiation searches. Plan: versioned bounded artifacts, exact header/dialect checks, SDK-resolved target types/statuses, compact read-only preview and negotiated import, real non-git fixtures and public tracker copy; targeted local checks and full npm/Bun CI gates."
   "2026-10-23T16:54:53.517Z",codex-agent,"Initial targeted regression run: 8 passed, 0 failed. Exact-header/dialect and lexical-domain refusals are checked before import; malformed/tampered schemas have typed remedies. Sixteen quoting/BOM/delimiter combinations preserve parsed cells. Real non-git tracker snapshot hashes prove describe, preview, dry-run and refused drift leave all tracker files unchanged. Imports reuse the existing parser, alias and strict-validation helpers, SDK workspace contracts and existing create/upsert core, with one captured table to avoid rereading mutable input. Full release gates are delegated to CI because the host is saturated."
@@ -44,4 +49,5 @@ tests[2]:
 docs[2]{path,scope}:
   docs/table-schema.md,project
   README.md,project
+close_reason: "https://github.com/unbraind/pm-csv/pull/186, merged 2026-10-23T17:47:11Z, merge 750aaf1af1804ce7ff4fc5f1765ab413e8487007: Saved schema/mapping contracts refuse renamed or drifted columns before reuse, preserve quoting/BOM/delimiter behavior, and keep preview read-only."
 body: ""
