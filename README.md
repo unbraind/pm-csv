@@ -283,11 +283,18 @@ By default only the built-in columns above are exported. `--all-fields` (alias
 workspace runtime schema and appends them as extra columns — the default column
 set is otherwise unchanged, so the flag is strictly additive.
 
-Discovery reads the same inputs the SDK's `resolveRuntimeFieldRegistry` consumes
-(the workspace `settings.json` `schema.fields` plus the file it points at via
-`schema.files.fields`, default `schema/fields.json`). A standalone-installed
-extension only loads its own `dist/`, so the SDK function isn't importable at
-runtime; reading its inputs directly is the runtime-safe equivalent.
+Discovery uses the pm SDK's `readSettingsWithMetadata` and
+`resolveRuntimeFieldRegistry`, including configured schema files, array and
+`definitions` file shapes, and legacy metadata aliases. The host's canonical
+registry rules apply: custom columns sort by normalized key, names normalize to
+lowercase, and file-backed definitions override inline definitions of the same
+key. These replace the old insertion order, literal names and first-definition
+precedence. Explicit `--columns` order remains unchanged. Invalid inline settings
+follow the SDK defaults instead of partially salvaging their inline fields;
+missing or malformed optional files follow the SDK's fallback rules. The SDK
+initializes missing runtime schema files as it does for host commands; complete
+schema files stay unchanged.
+Both discovery APIs are available at the declared host floor.
 
 ```bash
 pm csv export --all-fields --output full.csv

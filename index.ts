@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:f
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+import { certifyCompleteListResult, inspectCompleteListResult, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
 
 import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts";
 import type { LineageField } from "./lineage.ts";
@@ -2682,67 +2682,20 @@ interface DiscoveredField {
 }
 
 /**
- * Discover custom item fields registered in the workspace runtime schema and
- * return those that are NOT already covered by the built-in export columns
- * (or the provenance `csv_source` column).
- *
- * This is the standalone-extension-safe equivalent of the SDK's
- * `resolveRuntimeFieldRegistry(settings.schema)`: a standalone-installed
- * extension only loads its own `dist/`, so `@unbrained/pm-cli` is not
- * resolvable at runtime and the SDK function cannot be imported. We instead
- * read the very same inputs that function consumes — the workspace
- * `settings.json` `schema.fields` plus the file it points at
- * (`schema.files.fields`, default `schema/fields.json`) — and merge them by
- * field key. The shape matches the SDK `RuntimeFieldDefinition` type.
- *
- * Never throws: any read/parse problem yields an empty list so export still
- * works on hosts without a runtime field schema.
+ * Discover custom export columns through the host's hydrated runtime registry.
+ * SDK normalization, ordering and file-backed overrides match the host schema;
+ * optional discovery still yields no extra columns when settings cannot load.
  */
-function discoverCustomFields(pmRoot: string): DiscoveredField[] {
-  const builtin = new Set<string>(EXPORT_COLUMNS as string[]);
-  const byKey = new Map<string, DiscoveredField>();
-
-  const collect = (fields: unknown): void => {
-    if (!Array.isArray(fields)) return;
-    for (const raw of fields) {
-      if (!raw || typeof raw !== "object") continue;
-      const def = raw as { key?: unknown; metadata_key?: unknown; front_matter_key?: unknown };
-      const key = typeof def.key === "string" ? def.key.trim() : "";
-      if (!key || builtin.has(key)) continue;
-      const metadataKey =
-        (typeof def.metadata_key === "string" && def.metadata_key.trim()) ||
-        (typeof def.front_matter_key === "string" && def.front_matter_key.trim()) ||
-        key;
-      if (!byKey.has(key)) byKey.set(key, { key, metadataKey });
-    }
-  };
-
-  let settings: Record<string, unknown> = {};
+async function discoverCustomFields(pmRoot: string): Promise<DiscoveredField[]> {
   try {
-    settings = JSON.parse(readFileSync(resolve(pmRoot, "settings.json"), "utf-8"));
+    const { settings } = await readSettingsWithMetadata(pmRoot);
+    const builtin = new Set<string>(EXPORT_COLUMNS);
+    return resolveRuntimeFieldRegistry(settings.schema).definitions
+      .filter(field => !builtin.has(field.key))
+      .map(field => ({ key: field.key, metadataKey: field.metadata_key }));
   } catch {
     return [];
   }
-  const schema = (settings["schema"] ?? {}) as Record<string, unknown>;
-
-  // Inline fields declared directly in settings.json.
-  collect(schema["fields"]);
-
-  // File-backed fields (schema.files.fields, default schema/fields.json) — the
-  // path the CLI scaffolds and the SDK loader reads.
-  const files = (schema["files"] ?? {}) as Record<string, unknown>;
-  const fieldsPath =
-    typeof files["fields"] === "string" && files["fields"].trim()
-      ? (files["fields"] as string)
-      : "schema/fields.json";
-  try {
-    const fileJson = JSON.parse(readFileSync(resolve(pmRoot, fieldsPath), "utf-8"));
-    collect(fileJson?.fields);
-  } catch {
-    // No file / unreadable / unparsable — inline fields (if any) still apply.
-  }
-
-  return [...byKey.values()];
 }
 
 // Parse a `--columns id,title,status` spec into a validated, ordered subset of
@@ -2790,12 +2743,12 @@ function selectExportColumns(
  * - With `--columns`, the explicit, ordered selection wins; discovered custom
  *   field keys become selectable names too.
  */
-function resolveExportColumns(
+async function resolveExportColumns(
   pmRoot: string,
   columnsSpec: string | undefined,
   discover: boolean,
-): { columns: string[]; columnSource: Record<string, string> } {
-  const discovered = discover ? discoverCustomFields(pmRoot) : [];
+): Promise<{ columns: string[]; columnSource: Record<string, string> }> {
+  const discovered = discover ? await discoverCustomFields(pmRoot) : [];
   const columnSource: Record<string, string> = {};
   for (const f of discovered) {
     if (f.key !== f.metadataKey) columnSource[f.key] = f.metadataKey;
@@ -2916,13 +2869,13 @@ function buildCsvExport(
 }
 
 /** Parse export flags and render the tracker through the shared export core. */
-function prepareCsvExport(
+async function prepareCsvExport(
   pmRoot: string,
   rawOptions: Record<string, unknown>,
-): PreparedCsvExport {
+): Promise<PreparedCsvExport> {
   const delimiter = resolveDelimiter(rawOptions["delimiter"] as string | undefined);
   const discover = readBoolOption(rawOptions, "all-fields", "allFields", "discover-fields", "discoverFields");
-  const { columns, columnSource } = resolveExportColumns(
+  const { columns, columnSource } = await resolveExportColumns(
     pmRoot,
     rawOptions["columns"] as string | undefined,
     discover,
@@ -3299,7 +3252,7 @@ export default {
       ],
       async run(ctx) {
         console.error("Fetching pm items…");
-        const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
+        const { csvText, count, eol, outputPath } = await prepareCsvExport(ctx.pm_root, ctx.options);
 
         if (count === 0) {
           console.error("No items found.");
@@ -3326,7 +3279,7 @@ export default {
     // Mirrors the importer so CSV is a first-class import/export pair.
     // -----------------------------------------------------------------------
     api.registerExporter("csv-export", async (ctx) => {
-      const { csvText, count, eol, outputPath } = prepareCsvExport(ctx.pm_root, ctx.options);
+      const { csvText, count, eol, outputPath } = await prepareCsvExport(ctx.pm_root, ctx.options);
 
       if (outputPath) {
         const absolutePath = resolve(outputPath);

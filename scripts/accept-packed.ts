@@ -24,6 +24,7 @@ interface AcceptanceReceipt {
   readonly host_version: string;
   readonly stdout_bytes: number;
   readonly stderr_bytes: number;
+  readonly all_fields_exported: true;
   readonly created_fixture_present: true;
   readonly imported_fixture_present: true;
   readonly lineage_imported: 1;
@@ -150,6 +151,10 @@ try {
     if (exported.stderr.includes("deprecated") || exported.stderr.includes("list-all")) {
       throw new Error(`${scenario.name} pm csv export emitted a deprecated-command diagnostic: ${exported.stderr.trim()}`);
     }
+    const allFields = runPm(scenario, scenarioRoot, ["--json", "csv", "export", "--all-fields"]);
+    if (!allFields.stdout.includes(createdTitle) || !allFields.stdout.includes(importedTitle)) {
+      throw new Error(`${scenario.name} SDK all-fields export omitted a fixture`);
+    }
     const bundleInput = join(scenarioRoot, "lineage.csv");
     writeFileSync(bundleInput, "title,priority,excluded\nPacked lineage,2,omit\n,9,omit\n");
     const firstBundle = join(scenarioRoot, "lineage-first");
@@ -177,6 +182,7 @@ try {
       host_version: scenario.hostVersion,
       stdout_bytes: Buffer.byteLength(exported.stdout),
       stderr_bytes: Buffer.byteLength(exported.stderr),
+      all_fields_exported: true,
       created_fixture_present: true,
       imported_fixture_present: true,
       lineage_imported: 1,
