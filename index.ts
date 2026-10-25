@@ -2687,15 +2687,11 @@ interface DiscoveredField {
  * optional discovery still yields no extra columns when settings cannot load.
  */
 async function discoverCustomFields(pmRoot: string): Promise<DiscoveredField[]> {
-  try {
-    const { settings } = await readSettingsWithMetadata(pmRoot);
-    const builtin = new Set<string>(EXPORT_COLUMNS);
-    return resolveRuntimeFieldRegistry(settings.schema).definitions
-      .filter(field => !builtin.has(field.key))
-      .map(field => ({ key: field.key, metadataKey: field.metadata_key }));
-  } catch {
-    return [];
-  }
+  const { settings } = await readSettingsWithMetadata(pmRoot);
+  const builtin = new Set<string>(EXPORT_COLUMNS);
+  return resolveRuntimeFieldRegistry(settings.schema).definitions
+    .filter(field => !builtin.has(field.key))
+    .map(field => ({ key: field.key, metadataKey: field.metadata_key }));
 }
 
 // Parse a `--columns id,title,status` spec into a validated, ordered subset of

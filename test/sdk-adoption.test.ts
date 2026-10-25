@@ -1,13 +1,11 @@
 import "./support/isolated-environment.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { create, getHistoryPath, listMutationEvents, readSettingsWithMetadata, setActiveExtensionHooks } from "@unbrained/pm-cli/sdk";
-import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
-import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
+import { create, getHistoryPath, listMutationEvents, readSettingsWithMetadata } from "@unbrained/pm-cli/sdk";
 import { discoverCustomFields } from "../index.ts";
 import { captureUpdateCompensation, compensateUpdate, readUpdateSnapshot } from "../atomic-update.ts";
 import { applyEditSession, exportEditSession } from "../roundtrip.ts";
@@ -65,19 +63,14 @@ test("SDK discovery preserves an initialized schema and settings without git", a
   }
 });
 
-test("SDK discovery preserves optional fallback when a real settings read hook refuses access", async () => {
+test("SDK settings filesystem failures use the host fallback without partial fields", async () => {
   const root = tracker();
-  const harness = await createExtensionTestHarness({ name: "read-refusal", activate(api: ExtensionApi) {
-    api.hooks.onRead(() => { throw new Error("settings access refused"); });
-  } }, { name: "read-refusal", capabilities: ["hooks"] });
   try {
-    setActiveExtensionHooks(harness.activation.hooks);
+    rmSync(join(root, "settings.json"));
+    mkdirSync(join(root, "settings.json"));
+    assert.ok((await readSettingsWithMetadata(root)).warnings.includes("settings_read_fs_error"));
     assert.deepEqual(await discoverCustomFields(root), []);
-  } finally {
-    setActiveExtensionHooks(null);
-    await harness.deactivate();
-    rmSync(root, { recursive: true, force: true });
-  }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("corrupt history after priming SDK caches still refuses checkout, apply and compensation without writes", async () => {
