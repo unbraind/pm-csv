@@ -19,7 +19,6 @@
 
 ### Fixed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
 - Preserve CSV refusal and full-row evidence on pm-cli 2026.10.20 ([pm-csv-compat-177](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-compat-177.toon))
 
 ### Other
@@ -35,6 +34,7 @@
 
 ### Fixed
 
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
 - Development README names TypeScript 5 while the manifest pins TypeScript 7 ([pm-csv-bqyu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bqyu.toon))
 - Harden the release merge wait against mergeStateStatus deadlock ([pm-csv-7izf](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7izf.toon))
 - The changelog gate stamps an untagged version with the current date, so its verdict flips every midnight with no commit ([pm-csv-bv81](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bv81.toon))
@@ -46,14 +46,6 @@
 ### Other
 
 - Certify pm-csv with pm CLI and SDK 2026.9.28 ([pm-csv-3044](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3044.toon))
-
-## 2026.10.22 - 2026-10-22
-
-### Fixed
-
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
-- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 
 ## 2026.10.12 - 2026-10-12
 
@@ -75,6 +67,7 @@
 
 ### Fixed
 
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
 - A publish that npm accepts late is reported as failed and the GitHub Release is skipped on bun mirror lag ([pm-csv-c2a8](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-c2a8.toon))
 
 ### Other
@@ -139,6 +132,7 @@
 
 ### Fixed
 
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
 - Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
 
 ## 2026.8.31 - 2026-08-31
@@ -164,6 +158,7 @@
 
 ### Fixed
 
+- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 - Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
 - Adopt the canonical certified complete-list reader ([pm-csv-t4cc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-t4cc.toon))
 - Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))
