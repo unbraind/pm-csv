@@ -5,10 +5,21 @@ type: Issue
 status: closed
 priority: 2
 tags[3]: "gh:unbraind/pm-csv#86","github_author:github-actions[bot]",release-failure
-created_at: "2026-10-21T07:48:09.654Z"
-updated_at: "2026-10-21T07:48:09.753Z"
-closed_at: "2026-10-21T07:48:09.749Z"
-completed_at: "2026-09-01T04:51:41.000Z"
+created_at: "2026-08-27T14:29:39Z"
+updated_at: "2026-10-25T07:40:17.276Z"
+closed_at: "2026-09-01T04:51:41Z"
+completed_at: "2026-09-01T04:51:41Z"
 author: pm-github
-close_reason: GitHub issue #86 closed
+release: v2026.09.01
+close_reason: "Closed on GitHub as completed on 2026-09-01T04:51:41Z"
+github_close_reason: "Closed on GitHub as completed on 2026-09-01T04:51:41Z"
+github_closed_at: "2026-09-01T04:51:41Z"
+github_created_at: "2026-08-27T14:29:39Z"
+github_link_only: false
+github_number: 86
+github_release: v2026.09.01
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-09-01T04:51:41Z"
+github_url: "https://github.com/unbraind/pm-csv/issues/86"
 body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-csv/actions/runs/33081605178\n- Commit: f519a48843ca9e363475ee5852fb27fcd0157af1\n- Date (UTC): 2026-08-27T14:29:37Z\n\n\n---\n\n### GitHub comments (1)\n\n> **@unbraind** (2026-09-01T04:51:40Z)\n>\n> Closing as resolved and stale.\n> \n> This issue was filed automatically while npm publishing was broken fleet-wide between\n> 2026-08-23 and 2026-08-27. That outage is over. Measured today (2026-09-01), this repository's\n> last three scheduled release runs all succeeded, and the published version on npm matches the\n> current release:\n> \n> - release workflow: 2026-08-29 success, 2026-08-30 success, 2026-08-31 success\n> - npm `latest`: 2026.8.31\n> \n> Nothing here needs a fix; the failing condition no longer exists. The auto-filed issue simply\n> has no counterpart step that closes it once the workflow recovers, so it stayed open for five\n> days after the cause was gone.\n>"
