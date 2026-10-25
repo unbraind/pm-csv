@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { SETTINGS_DEFAULTS } from "@unbrained/pm-cli/sdk";
 
 import {
   parseCSV,
@@ -34,7 +35,7 @@ import {
   type ParsedRow,
 } from "../index.ts";
 
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -525,19 +526,21 @@ test("rowMatchesFilter: combined criteria are ANDed together", () => {
 function makeWorkspace(setup: (root: string) => void): string {
   const root = mkdtempSync(join(tmpdir(), "pm-csv-test-"));
   setup(root);
+  const settingsPath = join(root, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify({ ...SETTINGS_DEFAULTS, ...JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown> }));
   return root;
 }
 
-test("discoverCustomFields: no workspace settings → empty list (never throws)", () => {
+test("discoverCustomFields: no workspace settings → empty list (never throws)", async () => {
   const root = mkdtempSync(join(tmpdir(), "pm-csv-test-"));
   try {
-    assert.deepEqual(discoverCustomFields(root), []);
+    assert.deepEqual(await discoverCustomFields(root), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("discoverCustomFields: reads file-backed schema/fields.json", () => {
+test("discoverCustomFields: reads file-backed schema/fields.json", async () => {
   const root = makeWorkspace((r) => {
     writeFileSync(join(r, "settings.json"), JSON.stringify({ schema: { files: { fields: "schema/fields.json" }, fields: [] } }));
     mkdirSync(join(r, "schema"));
@@ -552,7 +555,7 @@ test("discoverCustomFields: reads file-backed schema/fields.json", () => {
     );
   });
   try {
-    const found = discoverCustomFields(root);
+    const found = await discoverCustomFields(root);
     assert.deepEqual(found, [
       { key: "story_points", metadataKey: "story_points" },
       { key: "team", metadataKey: "team" },
@@ -562,7 +565,7 @@ test("discoverCustomFields: reads file-backed schema/fields.json", () => {
   }
 });
 
-test("discoverCustomFields: built-in columns and csv_source are excluded", () => {
+test("discoverCustomFields: built-in columns and csv_source are excluded", async () => {
   const root = makeWorkspace((r) => {
     writeFileSync(
       join(r, "settings.json"),
@@ -579,13 +582,13 @@ test("discoverCustomFields: built-in columns and csv_source are excluded", () =>
     );
   });
   try {
-    assert.deepEqual(discoverCustomFields(root), [{ key: "epic_link", metadataKey: "epic_link" }]);
+    assert.deepEqual(await discoverCustomFields(root), [{ key: "epic_link", metadataKey: "epic_link" }]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("discoverCustomFields: falls back to metadata key, then key, for the stored property", () => {
+test("discoverCustomFields: falls back to metadata key, then key, for the stored property", async () => {
   const root = makeWorkspace((r) => {
     writeFileSync(
       join(r, "settings.json"),
@@ -601,7 +604,7 @@ test("discoverCustomFields: falls back to metadata key, then key, for the stored
     );
   });
   try {
-    assert.deepEqual(discoverCustomFields(root), [
+    assert.deepEqual(await discoverCustomFields(root), [
       { key: "points", metadataKey: "points" },
       { key: "sev", metadataKey: "severity" },
     ]);

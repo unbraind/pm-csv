@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -247,7 +247,7 @@ test("direct import and reader seams cover default options and fallback receipt 
     assert.equal(itemStatus(root, alreadyClosedId), "closed");
 
     writeFileSync(join(root, "settings.json"), "{}", "utf8");
-    assert.deepEqual(discoverCustomFields(root), []);
+    assert.deepEqual(await discoverCustomFields(root), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -389,12 +389,13 @@ test("command paths exercise rich create/update, headerless streaming, strict su
 
     mkdirSync(join(root, "schema"), { recursive: true });
     writeFileSync(join(root, "settings.json"), JSON.stringify({
-      schema: { fields: "invalid", files: { fields: "schema/fields.json" } },
+      ...JSON.parse(readFileSync(join(root, "settings.json"), "utf8")) as Record<string, unknown>,
+      schema: { fields: [], files: { fields: "schema/fields.json" } },
     }), "utf8");
     writeFileSync(join(root, "schema", "fields.json"), JSON.stringify({
       fields: [{ key: "custom", metadata_key: "custom_meta" }, { key: "title" }],
     }), "utf8");
-    assert.deepEqual(discoverCustomFields(root), [{ key: "custom", metadataKey: "custom_meta" }]);
+    assert.deepEqual(await discoverCustomFields(root), [{ key: "custom", metadataKey: "custom_meta" }]);
     const exported = await harness.runCommand({
       command: "csv export",
       options: { allFields: true, columns: "title,custom" },
