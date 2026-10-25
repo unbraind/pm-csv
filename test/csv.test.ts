@@ -527,7 +527,7 @@ function makeWorkspace(setup: (root: string) => void): string {
   const root = mkdtempSync(join(tmpdir(), "pm-csv-test-"));
   setup(root);
   const settingsPath = join(root, "settings.json");
-  writeFileSync(settingsPath, JSON.stringify({ ...SETTINGS_DEFAULTS, ...JSON.parse(readFileSync(settingsPath, "utf8")) }));
+  writeFileSync(settingsPath, JSON.stringify({ ...SETTINGS_DEFAULTS, ...JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown> }));
   return root;
 }
 

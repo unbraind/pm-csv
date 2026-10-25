@@ -389,7 +389,7 @@ test("command paths exercise rich create/update, headerless streaming, strict su
 
     mkdirSync(join(root, "schema"), { recursive: true });
     writeFileSync(join(root, "settings.json"), JSON.stringify({
-      ...JSON.parse(readFileSync(join(root, "settings.json"), "utf8")),
+      ...JSON.parse(readFileSync(join(root, "settings.json"), "utf8")) as Record<string, unknown>,
       schema: { fields: [], files: { fields: "schema/fields.json" } },
     }), "utf8");
     writeFileSync(join(root, "schema", "fields.json"), JSON.stringify({

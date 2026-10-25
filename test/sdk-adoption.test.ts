@@ -24,7 +24,7 @@ test("SDK discovery uses canonical registry tokens and file overrides in definit
   const savedPath = process.env.PATH;
   try {
     process.env.PATH = "";
-    const settings = JSON.parse(readFileSync(join(root, "settings.json"), "utf8"));
+    const settings = JSON.parse(readFileSync(join(root, "settings.json"), "utf8")) as Record<string, unknown>;
     settings.schema = { files: { fields: "custom-fields.json" }, fields: [
       { key: "Zeta", metadata_key: "OLD" }, { key: "title" }, { key: "csv_source" },
     ] };
@@ -86,7 +86,7 @@ test("corrupt history after priming SDK caches still refuses checkout, apply and
     assert.equal(page.source, "derived_index");
     const before = await readUpdateSnapshot(root, id);
     const historyPath = getHistoryPath(root, id);
-    const entries = readFileSync(historyPath, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const entries = readFileSync(historyPath, "utf8").trim().split("\n").map(line => JSON.parse(line) as Record<string, unknown>);
     // Keep the JSON and event projection readable while breaking chain integrity.
     entries[0].after_hash = "0".repeat(64);
     const corrupted = entries.map(entry => JSON.stringify(entry)).join("\n") + "\n";

@@ -68,7 +68,8 @@ try {
     const remote = run("git", ["-C", repository, "remote", "get-url", "origin"]).toString().trim();
     assert.match(remote, /^https:\/\/github\.com\/unbraind\/pm-[\w-]+\.git$/);
     const slug = remote.replace("https://github.com/", "").replace(/\.git$/, "");
-    assert.equal(JSON.parse(run("gh", ["repo", "view", slug, "--json", "visibility"]).toString()).visibility, "PUBLIC");
+    const repositoryInfo = JSON.parse(run("gh", ["repo", "view", slug, "--json", "visibility"]).toString()) as { visibility: string };
+    assert.equal(repositoryInfo.visibility, "PUBLIC");
     const head = run("git", ["-C", repository, "rev-parse", "origin/main"]).toString().trim();
     const copy = join(scratch, name);
     mkdirSync(copy);
