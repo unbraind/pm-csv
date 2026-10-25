@@ -524,3 +524,17 @@ keys make unchanged retries idempotent. The compact TOON/JSON receipt reports
 counts; artifacts include SHA-256 checksums. See the [protocol and worked
 example](docs/row-lineage.md) for the typed SDK, mapping revisions, refusals,
 privacy policy and recovery behavior.
+
+## Cross-table reference joins
+
+Resolve explicit external-key parent and dependency columns across selected tables
+in one preview, then apply the reviewed source digests through SDK transactions.
+
+```sh
+pm csv join preview joins.json --output reviewed.json --json
+pm csv join apply reviewed.json --json
+```
+
+Duplicate or unresolved keys include cell coordinates and block import. See the
+[three-table example, typed SDK API, bounds and recovery contract](docs/join-plans.md).
+These create-only plans work without git. Retain the reviewed artifact for retries.

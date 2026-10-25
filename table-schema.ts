@@ -58,7 +58,7 @@ export interface TableDescription {
 }
 
 /** Reject malformed quoting before using the existing parser; inspect only record separators outside quotes. */
-function readTable(text: string, delimiter: string): { table: string[][]; dialect: TableSchema["dialect"] } {
+export function readTable(text: string, delimiter: string): { table: string[][]; dialect: TableSchema["dialect"] } {
   if (Buffer.byteLength(text) > 8 * 1024 * 1024 || delimiter.length !== 1 || /["\r\n\uFEFF]/.test(delimiter)) {
     throw new TableSchemaRefusal("csv_table_invalid", "Use at most 8 MiB of UTF-8 CSV and a single delimiter other than quotes or newlines.");
   }

@@ -1,0 +1,34 @@
+id: pm-csv-join-plans
+title: Resolve cross-table external references before CSV import
+description: "Plan joins across explicitly selected external tables. Existing CSV relational columns accept native IDs and table-schema.ts negotiates one table; provider adapters retain remote-key ownership. Core continues to own item identities, relationships and transactions."
+type: Feature
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-25T22:22:43.054Z"
+updated_at: "2026-10-25T22:51:13.499Z"
+author: codex-agent
+acceptance_criteria: A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives.
+comments[7]{created_at,author,text}:
+  "2026-10-25T22:22:45.644Z",codex-agent,"Overlap check: inspected core SDK contracts, CSV relational import/export and single-table schema contracts, plus Jira, Linear, ADO and Beads adapters. No cross-selected-table external-key join planner found. Provider key mapping remains adapter-owned; join declarations are explicit. Validation will cover non-git trackers, stale revisions, ambiguous/unresolved coordinates, replay, and SDK state readback. Host write-fencing limitation is already tracked by pm-csv-sdk-write-fence."
+  "2026-10-25T22:24:03.715Z",codex-agent,"Implement bounded create-only cross-table plans. SDK-generated native IDs are persisted in reviewed plans; external keys never become native identities. Plans embed captured CSV sources with exact SHA-256 digests, explicit scalar mappings and parent/blocked_by declarations. Validate the whole selected graph before writes. Use the SDK create lifecycle and workspace transaction coordinator; inspect exact owned history and current documents on every retry, skip foreign collisions and their dependents, and refuse edited owned targets. No additional shared cache/outbox/lease files. Append-only compensation closes only unchanged owned creates, never deletes tracker records."
+  "2026-10-25T22:36:34.558Z",codex,"Targeted tests pass for three-table resolution, zero-byte preview/refusals, foreign-target skip closure, stale owned revisions, strict boundary fuzz, SDK journal transitions, compact commands and safe reconciliation. Model testing uses separate real SDK trackers as the reference oracle so normalization is never hand-written. The pinned SDK normalizes custom status IDs; tests now consume its returned ID. It accepts completedAt only for its configured close status, a host capability limitation to report."
+  "2026-10-25T22:39:08.419Z",codex-agent,"Public main tracker validation: 127 items across 3 selected tables; 19 native parent targets resolved as explicit key joins; 40833 CSV bytes; 114-byte receipt; 46173-byte plan; injected duplicate reported both coordinates. Read-only source hashes unchanged, zero tracker writes, no git executable. Final recovery contract retains created rows rather than closing them during compensation. Committed SDK journals bypass step inspect, so apply additionally rereads all current target revisions after coordination."
+  "2026-10-25T22:46:34.543Z",codex-agent,"Seeded model validation passed: 500 sequences, 4000 operations, 16 randomized custom-status tracker/model pairs. Every supported scalar, parent and dependency is compared by reading native SDK state from both trackers; older plan replay, source changes, LF/CRLF and whitespace are included. Behavioral revert proof: disabling only compile external-key edge resolution makes the three-table regression fail on the SDK-read parent value. Local strict health otherwise passes but reports the pre-existing global pm-github host-version skew tracked by pm-csv-sdyz; no dependency pin or global installation was changed."
+  "2026-10-25T22:49:39.689Z",codex-agent,"Implementation and local verification are complete: 13 focused regressions plus the 500-sequence model test; real CLI JSON/TOON in a tracker with no Git; strict input/output fuzz; current-revision checks after committed-journal fast paths; zero duplicates found; docstrings documented. npm typecheck and lint were run through pm test --run --progress. Full npm/Bun release checks will run in CI and their final run URL/counts will be attached to the PR. Isolated-global strict health passes; normal host health only reports the already tracked pm-github skew."
+  "2026-10-25T22:51:13.499Z",codex-agent,"Final artifact explicitly binds expected target revision \"absent\" in the transaction identity; retries still verify exact owned create history through the SDK. Receipts cap coordinate details at 20 while retaining complete counts and remedies. Repeated public-copy measurement after this final artifact field: 127 rows, 3 tables, 19 references, 40833 CSV bytes, 114-byte receipt, 46193-byte plan, 2 duplicate coordinates, zero writes, unchanged source hash. Focused checks still pass."
+files[5]{path,scope}:
+  index.ts,project
+  join-plans.ts,project
+  scripts/validate-join-plans.ts,project
+  table-schema.ts,project
+  test/join-plans.test.ts,project
+tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/join-plans.test.ts,project,1200,codex-agent,"2026-10-25T22:42:04.478Z",local_mutation,feat/cross-table-join-plans
+  npm run typecheck,project,120,codex-agent,"2026-10-25T22:42:07.353Z",local_mutation,feat/cross-table-join-plans
+  npm run lint,project,120,codex-agent,"2026-10-25T22:42:10.917Z",local_mutation,feat/cross-table-join-plans
+docs[3]{path,scope}:
+  docs/join-plans.md,project
+  docs/join-validation.md,project
+  README.md,project
+body: ""

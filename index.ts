@@ -9,6 +9,7 @@ import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts"
 import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+import { registerJoinCommands } from "./join-plans.ts";
 import { registerTableSchemaCommands } from "./table-schema.ts";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
@@ -2897,6 +2898,7 @@ export default {
 
   activate(api: ExtensionApi) {
     registerTableSchemaCommands(api);
+    registerJoinCommands(api);
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
@@ -3365,3 +3367,6 @@ export type { LineageField, LineageOptions, CellLineage, RowLineage, LineageMani
 
 export { describeTable, previewTable, parseTableSchema, importNegotiatedTable, TableSchemaRefusal } from "./table-schema.ts";
 export type { TableSchema, TableDomain, TableField, TableRefusalCode, TableReceipt, TableDescription, DescribeTableOptions } from "./table-schema.ts";
+
+export { previewJoins, applyJoins, JoinRefusal } from "./join-plans.ts";
+export type { JoinInput, JoinPlan, JoinReceipt, JoinIssue, JoinApplyOptions, JoinRefusalCode } from "./join-plans.ts";

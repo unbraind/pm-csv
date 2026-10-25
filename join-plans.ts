@@ -1,0 +1,355 @@
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync, statSync } from "node:fs";
+import {
+  acquireLock, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
+  PmCliError, readHistoryEntries, readLocatedItem, readSettings, resolveItemTypeRegistry,
+  resolveRuntimeStatusRegistry, verifyHistoryEntries,
+} from "@unbrained/pm-cli/sdk";
+import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep } from "@unbrained/pm-cli/sdk";
+import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+import { assertEditLease } from "./lease-guard.ts";
+import { readTable } from "./table-schema.ts";
+
+/** Explicit SDK create-option vocabulary: no implicit header mappings or field coercion. */
+const FIELDS = ["title", "body", "type", "status", "priority", "tags", "assignee", "sprint", "release", "estimatedMinutes", "acceptanceCriteria", "closeReason", "completedAt"] as const;
+/** Supported scalar create options; SDK owns their normalization and persistence. */
+type Field = typeof FIELDS[number];
+/** Explicit external-key input; CSV sources are captured inline, never reopened during apply. */
+export interface JoinInput {
+  version: 1;
+  tables: { name: string; key: string; csv: string; fields: Partial<Record<Field, string>>;
+    references: { column: string; table: string; kind: "parent" | "blocked_by" }[] }[];
+}
+/** Cell coordinates are one-based logical CSV records and columns, including the header. */
+export interface JoinIssue {
+  table: string;
+  row: number;
+  column: number;
+  code: "empty_key" | "duplicate_key" | "unresolved" | "cycle" | "foreign" | "dependency_skipped";
+}
+/** Saved review binds source bytes, target settings, SDK-generated identities and absent revisions. */
+export interface JoinPlan {
+  version: 1;
+  input: JoinInput;
+  sources: string[];
+  settings: string;
+  ids: string[];
+  expected: "absent";
+  digest: string;
+}
+/** Bounded host-rendered receipt; no cell values or source text are returned. */
+export interface JoinReceipt {
+  ok: boolean;
+  remedy?: string;
+  tables: number;
+  rows: number;
+  references: number;
+  applied: number;
+  unchanged: number;
+  skipped: number;
+  issueCount: number;
+  issues: JoinIssue[];
+}
+/** Stable expected refusal categories for SDK callers and agent dispatch. */
+export type JoinRefusalCode = "csv_join_invalid" | "csv_join_io" | "csv_join_settings_changed" | "csv_join_target_changed" | "csv_join_apply_failed" | "csv_join_reconcile";
+/** Diagnostics execute outside item locks; intended for deterministic crash and interleaving tests. */
+export interface JoinApplyOptions {
+  author: string;
+  onTransition?: CommitWorkspaceTransactionOptions["onTransition"];
+  onBoundary?: (phase: "inspected" | "before_dependencies" | "before_create" | "compensating", id: string) => void | Promise<void>;
+}
+/** Typed refusal with a stable machine code, semantic exit status and actionable remedy. */
+export class JoinRefusal extends PmCliError {
+  /** Stable category for callers that must choose a recovery action. */
+  readonly code: JoinRefusalCode;
+  /** Recovery action that avoids replaying over newer native state. */
+  readonly remedy: string;
+  constructor(code: JoinRefusalCode, remedy: string) {
+    super(`${code}: ${remedy}`, 2, { code, required: remedy, nextSteps: [remedy] });
+    this.code = code;
+    this.remedy = remedy;
+  }
+}
+/** Hash captured strings as UTF-8 bytes and structured revision data as JSON. */
+function hash(value: unknown): string {
+  return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
+}
+/** Refuse malformed boundary data without disclosing input values. */
+function invalid(): never {
+  throw new JoinRefusal("csv_join_invalid", "Use a version 1 join input or unchanged preview plan; use dense bounded arrays, exact declared keys and supported scalar mappings.");
+}
+/** One strict boundary schema shared by SDK and CLI, including artifact validation. */
+function boundary(value: unknown, artifact: boolean): JoinInput | JoinPlan {
+  /** Check own property keys before reading any nested structure. */
+  const object = (v: unknown, keys: string[]): Record<string, unknown> => {
+    if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).some(k => !keys.includes(k)) || keys.some(k => !Object.hasOwn(v, k))) invalid();
+    return v as Record<string, unknown>;
+  };
+  /** Arrays must be dense, bounded and free of additional enumerable properties. */
+  const array = (v: unknown, max: number): unknown[] => {
+    if (!Array.isArray(v) || v.length > max || Object.keys(v).length !== v.length || Array.from({ length: v.length }, (_, i) => !Object.hasOwn(v, i)).some(Boolean)) invalid();
+    return v;
+  };
+  /** Bound string allocations before field-specific header and identifier checks. */
+  const string = (v: unknown, max: number): string => {
+    if (typeof v !== "string" || v.length > max) invalid();
+    return v;
+  };
+  const envelope = artifact ? object(value, ["version", "input", "sources", "settings", "ids", "expected", "digest"]) : undefined;
+  const input = object(artifact ? envelope!.input : value, ["version", "tables"]);
+  if (input.version !== 1 || (envelope && (envelope.version !== 1 || envelope.expected !== "absent"))) invalid();
+  let bytes = 0;
+  const tables = array(input.tables, 16).map(v => {
+    const t = object(v, ["name", "key", "csv", "fields", "references"]);
+    const name = string(t.name, 64), key = string(t.key, 128), csv = string(t.csv, 8 * 1024 * 1024);
+    bytes += Buffer.byteLength(csv);
+    if (!/^[a-z][a-z0-9_-]*$/.test(name) || !key.trim() || bytes > 8 * 1024 * 1024) invalid();
+    if (!t.fields || typeof t.fields !== "object" || Array.isArray(t.fields) || Object.keys(t.fields).length > FIELDS.length) invalid();
+    const fields: Partial<Record<Field, string>> = {};
+    for (const [field, column] of Object.entries(t.fields)) {
+      if (!FIELDS.includes(field as Field)) invalid();
+      fields[field as Field] = string(column, 128);
+    }
+    if (!fields.title) invalid();
+    const references = array(t.references, 16).map((v): JoinInput["tables"][number]["references"][number] => {
+      const r = object(v, ["column", "table", "kind"]);
+      if (r.kind !== "parent" && r.kind !== "blocked_by") invalid();
+      return { column: string(r.column, 128), table: string(r.table, 64), kind: r.kind };
+    });
+    if (references.filter(r => r.kind === "parent").length > 1) invalid();
+    return { name, key, csv, fields, references };
+  });
+  if (!tables.length || new Set(tables.map(t => t.name)).size !== tables.length) invalid();
+  const parsed: JoinInput = { version: 1, tables };
+  if (!envelope) return parsed;
+  const ids = array(envelope.ids, 1000).map(v => string(v, 128));
+  const sources = array(envelope.sources, 16).map(v => string(v, 64));
+  const settings = string(envelope.settings, 64), digest = string(envelope.digest, 64);
+  if (new Set(ids).size !== ids.length || ids.some(id => !/^[a-z0-9][a-z0-9_-]*$/.test(id)) ||
+      sources.some(v => !/^[a-f0-9]{64}$/.test(v)) || !/^[a-f0-9]{64}$/.test(settings)) invalid();
+  const base = { version: 1 as const, input: parsed, sources, settings, ids, expected: "absent" as const };
+  if (digest !== hash(base) || JSON.stringify(sources) !== JSON.stringify(tables.map(t => hash(t.csv)))) invalid();
+  return { ...base, digest };
+}
+
+interface Row {
+  table: string;
+  row: number;
+  keyColumn: number;
+  options: Partial<Record<Field, string>>;
+  edges: { target: number; kind: "parent" | "blocked_by"; column: number }[];
+}
+/** Compile and validate all tables before generating a plan or invoking mutation primitives. */
+async function compile(pmRoot: string, input: JoinInput): Promise<{ rows: Row[]; issues: JoinIssue[]; order: number[] }> {
+  const settings = await readSettings(pmRoot);
+  const statuses = resolveRuntimeStatusRegistry(settings.schema);
+  const types = resolveItemTypeRegistry(settings);
+  const issues: JoinIssue[] = [], rows: Row[] = [];
+  const tables = input.tables.map(t => ({ ...t, data: readTable(t.csv, ",").table, keys: new Map<string, number[]>() }));
+  for (const t of tables) {
+    const headers = t.data[0];
+    if (![t.key, ...Object.values(t.fields), ...t.references.map(r => r.column)].every(c => headers.includes(c)) ||
+        t.references.some(r => !tables.some(target => target.name === r.table))) invalid();
+    for (const [offset, data] of t.data.slice(1).entries()) {
+      const row = offset + 2, keyColumn = headers.indexOf(t.key) + 1;
+      const key = data[keyColumn - 1].trim();
+      const options = Object.fromEntries(Object.entries(t.fields).map(([field, column]) => [field, data[headers.indexOf(column)]])) as Row["options"];
+      if (!options.title!.trim() || (options.priority !== undefined && !/^[0-4]$/.test(options.priority.trim())) ||
+          (options.estimatedMinutes !== undefined && (!options.estimatedMinutes.trim() || !Number.isFinite(Number(options.estimatedMinutes)) || Number(options.estimatedMinutes) < 0 || Number(options.estimatedMinutes) > 1e9)) ||
+          (options.status !== undefined && !statuses.by_id.has(options.status.trim())) ||
+          (options.type !== undefined && !types.type_to_folder[options.type.trim()]) ||
+          (options.status !== undefined && statuses.terminal_statuses.has(options.status.trim()) && !options.closeReason?.trim())) invalid();
+      if (!key) issues.push({ table: t.name, row, column: keyColumn, code: "empty_key" });
+      const entries = t.keys.get(key) ?? [];
+      entries.push(rows.length);
+      t.keys.set(key, entries);
+      rows.push({ table: t.name, row, keyColumn, options, edges: [] });
+    }
+    for (const entries of t.keys.values()) if (entries.length > 1) for (const i of entries) issues.push({ table: t.name, row: rows[i].row, column: rows[i].keyColumn, code: "duplicate_key" });
+  }
+  if (rows.length > 1000) invalid();
+  let index = 0;
+  for (const t of tables) for (const data of t.data.slice(1)) {
+    const row = rows[index++];
+    for (const ref of t.references) {
+      const column = t.data[0].indexOf(ref.column) + 1, key = data[column - 1].trim();
+      if (!key) continue;
+      const targets = tables.find(t => t.name === ref.table)!.keys.get(key);
+      if (targets?.length !== 1) issues.push({ table: t.name, row: row.row, column, code: "unresolved" });
+      else row.edges.push({ target: targets[0], kind: ref.kind, column });
+    }
+  }
+  const order: number[] = [], visiting = new Set<number>(), done = new Set<number>();
+  /** Topologically order all parent/dependency targets; cyclic imports are refused as a whole. */
+  function visit(i: number): void {
+    if (done.has(i)) return;
+    if (visiting.has(i)) {
+      const r = rows[i];
+      issues.push({ table: r.table, row: r.row, column: r.keyColumn, code: "cycle" });
+      return;
+    }
+    visiting.add(i);
+    for (const edge of rows[i].edges) visit(edge.target);
+    visiting.delete(i);
+    done.add(i);
+    order.push(i);
+  }
+  rows.forEach((_, i) => visit(i));
+  return { rows, issues, order };
+}
+
+/** Reject nonfinite, fractional, negative or excessive receipt numbers at the output boundary. */
+export function assertJoinNumbers(values: readonly number[]): void {
+  if (values.some(n => !Number.isSafeInteger(n) || n < 0 || n > 32000)) invalid();
+}
+
+/** Check every emitted numeric field, including coordinates, before returning a receipt. */
+function receipt(input: JoinInput, rows: Row[], issues: JoinIssue[], applied = 0, unchanged = 0, skipped = 0): JoinReceipt {
+  const result = { ok: issues.length === 0, tables: input.tables.length, rows: rows.length, references: rows.reduce((sum, r) => sum + r.edges.length, 0), applied, unchanged, skipped, issueCount: issues.length, issues: issues.slice(0, 20) };
+  assertJoinNumbers([result.tables, result.rows, result.references, applied, unchanged, skipped, result.issueCount, ...result.issues.flatMap(i => [i.row, i.column])]);
+  return { ...result, ...(issues.length ? { remedy: "Resolve reported key coordinates or reconcile foreign targets and their dependent rows before previewing a new plan." } : {}) };
+}
+
+/** Resolve every selected table in a single read-only preview and mint SDK-owned native identities. */
+export async function previewJoins(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
+  const input = boundary(value, false) as JoinInput;
+  const { rows, issues } = await compile(pmRoot, input);
+  const result = receipt(input, rows, issues);
+  if (!result.ok) return { receipt: result };
+  const settings = await readSettings(pmRoot);
+  const namespace = await generateItemId(pmRoot, settings.id_prefix, { tokenLength: 12 });
+  const ids = rows.map((_, i) => normalizeItemId(`${namespace}-${i}`, settings.id_prefix));
+  const base = { version: 1 as const, input, sources: input.tables.map(t => hash(t.csv)), settings: hash(settings), ids, expected: "absent" as const };
+  return { receipt: result, plan: { ...base, digest: hash(base) } };
+}
+
+/** Inspect current SDK state, distinguishing exact owned creates from foreign collisions and later edits. */
+async function inspect(pmRoot: string, id: string, marker: string): Promise<"pending" | "applied" | "foreign"> {
+  const settings = await readSettings(pmRoot);
+  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
+  const started = performance.now();
+  try {
+    const types = resolveItemTypeRegistry(settings);
+    const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
+    const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
+    if (!located && history.length === 0) return "pending";
+    if (history[0]?.message !== marker) return "foreign";
+    if (!located) throw new JoinRefusal("csv_join_target_changed", "An owned target was removed after import. Reconcile current SDK state and preview a fresh plan; a committed journal cannot recreate a missing target.");
+    const { document } = await readLocatedItem(located, { schema: settings.schema });
+    if (history.length !== 1 || !verifyHistoryEntries(history, document).ok) {
+      throw new JoinRefusal("csv_join_target_changed", "An owned target has changed since import. Read current items through the SDK, reconcile the interrupted import, and preview a fresh plan; never replay saved inputs over newer state.");
+    }
+    assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
+    return "applied";
+  } finally { await release(); }
+}
+
+/** Apply captured source bytes under SDK journal coordination; retries always revalidate every target revision. */
+export async function applyJoins(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
+  const plan = boundary(value, true) as JoinPlan;
+  if (hash(await readSettings(pmRoot)) !== plan.settings) throw new JoinRefusal("csv_join_settings_changed", "Preview a new plan against current tracker settings and review its source digests and identities.");
+  const { rows, issues, order } = await compile(pmRoot, plan.input);
+  if (rows.length !== plan.ids.length || issues.length) invalid();
+  const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
+  const states = await Promise.all(plan.ids.map((id, i) => inspect(pmRoot, id, marker(i))));
+  const skipped = new Set<number>();
+  for (const i of order) {
+    const row = rows[i];
+    const code = states[i] === "foreign" ? "foreign" : row.edges.some(e => skipped.has(e.target)) ? "dependency_skipped" : undefined;
+    if (code) {
+      skipped.add(i);
+      issues.push({ table: row.table, row: row.row, column: row.keyColumn, code });
+    }
+  }
+  const selected = order.filter(i => !skipped.has(i));
+  /** Preserve foreign records and propagate skips at every inspected step boundary. */
+  const skip = (i: number, code: "foreign" | "dependency_skipped"): "applied" => {
+    if (!skipped.has(i)) {
+      skipped.add(i);
+      issues.push({ table: rows[i].table, row: rows[i].row, column: rows[i].keyColumn, code });
+    }
+    return "applied";
+  };
+  /** Inspect current target and dependency revisions; a peer's identical success is applied. */
+  const state = async (i: number): Promise<"pending" | "applied"> => {
+    if (skipped.has(i)) return "applied";
+    const current = await inspect(pmRoot, plan.ids[i], marker(i));
+    if (current === "foreign") return skip(i, "foreign");
+    for (const e of rows[i].edges) {
+      if (skipped.has(e.target) || await inspect(pmRoot, plan.ids[e.target], marker(e.target)) === "foreign") return skip(i, "dependency_skipped");
+    }
+    return current;
+  };
+  let applied = 0;
+  const steps: WorkspaceTransactionStep[] = selected.map(i => ({
+    id: plan.ids[i],
+    inspect: async () => {
+      const current = await state(i);
+      await options.onBoundary?.("inspected", plan.ids[i]);
+      return { state: current, result: plan.ids[i] };
+    },
+    apply: async () => {
+      if (await state(i) === "applied") return plan.ids[i];
+      await options.onBoundary?.("before_dependencies", plan.ids[i]);
+      for (const e of rows[i].edges) if (await inspect(pmRoot, plan.ids[e.target], marker(e.target)) !== "applied") {
+        throw new JoinRefusal("csv_join_target_changed", "A dependency disappeared during apply. Reconcile current targets and preview a fresh plan.");
+      }
+      const row = rows[i];
+      const parent = row.edges.find(e => e.kind === "parent");
+      await options.onBoundary?.("before_create", plan.ids[i]);
+      try {
+        await create({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
+          ...(parent ? { parent: plan.ids[parent.target] } : {}),
+          dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
+        }, { pmRoot });
+        applied++;
+      } catch (error) {
+        if (await state(i) !== "applied") throw error;
+      }
+      return plan.ids[i];
+    },
+    compensate: async () => {
+      await options.onBoundary?.("compensating", plan.ids[i]);
+      if (await inspect(pmRoot, plan.ids[i], marker(i)) === "applied") {
+        throw new JoinRefusal("csv_join_reconcile", "Created targets are retained with immutable history. Inspect the SDK transaction journal and current targets before retrying; this create-only importer never deletes or closes imported records during recovery.");
+      }
+    },
+  }));
+  try {
+    if (steps.length) await commitWorkspaceTransaction({ pmRoot, transactionId: `csv-join-${hash([plan.digest, selected])}`, author: options.author, steps, onTransition: options.onTransition });
+    // The SDK fast-paths committed journals without calling step inspectors. Never trust that frozen receipt.
+    for (const i of selected) if (await state(i) === "pending") {
+      throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing after coordination. Read current SDK state, reconcile the journal and preview a fresh plan.");
+    }
+  } catch (error) {
+    const refusal = new JoinRefusal("csv_join_apply_failed", "Inspect the SDK transaction journal and current targets before retrying this reviewed plan. Completed creates remain recorded; reconciliation may be required. Preview again only after resolving changed targets.");
+    refusal.cause = error;
+    throw refusal;
+  }
+  return receipt(plan.input, rows, issues, applied, rows.length - applied - skipped.size, skipped.size);
+}
+
+/** Register compact native TOON/JSON commands; full source-bearing plans require an explicit output artifact. */
+export function registerJoinCommands(api: ExtensionApi): void {
+  for (const action of ["preview", "apply"] as const) api.registerCommand({
+    name: `csv join ${action}`, description: `${action === "preview" ? "Resolve external table keys without mutations" : "Apply a reviewed cross-table create plan using SDK transactions"}.`,
+    arguments: [{ name: "file", required: true, description: "Version 1 join input (preview) or saved plan (apply) JSON" }],
+    flags: action === "preview" ? [{ long: "--output", value_name: "file", description: "Exclusively create source-bearing plan JSON; never overwrite" }] : [],
+    async run(ctx) {
+      let value: unknown;
+      try {
+        if (statSync(ctx.args[0]).size > 32 * 1024 * 1024) invalid();
+        value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(ctx.args[0])));
+      }
+      catch { throw new JoinRefusal("csv_join_io", "Provide readable UTF-8 join input or saved plan JSON no larger than 32 MiB."); }
+      if (action === "apply") return { ...await applyJoins(ctx.pm_root, value, { author: (ctx.global["author"] as string | undefined) ?? "pm-csv" }) };
+      const result = await previewJoins(ctx.pm_root, value);
+      const output = ctx.options["output"] as string | undefined;
+      if (output && result.plan) {
+        try { writeFileSync(output, `${JSON.stringify(result.plan, null, 2)}\n`, { flag: "wx", mode: 0o600 }); }
+        catch { throw new JoinRefusal("csv_join_io", "Choose a new writable plan filename; existing review artifacts are preserved."); }
+      }
+      return { ...result.receipt, saved: Boolean(output && result.plan) };
+    },
+  });
+}
