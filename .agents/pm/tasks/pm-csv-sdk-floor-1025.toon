@@ -1,0 +1,24 @@
+id: pm-csv-sdk-floor-1025
+title: Align host and npm floors with published SDK capabilities
+description: "Audit runtime SDK usage on main against published artifacts, record first-version evidence, and enforce the required compatibility floor without changing the development SDK pin."
+type: Task
+status: in_progress
+priority: 2
+tags[2]: audit-1025,sdk-floor
+created_at: "2026-10-26T05:58:59.393Z"
+updated_at: "2026-10-26T06:19:18.425Z"
+author: codex-agent
+acceptance_criteria: Source API inventory and published adjacent-release evidence recorded; both supported-host declarations cover every used API; targeted checks pass; review evidence remains separate from release authority.
+comments[3]{created_at,author,text}:
+  "2026-10-26T05:59:22.094Z",codex-agent,"Auditing the current main runtime imports, client calls, and host context members. First-release evidence will come from published npm tarballs packed with lifecycle scripts disabled, inspected as data only. Existing tracker histories remain append-only."
+  "2026-10-26T06:16:38.237Z",codex-agent,"floor verified: 38 source-derived API contracts require pm 2026.8.18; main declares host 2026.8.20 and npm >=2026.8.20. Audited main ec5b50f55e68a6b4be95ef50640fdfe158f8273c. Binary search inspected 98 published stable tarballs, their static ESM exports and dist declarations, with adjacent negative/positive boundaries and SHA-256 receipts. Full API-to-first-version table and per-source uses are committed in docs/sdk-floor.md and docs/sdk-floor.json. No downloaded pm code was executed; this is API-availability evidence, not older-host behavioral acceptance."
+  "2026-10-26T06:16:48.668Z",codex-agent,"Targeted validation passed: npm run typecheck, including the unchanged pinned development SDK. The current host and npm declarations need no change, so no PR will be opened. The evidence-only audit branch retains the tracker item for orchestrator verification."
+files[3]{path,scope}:
+  docs/sdk-floor.json,project
+  manifest.json,project
+  package.json,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npm run typecheck,project,codex-agent,"2026-10-26T06:16:43.159Z",local_mutation,fix/sdk-floor-1025
+docs[1]{path,scope,note}:
+  docs/sdk-floor.md,project,Published first-release API inventory and artifact hashes
+body: ""
