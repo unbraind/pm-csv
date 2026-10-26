@@ -16,18 +16,23 @@ const LINKS = [["dep", "clearDeps", "--dep", "--clear-deps"], ["file", "clearFil
  * Freeze relationship/scope intent before native mutation. Creates explicitly unset
  * absent scalars and clear absent links. Patches preserve unselected fields; an
  * explicitly present empty/undefined scalar clears it. Neither mode reads focus,
- * templates, working directories or other ambient session state.
+ * templates, working directories or other ambient session state. Native `none`
+ * scope-clear aliases become explicit unsets; snapshot mode preserves already
+ * stored strings literally instead of interpreting command-input aliases.
  */
-export function buildMutationIntent(options: MutationOptions, mode: "create" | "patch" = "create"): MutationOptions {
+export function buildMutationIntent(options: MutationOptions, mode: "create" | "patch" | "snapshot" = "create"): MutationOptions {
   const result = { ...options };
   const unset = new Set(options.unset);
   for (const [option, field] of SCALARS) {
-    if (mode === "patch" && !Object.hasOwn(options, option)) continue;
-    if (options[option]?.trim()) unset.delete(field);
+    if (mode !== "create" && !Object.hasOwn(options, option)) continue;
+    const value = options[option];
+    const present = mode === "snapshot" ? value !== undefined : Boolean(value?.trim()) &&
+      !(["parent", "sprint", "release"].includes(field) && value!.trim().toLowerCase() === "none");
+    if (present) unset.delete(field);
     else { delete result[option]; unset.add(field); }
   }
   for (const [option, clear] of LINKS) {
-    if (mode === "patch" && !Object.hasOwn(options, option)) continue;
+    if (mode !== "create" && !Object.hasOwn(options, option)) continue;
     if (options[option]?.length) result[clear] = false;
     else { delete result[option]; result[clear] = true; }
   }
@@ -55,7 +60,7 @@ export function mutationScopeArguments(options: MutationOptions, mode: "create" 
 export function explicitDocumentMutation(mutate: Parameters<typeof mutateItem>[0]["mutate"]): Parameters<typeof mutateItem>[0]["mutate"] {
   return async document => {
     const result = await mutate(document);
-    const intent = buildMutationIntent(Object.fromEntries(SCALARS.map(([option, field]) => [option, document.metadata[field]])), "patch");
+    const intent = buildMutationIntent(Object.fromEntries(SCALARS.map(([option, field]) => [option, document.metadata[field]])), "snapshot");
     for (const [option, field] of SCALARS) {
       if (intent[option] === undefined) delete document.metadata[field];
       else document.metadata[field] = intent[option];

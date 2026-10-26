@@ -294,7 +294,7 @@ test("500 seeded model sequences compare SDK readback with native reference stat
         for (const [i, table] of source.tables.entries()) {
           const options = {
             title: `  Case ${seed} row ${i}  `, body: ` leading ${seed}\r\nline ${i} \t\n`, type: "Task", status: i === 2 ? "closed" : custom,
-            priority: String(Math.floor(rng() * 5)), tags: `Tag-${seed},Shared`, assignee: rng() < .5 ? "" : `member-${seed}`, sprint: rng() < .5 ? "" : `s-${seed}`, release: rng() < .5 ? "" : `r-${seed}`,
+            priority: String(Math.floor(rng() * 5)), tags: `Tag-${seed},Shared`, assignee: rng() < .5 ? "" : `member-${seed}`, sprint: ["", "none", `s-${seed}`][Math.floor(rng() * 3)], release: ["", "none", `r-${seed}`][Math.floor(rng() * 3)],
             estimatedMinutes: String(Math.floor(rng() * 1000)), acceptanceCriteria: `  AC ${seed}  `, closeReason: `Imported ${seed}`,
           };
           expected.push(options);

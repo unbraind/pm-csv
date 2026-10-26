@@ -5,13 +5,13 @@ import { mkdtempSync, mkdirSync, symlinkSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join, delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
-import { create, focus, update, commitWorkspaceTransaction, listAllComplete } from "@unbrained/pm-cli/sdk";
+import { create, focus, update, commitWorkspaceTransaction, listAllComplete, mutateItem, readSettings } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { importCSV, importLineage, serializeCSV, CommandError } from "../index.ts";
 import { describeTable, importNegotiatedTable, TableSchemaRefusal } from "../table-schema.ts";
 import { previewJoins, applyJoins, JoinRefusal } from "../join-plans.ts";
 import { readUpdateDocument } from "../atomic-update.ts";
-import { buildMutationIntent, mutationScopeArguments, mutationMessageBase, matchesMutationScope } from "../mutation-intent.ts";
+import { buildMutationIntent, mutationScopeArguments, mutationMessageBase, matchesMutationScope, explicitDocumentMutation } from "../mutation-intent.ts";
 import type { JoinPlan } from "../join-plans.ts";
 import { createHash } from "node:crypto";
 
@@ -78,6 +78,15 @@ test("builder declares absent scope, honors reviewed values, clears selected emp
     assert.deepEqual(mutationScopeArguments({}, "patch"), []);
     assert.equal(mutationMessageBase("owned | explicit_unset=parent"), "owned");
     assert.equal(mutationMessageBase(undefined), undefined);
+    for (const value of ["none", " NONE "]) {
+      const cleared = await create(buildMutationIntent({ title: `Clear alias ${value}`, parent: value, sprint: value, release: value }), { pmRoot: root });
+      await emptyScope(root, cleared.item.id);
+    }
+    // A stored snapshot is state, not command input: literal sentinels and empty representation survive the builder.
+    await mutateItem({ pmRoot: root, settings: await readSettings(root), id: created.item.id, op: "update", author: "scope-test",
+      mutate: explicitDocumentMutation(document => { document.metadata.sprint = "none"; document.metadata.assignee = "";
+        return { changedFields: ["sprint", "assignee"] }; }) });
+    assert.equal((await readUpdateDocument(root, created.item.id)).metadata.sprint, "none");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -94,6 +103,11 @@ test("focus changes do not alter reviewed empty parents; previously inherited sc
     await emptyScope(root, plan.ids[0]);
     await focus(parents[2], {}, { pmRoot: root });
     assert.equal((await applyJoins(root, plan, { author: "scope-test" })).unchanged, 1);
+    const aliasInput = input(); aliasInput.tables[0].csv = aliasInput.tables[0].csv.replace("a,Selected,,,,", "a,Selected,,,none,NONE");
+    const aliasPlan = (await previewJoins(root, aliasInput)).plan; assert.ok(aliasPlan);
+    assert.equal((await applyJoins(root, aliasPlan, { author: "scope-test" })).applied, 1);
+    await emptyScope(root, aliasPlan.ids[0]);
+    assert.equal((await applyJoins(root, aliasPlan, { author: "scope-test" })).unchanged, 1);
     const { plan: old } = await previewJoins(root, input()); assert.ok(old);
     // Reproduce the previous package behavior with its exact ownership message and no explicit unset.
     await create({ id: old.ids[0], title: "Selected", message: `csv-join:${old.digest}:0` }, { pmRoot: root });
