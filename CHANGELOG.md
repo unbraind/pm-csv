@@ -6,6 +6,12 @@
 
 - Use the pm SDK for runtime CSV export fields ([pm-csv-sdk-adoption-1025](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-sdk-adoption-1025.toon))
 
+## 2026.10.26 - 2026-10-26
+
+### Fixed
+
+- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-195](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-195.toon))
+
 ## 2026.10.25 - 2026-10-25
 
 ### Added

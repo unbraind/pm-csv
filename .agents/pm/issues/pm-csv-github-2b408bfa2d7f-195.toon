@@ -1,0 +1,24 @@
+id: pm-csv-github-2b408bfa2d7f-195
+title: Daily Release workflow is failing
+description: "GH issue #195: https://github.com/unbraind/pm-csv/issues/195 · author @github-actions[bot] · state reason completed · created 2026-10-25T09:32:36Z · updated 2026-10-25T23:08:44Z"
+type: Issue
+status: closed
+priority: 2
+tags[3]: "gh:unbraind/pm-csv#195","github_author:github-actions[bot]",release-failure
+created_at: "2026-10-25T09:32:36Z"
+updated_at: "2026-10-26T07:54:41.126Z"
+closed_at: "2026-10-25T23:08:44Z"
+completed_at: "2026-10-25T23:08:44Z"
+author: pm-github
+close_reason: "Closed on GitHub as completed on 2026-10-25T23:08:44Z"
+github_close_reason: "Closed on GitHub as completed on 2026-10-25T23:08:44Z"
+github_closed_at: "2026-10-25T23:08:44Z"
+github_created_at: "2026-10-25T09:32:36Z"
+github_link_only: false
+github_number: 195
+github_release: ""
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-10-25T23:08:44Z"
+github_url: "https://github.com/unbraind/pm-csv/issues/195"
+body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-csv/actions/runs/40177055905\n- Commit: 07bc618897f18d396395a71c5034cf5f30aff5af\n- Date (UTC): 2026-10-25T09:32:34Z\n\n\n---\n\n### GitHub comments (1)\n\n> **@unbraind** (2026-10-25T23:08:43Z)\n>\n> Recovered: the 2026-10-25 run failed only at \"Merge release metadata through protected PR\". The release PR's required checks were still queued when the 30-minute merge wait expired, because the runner pool was saturated; no check failed. The run was re-run (or, where main had advanced, dispatched fresh), and v2026.10.25 is published: npm `pm-csv@2026.10.25` and GitHub Release v2026.10.25 (2026-10-25T10:31:49Z). Future runs that fail this way are recovered automatically by the host-side release re-run sweep (unbraind/pm-cli-companion#273)."

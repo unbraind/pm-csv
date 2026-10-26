@@ -1,0 +1,27 @@
+id: pm-csv-2ms0
+title: Point the npm homepage at the package catalog and link the author
+description: Apply the owner-requested package homepage and linked author metadata; verify the matching GitHub repository website. Published npm metadata updates with the next release.
+type: Chore
+status: in_progress
+priority: 2
+tags[1]: "gh:unbraind/pm-csv#197"
+created_at: "2026-10-26T06:46:18.969Z"
+updated_at: "2026-10-26T07:27:42.445Z"
+author: codex-agent
+acceptance_criteria: Package homepage points to its catalog page; author links to the about page; repository and bugs remain unchanged; GitHub website matches; local manifest checks pass.
+comments[4]{created_at,author,text}:
+  "2026-10-26T06:46:23.068Z",codex-agent,"Plan: update homepage and author in package.json, preserve repository and bugs, set and verify the GitHub website, run local manifest checks, and regenerate the changelog. CI provides the full gate; npm metadata changes on the next release."
+  "2026-10-26T06:46:42.191Z",codex-agent,"Verified GitHub website: https://pm-cli.unbrained.dev/packages/pm-csv. Local linked checks passed: npm run lint; npm run typecheck; npm run pack:dry-run. Package metadata now matches the owner request and repository/bugs are unchanged. Metadata-only change: no runtime behavior changes, so behavioral revert proof is not applicable. Full release gates are delegated to CI as requested; no release or merge performed."
+  "2026-10-26T07:27:34.091Z",codex-agent,"Review follow-up: the previous typecheck and pack checks did not guard metadata values. Add four node:test assertions for the exact homepage, linked author, repository, and bugs fields; prove independent homepage and author reverts fail; restore metadata; push and wait for CI on the final commit."
+  "2026-10-26T07:27:41.655Z",codex-agent,"Revert-sensitive proof: node --test test/package-metadata.test.ts passes 4/4 assertions. Reverting only homepage to its original README URL fails exactly the homepage assertion (3 pass, 1 fail, exit 1). Reverting only author to its original string fails exactly the author assertion (3 pass, 1 fail, exit 1). Restored package.json byte-for-byte and reran: 4 pass, 0 fail. The existing test and coverage globs include test/package-metadata.test.ts, and release:check invokes coverage. Test compilation and lint passed. Full npm/Bun release gates will be checked in CI."
+files[2]{path,scope}:
+  package.json,project
+  test/package-metadata.test.ts,project
+tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npm run lint,project,codex-agent,"2026-10-26T06:46:28.529Z",local_mutation,chore/npm-homepage-author
+  npm run typecheck,project,codex-agent,"2026-10-26T06:46:30.305Z",local_mutation,chore/npm-homepage-author
+  "npm run pack:dry-run",project,codex-agent,"2026-10-26T06:46:32.192Z",local_mutation,chore/npm-homepage-author
+  node --test test/package-metadata.test.ts,project,codex-agent,"2026-10-26T07:27:35.917Z",local_mutation,chore/npm-homepage-author
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""
