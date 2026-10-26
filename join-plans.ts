@@ -8,6 +8,7 @@ import {
 import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { assertEditLease } from "./lease-guard.ts";
+import { buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
 
 /** Explicit SDK create-option vocabulary: no implicit header mappings or field coercion. */
@@ -64,12 +65,25 @@ export class JoinRefusal extends PmCliError {
   readonly code: JoinRefusalCode;
   /** Recovery action that avoids replaying over newer native state. */
   readonly remedy: string;
-  constructor(code: JoinRefusalCode, remedy: string) {
-    super(`${code}: ${remedy}`, 2, { code, required: remedy, nextSteps: [remedy] });
+  /** Original lower-level category, when a boundary wrapped another refusal. */
+  readonly sourceCode?: string;
+  constructor(code: JoinRefusalCode, remedy: string, sourceCode?: string) {
+    super(`${code}: ${remedy}`, 2, { code, required: remedy, nextSteps: [remedy], ...(sourceCode ? { sourceCode, sourceRemedy: remedy } : {}) });
+    this.sourceCode = sourceCode;
     this.code = code;
     this.remedy = remedy;
   }
 }
+/** Preserve the documented refusal family while retaining lower-level categories and remedies. */
+function joinRefusal(error: unknown, code: JoinRefusalCode, remedy: string): JoinRefusal {
+  if (error instanceof JoinRefusal) return error;
+  const sourceCode = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "unexpected_error";
+  const sourceRemedy = typeof error === "object" && error !== null && "remedy" in error && typeof error.remedy === "string" ? error.remedy : remedy;
+  const refusal = new JoinRefusal(code, sourceRemedy, sourceCode);
+  refusal.cause = error;
+  return refusal;
+}
+
 /** Hash captured strings as UTF-8 bytes and structured revision data as JSON. */
 function hash(value: unknown): string {
   return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
@@ -211,7 +225,7 @@ function receipt(input: JoinInput, rows: Row[], issues: JoinIssue[], applied = 0
 }
 
 /** Resolve every selected table in a single read-only preview and mint SDK-owned native identities. */
-export async function previewJoins(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
+async function previewJoinsInternal(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
   const input = boundary(value, false) as JoinInput;
   const { rows, issues } = await compile(pmRoot, input);
   const result = receipt(input, rows, issues);
@@ -224,7 +238,7 @@ export async function previewJoins(pmRoot: string, value: unknown): Promise<{ re
 }
 
 /** Inspect current SDK state, distinguishing exact owned creates from foreign collisions and later edits. */
-async function inspect(pmRoot: string, id: string, marker: string): Promise<"pending" | "applied" | "foreign"> {
+async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids: string[]): Promise<"pending" | "applied" | "foreign"> {
   const settings = await readSettings(pmRoot);
   const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
   const started = performance.now();
@@ -233,11 +247,16 @@ async function inspect(pmRoot: string, id: string, marker: string): Promise<"pen
     const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
     if (!located && history.length === 0) return "pending";
-    if (history[0]?.message !== marker) return "foreign";
+    if (mutationMessageBase(history[0]?.message) !== marker) return "foreign";
     if (!located) throw new JoinRefusal("csv_join_target_changed", "An owned target was removed after import. Reconcile current SDK state and preview a fresh plan; a committed journal cannot recreate a missing target.");
     const { document } = await readLocatedItem(located, { schema: settings.schema });
     if (history.length !== 1 || !verifyHistoryEntries(history, document).ok) {
       throw new JoinRefusal("csv_join_target_changed", "An owned target has changed since import. Read current items through the SDK, reconcile the interrupted import, and preview a fresh plan; never replay saved inputs over newer state.");
+    }
+    const parent = row.edges.find(edge => edge.kind === "parent");
+    if (!matchesMutationScope(document, { ...row.options, parent: parent ? ids[parent.target] : undefined },
+      row.edges.filter(edge => edge.kind === "blocked_by").map(edge => ({ id: ids[edge.target], kind: edge.kind })))) {
+      throw new JoinRefusal("csv_join_target_changed", "Current scope differs from the reviewed sources. Reconcile unreviewed parent, assignment, planning or dependency links and preview a new plan before replaying.");
     }
     assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
     return "applied";
@@ -245,13 +264,13 @@ async function inspect(pmRoot: string, id: string, marker: string): Promise<"pen
 }
 
 /** Apply captured source bytes under SDK journal coordination; retries always revalidate every target revision. */
-export async function applyJoins(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
+async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
   const plan = boundary(value, true) as JoinPlan;
   if (hash(await readSettings(pmRoot)) !== plan.settings) throw new JoinRefusal("csv_join_settings_changed", "Preview a new plan against current tracker settings and review its source digests and identities.");
   const { rows, issues, order } = await compile(pmRoot, plan.input);
   if (rows.length !== plan.ids.length || issues.length) invalid();
   const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
-  const states = await Promise.all(plan.ids.map((id, i) => inspect(pmRoot, id, marker(i))));
+  const states = await Promise.all(plan.ids.map((id, i) => inspect(pmRoot, id, marker(i), rows[i], plan.ids)));
   const skipped = new Set<number>();
   for (const i of order) {
     const row = rows[i];
@@ -273,10 +292,10 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
   /** Inspect current target and dependency revisions; a peer's identical success is applied. */
   const state = async (i: number): Promise<"pending" | "applied"> => {
     if (skipped.has(i)) return "applied";
-    const current = await inspect(pmRoot, plan.ids[i], marker(i));
+    const current = await inspect(pmRoot, plan.ids[i], marker(i), rows[i], plan.ids);
     if (current === "foreign") return skip(i, "foreign");
     for (const e of rows[i].edges) {
-      if (skipped.has(e.target) || await inspect(pmRoot, plan.ids[e.target], marker(e.target)) === "foreign") return skip(i, "dependency_skipped");
+      if (skipped.has(e.target) || await inspect(pmRoot, plan.ids[e.target], marker(e.target), rows[e.target], plan.ids) === "foreign") return skip(i, "dependency_skipped");
     }
     return current;
   };
@@ -291,17 +310,17 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
     apply: async () => {
       if (await state(i) === "applied") return plan.ids[i];
       await options.onBoundary?.("before_dependencies", plan.ids[i]);
-      for (const e of rows[i].edges) if (await inspect(pmRoot, plan.ids[e.target], marker(e.target)) !== "applied") {
+      for (const e of rows[i].edges) if (await inspect(pmRoot, plan.ids[e.target], marker(e.target), rows[e.target], plan.ids) !== "applied") {
         throw new JoinRefusal("csv_join_target_changed", "A dependency disappeared during apply. Reconcile current targets and preview a fresh plan.");
       }
       const row = rows[i];
       const parent = row.edges.find(e => e.kind === "parent");
       await options.onBoundary?.("before_create", plan.ids[i]);
       try {
-        await create({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
+        await create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
           ...(parent ? { parent: plan.ids[parent.target] } : {}),
           dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
-        }, { pmRoot });
+        }), { pmRoot });
         applied++;
       } catch (error) {
         if (await state(i) !== "applied") throw error;
@@ -310,7 +329,7 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
     },
     compensate: async () => {
       await options.onBoundary?.("compensating", plan.ids[i]);
-      if (await inspect(pmRoot, plan.ids[i], marker(i)) === "applied") {
+      if (await inspect(pmRoot, plan.ids[i], marker(i), rows[i], plan.ids) === "applied") {
         throw new JoinRefusal("csv_join_reconcile", "Created targets are retained with immutable history. Inspect the SDK transaction journal and current targets before retrying; this create-only importer never deletes or closes imported records during recovery.");
       }
     },
@@ -322,11 +341,21 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
       throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing after coordination. Read current SDK state, reconcile the journal and preview a fresh plan.");
     }
   } catch (error) {
-    const refusal = new JoinRefusal("csv_join_apply_failed", "Inspect the SDK transaction journal and current targets before retrying this reviewed plan. Completed creates remain recorded; reconciliation may be required. Preview again only after resolving changed targets.");
-    refusal.cause = error;
-    throw refusal;
+    throw joinRefusal(error, "csv_join_apply_failed", "Inspect the SDK transaction journal and current targets before retrying this reviewed plan. Completed creates remain recorded; reconciliation may be required. Preview again only after resolving changed targets.");
   }
   return receipt(plan.input, rows, issues, applied, rows.length - applied - skipped.size, skipped.size);
+}
+
+/** Resolve selected sources, exposing only JoinRefusal for malformed CSV, SDK and input failures. */
+export async function previewJoins(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
+  try { return await previewJoinsInternal(pmRoot, value); }
+  catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the selected sources and initialized tracker, then preview again."); }
+}
+
+/** Apply a saved source/revision plan using the same documented JoinRefusal boundary on every path. */
+export async function applyJoins(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
+  try { return await applyJoinsInternal(pmRoot, value, options); }
+  catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the reviewed plan and current SDK state before retrying."); }
 }
 
 /** Register compact native TOON/JSON commands; full source-bearing plans require an explicit output artifact. */
@@ -338,16 +367,16 @@ export function registerJoinCommands(api: ExtensionApi): void {
     async run(ctx) {
       let value: unknown;
       try {
-        if (statSync(ctx.args[0]).size > 32 * 1024 * 1024) invalid();
+        if (statSync(ctx.args[0]).size > 32 * 1024 * 1024) throw new JoinRefusal("csv_join_io", "Provide readable UTF-8 join input or saved plan JSON no larger than 32 MiB.");
         value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(ctx.args[0])));
       }
-      catch { throw new JoinRefusal("csv_join_io", "Provide readable UTF-8 join input or saved plan JSON no larger than 32 MiB."); }
+      catch (error) { throw joinRefusal(error, "csv_join_io", "Provide readable UTF-8 join input or saved plan JSON no larger than 32 MiB."); }
       if (action === "apply") return { ...await applyJoins(ctx.pm_root, value, { author: (ctx.global["author"] as string | undefined) ?? "pm-csv" }) };
       const result = await previewJoins(ctx.pm_root, value);
       const output = ctx.options["output"] as string | undefined;
       if (output && result.plan) {
         try { writeFileSync(output, `${JSON.stringify(result.plan, null, 2)}\n`, { flag: "wx", mode: 0o600 }); }
-        catch { throw new JoinRefusal("csv_join_io", "Choose a new writable plan filename; existing review artifacts are preserved."); }
+        catch (error) { throw joinRefusal(error, "csv_join_io", "Choose a new writable plan filename; existing review artifacts are preserved."); }
       }
       return { ...result.receipt, saved: Boolean(output && result.plan) };
     },

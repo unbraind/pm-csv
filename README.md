@@ -538,3 +538,10 @@ pm csv join apply reviewed.json --json
 Duplicate or unresolved keys include cell coordinates and block import. See the
 [three-table example, typed SDK API, bounds and recovery contract](docs/join-plans.md).
 These create-only plans work without git. Retain the reviewed artifact for retries.
+
+CSV mutations use explicit source-owned scope: missing or empty create parents
+are unset through the SDK, so session focus cannot add links. Empty supported
+scope columns clear legacy keyed-import scope; spreadsheet patches preserve
+unselected fields. Join replay refuses unreviewed stored scope. Public join
+failures consistently use `JoinRefusal`, with lower-level `sourceCode` and remedy
+retained. See [scope and refusal contracts](docs/join-plans.md#explicit-scope-and-refusal-boundaries).

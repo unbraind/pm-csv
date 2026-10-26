@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { create, locateItem, normalizeItemId, PmCliError, readSettings } from "@unbrained/pm-cli/sdk";
+import { buildMutationIntent, matchesMutationScope } from "./mutation-intent.ts";
 import { serializeCSV } from "./index.ts";
 import { readUpdateDocument } from "./atomic-update.ts";
 
@@ -86,10 +87,10 @@ function planMapping(table: readonly string[][], options: LineageOptions): Linea
   return mapping;
 }
 /** Recover a committed native create by its stable key, including a crash before artifact export. */
-async function existingRow(pmRoot: string, id: string, marker: string): Promise<"replayed" | "identity_conflict" | undefined> {
+async function existingRow(pmRoot: string, id: string, marker: string, intent: Parameters<typeof create>[0]): Promise<"replayed" | "identity_conflict" | undefined> {
   if (!await locateItem(pmRoot, id)) return undefined;
   const document = await readUpdateDocument(pmRoot, id);
-  return document.metadata.tags?.includes(marker) ? "replayed" : "identity_conflict";
+  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!) ? "replayed" : "identity_conflict";
 }
 /** Import bounded rows with native SDK validation/history/locking and stable explicit IDs.
  * Rejected artifacts contain only allowed columns plus a stable retry key. Replaying
@@ -112,19 +113,21 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
     const values = Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()]));
     const marker = `csv-lineage:${lineageDigest([key, values])}`;
     const id = normalizeItemId(`csv-${key}`, settings.id_prefix);
+    const intent = buildMutationIntent({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id,
+      tags: [values.tags, marker].filter(Boolean).join(",") });
     const record: RowLineage = { row: index + 2, key, outcome: "rejected", cells: [] };
     rows.push(record);
     if (row.length !== table[0].length || !values.title || (values.priority && !/^[0-4]$/.test(values.priority))) {
       record.code = "invalid_row";
     } else {
-      let outcome = await existingRow(pmRoot, id, marker);
+      let outcome = await existingRow(pmRoot, id, marker, intent);
       if (!outcome) {
         try {
-          await create({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id, tags: [values.tags, marker].filter(Boolean).join(",") }, { pmRoot, author: options.author ?? "pm-csv" });
+          await create(intent, { pmRoot, author: options.author ?? "pm-csv" });
           record.outcome = "imported";
         } catch {
           // A racing writer may have won the same native create; inspect durable state.
-          outcome = await existingRow(pmRoot, id, marker);
+          outcome = await existingRow(pmRoot, id, marker, intent);
           record.code = outcome ? undefined : "create_refused";
         }
       }

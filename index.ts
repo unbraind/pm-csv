@@ -9,10 +9,11 @@ import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts"
 import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+import { mutationScopeArguments, matchesMutationScope } from "./mutation-intent.ts";
 import { registerJoinCommands } from "./join-plans.ts";
 import { registerTableSchemaCommands } from "./table-schema.ts";
 
-import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
+import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
 import type {
   WorkspaceTransactionStep,
@@ -1799,7 +1800,7 @@ function compensateCreate(
   if (markers.length > 0) {
     const markerCleanup = spawnSync(
       "pm",
-      ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
+      ["--path", pmRoot, "update", id, "--remove-tags", markers.join(","), ...mutationScopeArguments({}, "patch")],
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
     if (markerCleanup.status !== 0) {
@@ -1916,6 +1917,19 @@ async function importCSVAtomic(
       : normalizedKey ? keyIndex.get(normalizedKey) : undefined;
     if (normalizedKey && !existingId) claimedKeys.set(normalizedKey, rowIndex);
     planned.push({ rowIndex, lineNo, parsed, keyValue, existingId, isUpdate: Boolean(existingId) });
+  }
+
+  // Recheck current scope before the SDK can reuse a committed journal receipt.
+  // In particular, legacy creates may carry an unreviewed focus-inherited parent.
+  for (const row of planned) {
+    const owned = applied.byRowIndex.get(row.rowIndex);
+    if (!owned || row.isUpdate) continue;
+    const document = await readUpdateDocument(pmRoot, owned);
+    if (!matchesMutationScope(document, { parent: row.parsed.parent, assignee: row.parsed.assignee,
+      sprint: row.parsed.sprint, release: row.parsed.release, blockedBy: row.parsed.blocked_by,
+      ...(!row.parsed.blocked_by ? { dep: [] } : {}) }, undefined, "patch")) {
+      throw new CommandError("Atomic CSV replay scope differs from the reviewed rows. Reconcile current parent, assignment, planning and dependency fields before importing again.", EXIT_CODE.USAGE);
+    }
   }
 
   // Build one transaction step per row to be written (create or update).
@@ -2072,12 +2086,9 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
  * Flag names verified against the installed `pm create`/`pm update` contracts:
  * --parent, --assignee, --sprint, --release, --blocked-by.
  */
-function appendRelationalArgs(args: string[], p: ParsedRow): void {
-  if (p.parent) args.push("--parent", p.parent);
-  if (p.assignee) args.push("--assignee", p.assignee);
-  if (p.sprint) args.push("--sprint", p.sprint);
-  if (p.release) args.push("--release", p.release);
-  if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
+function appendRelationalArgs(args: string[], p: ParsedRow, mode: "create" | "patch"): void {
+  args.push(...mutationScopeArguments({ parent: p.parent, assignee: p.assignee, sprint: p.sprint, release: p.release,
+    blockedBy: p.blocked_by, dep: [] }, mode));
 }
 
 /** Append item fields shared by create and update mutation commands. */
@@ -2086,7 +2097,7 @@ function appendMutableItemArgs(args: string[], p: ParsedRow, preserveEmptyBody: 
   if (p.priority !== undefined) args.push("--priority", String(p.priority));
   if (p.type) args.push("--type", p.type);
   if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendRelationalArgs(args, p, preserveEmptyBody ? "patch" : "create");
 }
 
 /** Build a normal validated close with factual CSV provenance and outcome fields. */

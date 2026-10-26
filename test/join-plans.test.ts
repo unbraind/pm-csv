@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { create, update, get, readHistoryEntries, getHistoryPath, WorkspaceTransactionInterruptedError, schemaAddStatus, deleteItem, locateItem } from "@unbrained/pm-cli/sdk";
+import { create, update, get, readHistoryEntries, getHistoryPath, WorkspaceTransactionInterruptedError, schemaAddStatus, deleteItem, locateItem, focus } from "@unbrained/pm-cli/sdk";
 import { applyJoins, previewJoins, JoinRefusal, assertJoinNumbers } from "../join-plans.ts";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { serializeCSV } from "../index.ts";
@@ -269,8 +269,9 @@ async function nativeState(root: string, id: string): Promise<unknown> {
 test("500 seeded model sequences compare SDK readback with native reference state across replay, variants and custom roles", { timeout: 900000 }, async t => {
   const template = fixture();
   const base = mkdtempSync(join(tmpdir(), "csv-join-model-"));
-  const pool: { root: string; oracle: string; source: JoinInput; plan: JoinPlan; edited: boolean }[] = [];
+  const pool: { root: string; oracle: string; source: JoinInput; plan: JoinPlan; edited: boolean; ambient: string[]; cwd: string[] }[] = [];
   let operations = 0;
+  const originalCwd = process.cwd();
   try {
     for (let seed = 1; seed <= 500; seed++) {
       const rng = random(seed), slot = (seed - 1) % 16;
@@ -281,13 +282,19 @@ test("500 seeded model sequences compare SDK readback with native reference stat
         const role = ["active", "blocked", "terminal_done", "terminal_canceled"][Math.floor(rng() * 4)];
         const custom = (await schemaAddStatus(`custom-${seed}`, { role: [role] }, { pmRoot: root })).status.id;
         cpSync(root, oracle, { recursive: true });
+        const ambient: string[] = [];
+        for (let i = 0; i < 3; i++) ambient.push((await create({ title: `Ambient ${slot}-${i}`, unset: ["parent"],
+          assignee: `ambient-owner-${i}`, sprint: `ambient-sprint-${i}`, release: `ambient-release-${i}` }, { pmRoot: root })).item.id);
+        const cwd = [join(root, "cwd-a"), join(root, "cwd-b")];
+        for (const dir of cwd) mkdirSync(dir);
+        await focus(ambient[Math.floor(rng() * ambient.length)], {}, { pmRoot: root });
         const source = input();
         const expected: Parameters<typeof create>[0][] = [];
         const fields = ["title", "body", "type", "status", "priority", "tags", "assignee", "sprint", "release", "estimatedMinutes", "acceptanceCriteria", "closeReason"] as const;
         for (const [i, table] of source.tables.entries()) {
           const options = {
             title: `  Case ${seed} row ${i}  `, body: ` leading ${seed}\r\nline ${i} \t\n`, type: "Task", status: i === 2 ? "closed" : custom,
-            priority: String(Math.floor(rng() * 5)), tags: `Tag-${seed},Shared`, assignee: `member-${seed}`, sprint: `s-${seed}`, release: `r-${seed}`,
+            priority: String(Math.floor(rng() * 5)), tags: `Tag-${seed},Shared`, assignee: rng() < .5 ? "" : `member-${seed}`, sprint: rng() < .5 ? "" : `s-${seed}`, release: rng() < .5 ? "" : `r-${seed}`,
             estimatedMinutes: String(Math.floor(rng() * 1000)), acceptanceCriteria: `  AC ${seed}  `, closeReason: `Imported ${seed}`,
           };
           expected.push(options);
@@ -303,14 +310,22 @@ test("500 seeded model sequences compare SDK readback with native reference stat
           if (i > 0) table.references[0].column = "ref";
         }
         const p = await plan(root, source);
+        await focus(ambient[Math.floor(rng() * ambient.length)], {}, { pmRoot: root });
+        process.chdir(cwd[Math.floor(rng() * cwd.length)]);
         await applyJoins(root, p, { author: "model-test" });
         // Reference transition: create once at absent native identities. Canonical values come only from SDK readback.
-        for (const [i, options] of expected.entries()) await create({ ...options, id: p.ids[i], author: "model-test",
-          ...(i === 1 ? { parent: p.ids[0] } : {}), ...(i === 2 ? { dep: [`kind=blocked_by,id=${p.ids[1]}`] } : {}) }, { pmRoot: oracle });
-        model = { root, oracle, source, plan: p, edited: false };
+        for (const [i, options] of expected.entries()) {
+          const absent = ["assignee", "sprint", "release"].filter(field => options![field as "assignee" | "sprint" | "release"] === "");
+          await create({ ...Object.fromEntries(Object.entries(options!).filter(([field]) => !absent.includes(field))), id: p.ids[i], author: "model-test",
+            unset: [...(i === 1 ? [] : ["parent"]), ...absent],
+            ...(i === 1 ? { parent: p.ids[0] } : {}), ...(i === 2 ? { dep: [`kind=blocked_by,id=${p.ids[1]}`] } : {}) }, { pmRoot: oracle });
+        }
+        model = { root, oracle, source, plan: p, edited: false, ambient, cwd };
         pool[slot] = model;
       }
       const { root, oracle, source, plan: p } = model;
+      await focus(model.ambient[Math.floor(rng() * model.ambient.length)], {}, { pmRoot: root });
+      process.chdir(model.cwd[Math.floor(rng() * model.cwd.length)]);
       assert.equal((await previewJoins(root, source)).receipt.ok, true);
       operations++;
       if (model.edited) await assert.rejects(applyJoins(root, p, { author: "model-test" }), refuses);
@@ -318,6 +333,8 @@ test("500 seeded model sequences compare SDK readback with native reference stat
       operations++;
       for (let step = 0; step < 6; step++) {
         const op = Math.floor(rng() * 4);
+        await focus(model.ambient[Math.floor(rng() * model.ambient.length)], {}, { pmRoot: root });
+        process.chdir(model.cwd[Math.floor(rng() * model.cwd.length)]);
         if (op === 0) {
           if (model.edited) await assert.rejects(applyJoins(root, p, { author: "model-test" }), refuses);
           else assert.equal((await applyJoins(root, p, { author: "model-test" })).applied, 0);
@@ -340,7 +357,7 @@ test("500 seeded model sequences compare SDK readback with native reference stat
       if (seed % 100 === 0) t.diagnostic(`seeded join sequences=${seed}; operations=${operations}`);
     }
     assert.equal(operations, 4000);
-  } finally { rmSync(template, { recursive: true, force: true }); rmSync(base, { recursive: true, force: true }); }
+  } finally { process.chdir(originalCwd); rmSync(template, { recursive: true, force: true }); rmSync(base, { recursive: true, force: true }); }
 });
 
 test("each internal mutation boundary rechecks a competing writer and reports peer success truthfully", async () => {

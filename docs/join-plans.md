@@ -105,3 +105,33 @@ silently overwrite newer target revisions.
 
 Preview, apply and replay work in plain initialized trackers without a Git
 executable. Git is not needed for these commands.
+
+## Explicit scope and refusal boundaries
+
+All package mutation paths share `buildMutationIntent` in `mutation-intent.ts`.
+A create with no parent uses the SDK's `unset: ["parent"]` form; an empty CSV
+parent cell never means “inherit the current focus”. Absent create assignment,
+reviewer, sprint/release, goal/objective and blocker fields are also explicitly
+unset, and absent dependency/file/doc/test collections are explicitly cleared.
+The intent never reads session focus or the working directory.
+
+Legacy CSV imports use the same builder for standard, streaming, atomic and
+schema-negotiated imports. Their absent or empty supported scope columns clear
+parent, assignment, sprint/release and blocker/dependency values on keyed updates.
+Spreadsheet patches, compensation and marker cleanup preserve unselected native
+scope; raw patches/restores build their selected scope from the current document
+inside the SDK item lock. Native lifecycle policy still owns terminal transitions.
+
+Join replay compares current native scope to the reviewed source intent using
+SDK canonicalization. It refuses old owned records with an inherited parent,
+unreviewed scope or extra links, including when their unchanged history and a
+committed journal would otherwise look reusable. Lineage reports these old
+scope mismatches as identity conflicts; legacy atomic create receipts also refuse
+scope drift. Changing focus after preview is harmless for a correctly reviewed
+plan and never adds a parent.
+
+Both `previewJoins` and `applyJoins` expose only `JoinRefusal` on failure. Malformed
+quoting, ragged records and inconsistent line endings are wrapped from the table
+parser, retaining its `sourceCode`, actionable `remedy` and original `cause`.
+The CLI does the same for invalid UTF-8/JSON and file errors. Expected lower-level
+failures are not leaked as another API's refusal family.

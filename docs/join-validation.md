@@ -77,3 +77,29 @@ passes. No global installation or dependency pin is changed by this feature.
 
 Full release acceptance is supplied by the unchanged npm and Bun CI release
 checks, including every coverage dimension and packed-package acceptance.
+
+## Ambient-state review regressions
+
+The shared mutation builder is exercised through joins, lineage, standard CSV,
+streaming CSV, atomic CSV, schema imports, native spreadsheet patches and
+compensation. Empty supported scope columns become explicit SDK clears. Native
+patch/restore callbacks preserve unselected current scope under the item lock.
+
+The 500-sequence model now randomizes target focus before preview, changes it
+between preview and apply, and changes focus and working directory during retry.
+Each of sixteen non-git tracker/model pairs uses three ambient items and two
+working directories. Source assignment and planning cells alternate between
+empty and explicit values. SDK readback matches the independent reference;
+changing ambient state adds no parent or dependency links. Previously created
+owned records containing unreviewed parent, assignment, planning or resource
+links refuse replay.
+
+Refusal regressions cover unterminated quotes, ragged rows, bare/mixed line
+endings, invalid UTF-8/JSON and arbitrary lower-layer failures. Both public join
+APIs always expose `JoinRefusal`, retaining lower refusal codes/remedies and causes.
+
+Two behavioral revert proofs were run independently: removing the builder's
+parent unset makes the focus-change regression fail, and removing only the
+public preview refusal wrapper makes the malformed-CSV instance assertion fail.
+Both tests pass when their changed functions are restored. Targeted native
+recovery tests also pass, including compensation and a competing writer.

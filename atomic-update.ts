@@ -1,3 +1,4 @@
+import { explicitDocumentMutation } from "./mutation-intent.ts";
 import {
   acquireLock, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
   readLocatedItem, readSettings, resolveItemTypeRegistry, verifyHistoryEntries,
@@ -127,7 +128,7 @@ export async function compensateUpdate(
   await mutateItem({
     pmRoot, settings, id, op: "restore", author, message: restoreMessage,
     skipNoop: true,
-    mutate: guardEditMutation(settings.locks.ttl_seconds, async document => {
+    mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
       const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
       if (!verifyHistoryEntries(history, document).ok
           || journalHash(history.slice(0, historyLength)) !== historyHash
@@ -150,7 +151,7 @@ export async function compensateUpdate(
       document.metadata = structuredClone(prior.metadata);
       document.body = prior.body;
       return { changedFields };
-    }),
+    })),
   });
   if (completed) return;
   await onPhase("canonical_restored");

@@ -1,3 +1,4 @@
+import { explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   acquireLock, commitWorkspaceTransaction, getHistoryPath, mutateItem,
@@ -189,7 +190,7 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
   const settings = await readSettings(pmRoot);
   const result = await mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
-    mutate: guardEditMutation(settings.locks.ttl_seconds, async document => {
+    mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
       const current = await documentRow(pmRoot, plan.base.id, document);
       const divergent = conflicts(plan, current);
       if (divergent.length) throw new EditRefusal("csv_edit_conflict", "Re-export and reconcile the edited fields; no conflicting value was overwritten.", [{ id: plan.base.id, fields: divergent }]);
@@ -205,7 +206,7 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
         changedFields.push(field);
       }
       return { changedFields };
-    }),
+    })),
   });
   return result.changedFields.length > 0;
 }
