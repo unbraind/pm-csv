@@ -1,0 +1,29 @@
+id: pm-csv-packed-custom-fields
+title: Prove packed CSV custom fields survive export and re-import
+description: "Packed acceptance currently exports fixtures without custom fields, so all-fields success cannot prove custom schema discovery or values. Follow-up to the non-blocking review of PR #196."
+type: Issue
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-26T08:13:37.474Z"
+updated_at: "2026-10-26T08:51:57.803Z"
+author: codex-agent
+acceptance_criteria: "Seed string, number, boolean, date, list and empty custom fields through the installed host SDK in a non-git tracker; assert packed exports column by column; re-import into a fresh tracker and compare SDK state; regression fails after behavioral revert; targeted tests, typecheck and lint pass; CI npm and Bun release gates pass."
+comments[7]{created_at,author,text}:
+  "2026-10-26T08:17:29.187Z",codex-agent,"Searched active and historical tracker items; this acceptance gap is distinct from the merged SDK adoption task. Plan: seed six custom columns through each installed SDK in non-git trackers, check discovery and explicit selection cell by cell, add behavioral regression/revert proof, and verify re-import state through the SDK. Runtime schemas encode dates as ISO string values. The legacy importer currently ignores custom columns; requested scope clarification while implementing export proof."
+  "2026-10-26T08:23:48.700Z",codex-agent,"Acceptance scope remains export proof plus SDK import-adapter roundtrip: packed CSV decoding feeds a fresh tracker, then source and destination custom metadata are compared through SDK reads. Legacy CLI import custom-column support is a distinct feature tracked by pm-csv-import-custom-columns. Linked test isolation clears inherited PM_PATH so each scenario owns its non-git tracker."
+  "2026-10-26T08:26:03.644Z",codex-agent,"Minimum-host diagnosis: schemaAddField(name, {type}) silently registers a string in pm 2026.8.20 because its dispatcher reads fieldType. The fixture supplies both typed and legacy option names and asserts the SDK registry types before persisting data with commitImportedItem. This avoids normalizing a broken seed into expected values; every SDK read must match the original typed fixture. No host dependency bump or upstream modification."
+  "2026-10-26T08:29:18.523Z",codex-agent,"Behavioral revert proof: restored only scripts/accept-packed.ts from origin/main, retaining the new fixture module and regression test. node --test test/packed-custom-fields.test.ts fails 1/2 with npm-current: custom_columns_exported is undefined rather than 6; the old packed script itself succeeds, proving its false-positive gap. Restored the fixed script in a finally block; no product source or history records changed. The fixed version previously passed 2/2 across all three scenarios; running final linked checks next."
+  "2026-10-26T08:30:59.287Z",codex-agent,"Final local verification passes after restoring the fix: tracker-linked node --test test/packed-custom-fields.test.ts is 2/2, node --test test/sdk-adoption.test.ts is 4/4; no failures or skips. npm run typecheck, npm run build:test, npm run lint, npm run duplicates and npm run docstring pass (115 documented declarations; zero clones). Strict health passes with an empty global pm context; ordinary local health reports the already tracked pm-csv-sdyz global extension skew. Full unchanged npm and Bun release gates will run in CI before final handoff."
+  "2026-10-26T08:35:09.894Z",codex-agent,"Opened ready-for-review PR https://github.com/unbraind/pm-csv/pull/202 at d9f33ec. Full CI matrix https://github.com/unbraind/pm-csv/actions/runs/40292925244 is queued for GitHub runners; waiting for both Node versions and both npm/Bun release gates. No merge requested or performed."
+  "2026-10-26T08:51:56.466Z",codex-agent,"Full source-head CI passed at d9f33ec7bf19fb5b0f9da6ab603c86ee4ba38881: https://github.com/unbraind/pm-csv/actions/runs/40292925244. Node 22 and 26 each passed npm run release:check and bun run release:check, each with 341 tests and all eight configured coverage sources meeting unchanged thresholds. Verified all 12 direct packed receipts: six custom columns and SDK roundtrip true in npm-current, bun-current and npm-minimum for every gate. Strict tracker health and Bun graph installs also pass. CodeQL and available static checks pass; skipped/neutral automated reviewers are not review approval. Releasing the claim for owner verification; the item stays in progress and the import follow-up stays open. The final tracker-only commit will receive a fresh matrix linked from https://github.com/unbraind/pm-csv/pull/202/checks."
+files[3]{path,scope}:
+  scripts/accept-packed.ts,project
+  scripts/packed-custom-fields.ts,project
+  test/packed-custom-fields.test.ts,project
+tests[2]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/packed-custom-fields.test.ts,project,360,codex-agent,"2026-10-26T08:19:40.644Z",local_mutation,fix/packed-acceptance-custom-fields
+  node --test test/sdk-adoption.test.ts,project,120,codex-agent,"2026-10-26T08:28:25.173Z",local_mutation,fix/packed-acceptance-custom-fields
+docs[1]{path,scope}:
+  README.md,project
+body: ""

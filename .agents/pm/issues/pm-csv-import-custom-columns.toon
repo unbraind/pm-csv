@@ -1,0 +1,16 @@
+id: pm-csv-import-custom-columns
+title: Preserve registered custom columns in CSV imports
+description: The legacy importer reads only the fixed built-in IMPORT_COLUMNS and rowFields schema. Custom columns emitted by export --all-fields are silently ignored on CLI re-import. Discovered while strengthening packed acceptance; SDK adapter re-import is separate evidence and does not certify CLI custom-field import.
+type: Issue
+status: open
+priority: 2
+tags: []
+created_at: "2026-10-26T08:23:24.402Z"
+updated_at: "2026-10-26T08:23:59.361Z"
+author: codex-agent
+acceptance_criteria: "Resolve registered columns and metadata aliases through the SDK; preserve supported field types and empty values through CLI re-import; cover create, update, preview, stream and atomic paths with real tracker tests; reject invalid typed cells before mutation."
+comments[1]{created_at,author,text}:
+  "2026-10-26T08:23:59.361Z",codex-agent,Follow-up from pm-csv-packed-custom-fields. The packed acceptance fixture roundtrip uses the SDK import adapter and must not be described as proof that the legacy CLI importer preserves custom columns.
+files[1]{path,scope}:
+  index.ts,project
+body: ""

@@ -1,0 +1,21 @@
+id: pm-csv-github-2b408bfa2d7f-197
+title: Point the npm homepage at the package's website and link the author
+description: "GH issue #197: https://github.com/unbraind/pm-csv/issues/197 · author @unbraind · created 2026-10-25T21:54:30Z · updated 2026-10-25T21:54:30Z"
+type: Issue
+status: open
+priority: 2
+tags[2]: "gh:unbraind/pm-csv#197","github_author:unbraind"
+created_at: "2026-10-25T21:54:30Z"
+updated_at: "2026-10-26T07:54:41.120Z"
+author: pm-github
+github_close_reason: ""
+github_closed_at: ""
+github_created_at: "2026-10-25T21:54:30Z"
+github_link_only: false
+github_number: 197
+github_release: ""
+github_state: open
+github_state_reason: unspecified
+github_updated_at: "2026-10-25T21:54:30Z"
+github_url: "https://github.com/unbraind/pm-csv/issues/197"
+body: "## Why\n\nOn npm, `pm-csv` links **Homepage** to `https://github.com/unbraind/pm-csv#readme`, the same place as the Repository link beside it. The package has its page in the pm cli package catalog: https://pm-cli.unbrained.dev/packages/pm-csv. Pointing npm there gives people a useful place to land and lets search engines tie the package to its website. The author field (`\"@unbraind\"`) has no link to the person behind the work.\n\n## What to change\n\nIn `package.json`:\n\n```json\n\"homepage\": \"https://pm-cli.unbrained.dev/packages/pm-csv\",\n\"author\": { \"name\": \"unbrained\", \"url\": \"https://unbrained.dev/about\" },\n```\n\n- Currently: `\"homepage\": \"https://github.com/unbraind/pm-csv#readme\"`, `\"author\": \"@unbraind\"`.\n- Keep `repository` and `bugs` as they are.\n- Set the repository's GitHub website (About → Website) to the same address (currently empty): `gh repo edit unbraind/pm-csv --homepage https://pm-cli.unbrained.dev/packages/pm-csv`.\n- npm takes the new fields with the next published version.\n\n## Acceptance\n\n- [ ] `npm view pm-csv homepage` prints `https://pm-cli.unbrained.dev/packages/pm-csv` after the next release.\n- [ ] `npm view pm-csv author` includes the url `https://unbrained.dev/about`.\n- [ ] The GitHub repository's website is `https://pm-cli.unbrained.dev/packages/pm-csv`.\n\n## Context\n\nChecked 2026-10-25 with `npm view` and the GitHub API. The same change has been filed in every published unbrained package's repository (pm-cli as unbraind/pm-cli#1594, its extensions, pm-web and the agent-ready clis), so they all link the same way: the product page as homepage, https://unbrained.dev/about as the author."
