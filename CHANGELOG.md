@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Use the pm SDK for runtime CSV export fields ([pm-csv-sdk-adoption-1025](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-sdk-adoption-1025.toon))
+
 ## 2026.10.25 - 2026-10-25
 
 ### Added

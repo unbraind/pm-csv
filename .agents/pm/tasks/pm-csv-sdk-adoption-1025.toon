@@ -2,16 +2,21 @@ id: pm-csv-sdk-adoption-1025
 title: Use the pm SDK for runtime CSV export fields
 description: "Resolve audit findings with SDK settings and runtime field registry; evaluate native mutation and fenced update adoption against the supported host floor. Preserve verified history, prove real public tracker export equivalence, and record per-finding revert evidence. Related adoption: pm-csv-axm5; persistence prerequisite: pm-csv-sdk-write-fence."
 type: Task
-status: in_progress
+status: closed
 priority: 1
 tags: []
 created_at: "2026-10-25T16:45:54.747Z"
-updated_at: "2026-10-25T17:14:23.100Z"
+updated_at: "2026-10-26T03:14:09.462Z"
+closed_at: "2026-10-26T03:14:06.928Z"
+completed_at: "2026-10-25T17:26:15.000Z"
 author: codex-agent
+resolution: "Delivered by PR #196, merge ec5b50f55e68a6b4be95ef50640fdfe158f8273c, merged 2026-10-25T17:26:15Z. index.ts discoverCustomFields awaits readSettingsWithMetadata and resolves canonical runtime definitions with resolveRuntimeFieldRegistry on both export surfaces. test/sdk-adoption.test.ts covers schema normalization, file precedence, no-git preservation and corrupted-history refusal. The item requires evaluating native mutation adoption; its documented evaluation retains atomic-update.ts and roundtrip.ts until the separately tracked SDK guarantees exist."
+expected_result: "Runtime CSV export field discovery uses SDK settings/registry, preserves tested export contracts and explicitly evaluates safety prerequisites."
+actual_result: "Four focused adoption regressions pass on main. The field-discovery replacement and evaluation are delivered; pm-csv-sdk-write-fence remains open under PR #198, and no atomic mutation migration is claimed."
 dependencies[2]{id,kind,created_at,author,source_kind,author_source}:
   pm-csv-axm5,related,"2026-10-25T16:58:16.173Z",codex-agent,"cli:update:dep",detected
   pm-csv-sdk-write-fence,related,"2026-10-25T16:58:16.173Z",codex-agent,"cli:update:dep",detected
-comments[9]{created_at,author,text}:
+comments[10]{created_at,author,text}:
   "2026-10-25T16:46:58.595Z",codex-agent,"Audit plan: replace index.ts custom schema discovery with readSettingsWithMetadata and resolveRuntimeFieldRegistry, deleting the manual JSON reader/merge. Link prior SDK adoption pm-csv-axm5 and persistence prerequisite pm-csv-sdk-write-fence. SDK canonical field ordering, normalized tokens, last-definition precedence and invalid settings validation are intentional documented differences; preserve the optional-discovery empty-list fallback. Evidence will include real public tracker differential copies, per-replacement behavioral revert, targeted tests and full npm/Bun release gates."
   "2026-10-25T16:46:59.745Z",codex-agent,"Not replaced: atomic-update.ts captureUpdateCompensation and roundtrip.ts snapshot/applyPlan. Pinned SDK 2026.10.20 mutateItem has no lease-owner/revision persistence fence; peer host floor is 2026.8.20. Existing guardEditMutation/assertEditLease must remain until pm-csv-sdk-write-fence (gh:unbraind/pm-cli#1549) is resolved. Missing SDK API: verified read-only item+history snapshot under one lease, and atomic lease/revision fencing with compatibility for extension-owned locks. commitItemMutations update match exists but validates only one field/key, cannot express the multi-field three-way conflict predicate or verified history prefix plus exact raw-representation compensation, and restore-by-updated_at would lose these guarantees. Missing SDK API: async under-lock verified-history precondition and exact snapshot/representation compensation hook. No dependency bump, cache substitution or removal of existing verification."
   "2026-10-25T16:57:11.710Z",codex-agent,"Behavioral revert proof: restored only discoverCustomFields from origin/main (7b609b1), leaving async callers and regression tests intact. node --test --test-name-pattern=\"SDK discovery uses canonical\" test/sdk-adoption.test.ts failed 1/1: legacy code returned literal Zeta/OLD instead of canonical alpha/severity and zeta/new. Restored SDK implementation passes 4/4 adoption regressions. This is the sole replaced implementation; atomic-update.ts and roundtrip.ts remain unchanged for the separately documented missing SDK guarantees."
@@ -21,6 +26,7 @@ comments[9]{created_at,author,text}:
   "2026-10-25T17:09:38.696Z",codex-agent,"Final local evidence: tracker-linked node --test test/sdk-adoption.test.ts test/csv.test.ts test/edge-contracts.test.ts passes 95/95; npm run typecheck, npm run build:test, npm run lint, npm run duplicates and npm run docstring pass. Final differential repeats 26/26 matches and 589 unchanged authoritative files; final function-only revert still fails 1/1. Production index.ts deletes 70 lines (net -51), including the old 46-line manual discovery function and redundant catch. Initial pre-fix local full gate was superseded; final full-gate authority is CI npm/Bun on Node 22/26, not the interrupted local run."
   "2026-10-25T17:09:59.421Z",codex-agent,"For orchestrator upstream follow-up, suggested missing API names (not existing exports): readVerifiedItemSnapshot with document/raw/format/history boundary under one lease; mutateItem expectedRevision plus leaseOwner persistence fencing, including extension-owned locks; commitItemMutations verifiedHistoryPrecondition and exactSnapshotCompensation hooks. These are required before deleting the atomic-update.ts and roundtrip.ts safety/three-way machinery. Existing single-field update match is insufficient. No upstream issue was filed by this task. Review evidence: automatic reviewer skips, exhausted review budgets and a trial-ended message provide no approval; PR 196 is ready for owner review."
   "2026-10-25T17:14:21.324Z",codex-agent,"Full-gate receipt for d4e7f3c: https://github.com/unbraind/pm-csv/actions/runs/40214820636 succeeded, 2/2 CI jobs (Node 22 and 26), each running npm run release:check and bun run release:check. All four gates pass 335/335 tests, zero failures/skips, 100% lines/branches/functions, and three packed npm-current/Bun-current/npm-minimum acceptance scenarios including --all-fields (12 successful scenario receipts total). Both strict tracker-health steps and Bun graph installs pass. Final bookkeeping includes explicit unknown-record types for JSON fixtures; no production changes after this passing source head. PR: https://github.com/unbraind/pm-csv/pull/196. Owner verification remains required; do not close."
+  "2026-10-26T03:13:37.596Z",codex-agent,"Closure audit on main ec5b50f55e68a6b4be95ef50640fdfe158f8273c: merged PR #196 (ec5b50f55e68a6b4be95ef50640fdfe158f8273c, merged 2026-10-25T17:26:15Z). index.ts discoverCustomFields awaits readSettingsWithMetadata and resolves canonical runtime definitions with resolveRuntimeFieldRegistry on both export surfaces. test/sdk-adoption.test.ts covers schema normalization, file precedence, no-git preservation and corrupted-history refusal. The item requires evaluating native mutation adoption; its documented evaluation retains atomic-update.ts and roundtrip.ts until the separately tracked SDK guarantees exist. All scoped acceptance criteria are represented by the inspected implementation and regressions. Existing behavioural revert evidence is retained; this tracker-only audit changes no runtime functions."
 files[6]{path,scope}:
   index.ts,project
   scripts/accept-packed.ts,project
@@ -28,8 +34,23 @@ files[6]{path,scope}:
   test/edge-contracts.test.ts,project
   test/repros/sdk-adoption-differential.ts,project
   test/sdk-adoption.test.ts,project
-tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  node --test test/sdk-adoption.test.ts test/csv.test.ts test/edge-contracts.test.ts,project,codex-agent,"2026-10-25T16:51:01.469Z",local_mutation,refactor/sdk-adoption-1025
+tests[2]:
+  - command: node --test test/sdk-adoption.test.ts test/csv.test.ts test/edge-contracts.test.ts
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T16:51:01.469Z"
+      source_kind: local_mutation
+      source_ref: refactor/sdk-adoption-1025
+  - command: node --test test/sdk-adoption.test.ts
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T03:13:52.504Z"
+      source_kind: local_mutation
+      source_ref: chore/close-delivered-1026
 docs[1]{path,scope}:
   README.md,project
+close_reason: "Delivered by PR #196, merge ec5b50f55e68a6b4be95ef50640fdfe158f8273c, merged 2026-10-25T17:26:15Z. index.ts discoverCustomFields awaits readSettingsWithMetadata and resolves canonical runtime definitions with resolveRuntimeFieldRegistry on both export surfaces. test/sdk-adoption.test.ts covers schema normalization, file precedence, no-git preservation and corrupted-history refusal. The item requires evaluating native mutation adoption; its documented evaluation retains atomic-update.ts and roundtrip.ts until the separately tracked SDK guarantees exist."
 body: ""
