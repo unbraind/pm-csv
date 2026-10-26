@@ -82,7 +82,7 @@ checks, including every coverage dimension and packed-package acceptance.
 
 The shared mutation builder is exercised through joins, lineage, standard CSV,
 streaming CSV, atomic CSV, schema imports, native spreadsheet patches and
-compensation. Empty supported scope columns become explicit SDK clears. Native
+compensation. Creates explicitly suppress ambient defaults; absent or empty keyed-update cells preserve existing state. Native
 patch/restore callbacks preserve unselected current scope under the item lock.
 
 The 500-sequence model now randomizes target focus before preview, changes it
@@ -103,3 +103,31 @@ parent unset makes the focus-change regression fail, and removing only the
 public preview refusal wrapper makes the malformed-CSV instance assertion fail.
 Both tests pass when their changed functions are restored. Targeted native
 recovery tests also pass, including compensation and a competing writer.
+
+## Keyed-update column ownership re-review
+
+Legacy keyed updates now own only nonempty supported CSV cells. Absent headers
+and empty cells preserve current values, native links and dependency edges;
+`none` retains its native explicit-clear meaning for parent/sprint/release.
+Creates still unset absent scope through the shared builder. Body cells retain
+source whitespace until the SDK applies its native normalization. README and
+import command help describe this ownership contract, additive tags/blockers,
+and export-only custom fields.
+
+`test/column-ownership.test.ts` reproduces the title-only review case and tests
+all twelve supported import headers as keys, plus native ID, foreign and custom
+keys. Its deterministic seeds 1–500 each perform four transitions: a random
+subset import, an unchanged native/custom-field export/import, explicit edits,
+and replay of an older input. Standard, streaming and atomic mutations use real
+non-git trackers with only Node and the pinned pm executable on PATH. Reference
+state evolves independently through native SDK updates. The model reads complete
+SDK documents, including custom objects and resource links; comparisons exclude
+only generated mutation/edge clocks. Silent dependency records also receive a
+byte-for-byte assertion, including their original provenance and timestamps.
+Atomic transaction ownership tags are modeled explicitly with the public
+transaction-ID API. No source-value normalization is implemented in the oracle.
+
+The behavioral revert replaces only `appendRelationalArgs` with the clearing
+implementation from the previous head. The fixed review case fails the silence
+law, losing parent, assignment, planning values and the dependency edge. Restoring
+the changed function makes that regression pass.

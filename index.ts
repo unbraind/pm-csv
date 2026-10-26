@@ -1158,7 +1158,7 @@ function createImportResult(): ImportResult {
 
 interface ParsedRow {
   title: string;
-  status: ItemStatus;
+  status?: ItemStatus;
   priority?: number;
   tags: string[];
   type?: string;
@@ -1192,13 +1192,13 @@ function rowFields(
     get,
     parsed: {
       title: get("title"),
-      status: rawStatus ? normalizeStatus(rawStatus) : "open",
+      status: rawStatus ? normalizeStatus(rawStatus) : undefined,
       priority: priority !== undefined && !isNaN(priority) ? priority : undefined,
       tags: parseTags(get("tags")),
       type: get("type") || undefined,
       // pm has no milestone/due_date fields; map deadline (accept legacy header).
       deadline: get("deadline") || get("due_date") || undefined,
-      body: get("body") || undefined,
+      body: get("body") ? row[col("body")] : undefined,
       parent: get("parent") || undefined,
       assignee: get("assignee") || undefined,
       sprint: get("sprint") || undefined,
@@ -1249,7 +1249,7 @@ function parseImportFilter(
  */
 function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): boolean {
   if (!filter) return true;
-  if (filter.status !== undefined && row.status !== filter.status) return false;
+  if (filter.status !== undefined && (row.status ?? "open") !== filter.status) return false;
   if (filter.type !== undefined && (row.type ?? "").toLowerCase() !== filter.type) return false;
   if (filter.priority !== undefined && row.priority !== filter.priority) return false;
   return true;
@@ -1347,6 +1347,7 @@ function processImportRow(
     result.previews.push({
       action: existingId ? "update" : "create",
       ...parsed,
+      status: parsed.status ?? (existingId ? undefined : "open"),
       ...(opts.keyField ? { key: keyValue } : {}),
       ...(opts.source ? { csv_source: opts.source } : {}),
     });
@@ -2087,8 +2088,11 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
  * --parent, --assignee, --sprint, --release, --blocked-by.
  */
 function appendRelationalArgs(args: string[], p: ParsedRow, mode: "create" | "patch"): void {
-  args.push(...mutationScopeArguments({ parent: p.parent, assignee: p.assignee, sprint: p.sprint, release: p.release,
-    blockedBy: p.blocked_by, dep: [] }, mode));
+  // Updates own only nonempty cells. Absent/empty cells preserve current state,
+  // including all dependency edges; create mode still suppresses ambient defaults.
+  const selected = Object.fromEntries(Object.entries({ parent: p.parent, assignee: p.assignee,
+    sprint: p.sprint, release: p.release, blockedBy: p.blocked_by }).filter(([, value]) => value !== undefined));
+  args.push(...mutationScopeArguments(selected, mode));
 }
 
 /** Append item fields shared by create and update mutation commands. */
@@ -2173,7 +2177,7 @@ function upsertCreate(
 
   // See the function docstring: terminal `closed` is applied via pm close
   // after the create, never via `pm create --status closed`.
-  const createStatus = p.status === "closed" ? "open" : p.status;
+  const createStatus = !p.status || p.status === "closed" ? "open" : p.status;
   const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
   appendMutableItemArgs(args, p, false);
   if (tags.length > 0) args.push("--tags", tags.join(","));
@@ -2336,7 +2340,7 @@ function upsertUpdate(
   if (extraTags && extraTags.length > 0) addTags.push(...extraTags);
   if (addTags.length > 0) args.push("--add-tags", addTags.join(","));
   // `update` cannot set a closed status; only set non-closed statuses here.
-  if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
+  if (p.status && p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
   // `pm update` is a WRITE: a null status (receipt overrun or a signal kill)
@@ -3028,6 +3032,9 @@ export default {
         "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, " +
         "--source to record import provenance in the csv_source field, and " +
         "--status/--type/--priority to import only matching rows (others are skipped). " +
+        "Keyed updates preserve absent columns and empty cells; nonempty cells set supported fields. " +
+        "Use none to clear parent/sprint/release; tags are additive and dependency edges are preserved. " +
+        "Custom fields are export-only. Creates suppress implicit focus and planning defaults. " +
         "Use --strict to fail before writing when row-level data issues are present.",
       arguments: [{ name: "file", required: true, description: "CSV file to import" }],
       intent: "import items from a CSV file into pm",

@@ -494,6 +494,7 @@ test("rowMatchesFilter: undefined filter matches every row", () => {
 test("rowMatchesFilter: status criterion skips non-matching rows", () => {
   const filter = parseImportFilter("open", undefined, undefined);
   assert.equal(rowMatchesFilter(makeRow({ status: "open" }), filter), true);
+  assert.equal(rowMatchesFilter(makeRow({ status: undefined }), filter), true);
   assert.equal(rowMatchesFilter(makeRow({ status: "closed" }), filter), false);
 });
 

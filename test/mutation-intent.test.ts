@@ -116,7 +116,7 @@ test("focus changes do not alter reviewed empty parents; previously inherited sc
   } finally { process.chdir(originalCwd); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("lineage and every legacy create/update importer suppress focus and explicitly clear empty CSV scope", async () => {
+test("lineage and every legacy importer suppress focus on create and preserve empty update cells", async () => {
   const root = fixture(), oldPath = process.env.PATH;
   try {
     const bin = join(root, "bin"); mkdirSync(bin);
@@ -142,7 +142,15 @@ test("lineage and every legacy create/update importer suppress focus and explici
       if (mode !== "atomic") await update(imported.id, { parent: ambient, assignee: "Other", sprint: "Other", release: "Other", blockedBy: ambient }, { pmRoot: root });
       const replay = mode === "schema" ? await importNegotiatedTable(root, serializeCSV(table, ","), (await describeTable(root, serializeCSV(table, ","))).schema, { keyField: "title" }) : await importCSV(root, file, options);
       assert.equal(replay.imported, 0, mode);
-      await emptyScope(root, imported.id);
+      if (mode === "atomic") await emptyScope(root, imported.id);
+      else {
+        const stored = (await readUpdateDocument(root, imported.id)).metadata;
+        assert.equal(stored.parent, ambient);
+        assert.equal(stored.assignee, "Other");
+        assert.equal(stored.sprint, "Other");
+        assert.equal(stored.release, "Other");
+        assert.equal(stored.dependencies?.[0].id, ambient);
+      }
       if (mode === "atomic") {
         const linkedFile = join(root, "atomic-linked.csv");
         writeFileSync(linkedFile, serializeCSV([["title", "blocked_by"], ["Legacy dependency", ambient]], ","));

@@ -87,6 +87,15 @@ pm csv import items.csv --dry-run
 pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 ```
 
+**Column ownership on keyed updates:** an absent header means “do not touch”.
+Empty cells also leave existing values alone. A nonempty cell sets a supported
+field; `none` explicitly clears `parent`, `sprint` or `release`. Tags are additive;
+`blocked_by` adds a blocker without deleting other dependency edges. Custom fields
+are export-only and remain unchanged on import. Thus a title-only `--key title`
+reimport preserves status, assignment, planning fields, body, links and custom data.
+New items explicitly suppress implicit focus parents and planning defaults.
+Spreadsheet edit sessions have their own documented explicit-clear contract.
+
 **Flags**
 
 | Flag | Type | Default | Description |
@@ -541,7 +550,7 @@ These create-only plans work without git. Retain the reviewed artifact for retri
 
 CSV mutations use explicit source-owned scope: missing or empty create parents
 are unset through the SDK, so session focus cannot add links. Empty supported
-scope columns clear legacy keyed-import scope; spreadsheet patches preserve
+scope cells preserve legacy keyed-import state; spreadsheet patches preserve
 unselected fields. Join replay refuses unreviewed stored scope. Public join
 failures consistently use `JoinRefusal`, with lower-level `sourceCode` and remedy
 retained. See [scope and refusal contracts](docs/join-plans.md#explicit-scope-and-refusal-boundaries).

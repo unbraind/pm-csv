@@ -6,10 +6,10 @@ status: in_progress
 priority: 2
 tags: []
 created_at: "2026-10-25T22:22:43.054Z"
-updated_at: "2026-10-26T05:06:05.751Z"
+updated_at: "2026-10-26T22:57:56.916Z"
 author: codex-agent
-acceptance_criteria: "A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives. Every mutation path uses shared explicit relationship/scope intent; random focus and cwd changes cannot add unreviewed relationships, and divergent old scope refuses replay. Public join APIs expose only JoinRefusal and preserve lower-level source codes and remedies for malformed CSV, encoding and SDK failures."
-comments[14]{created_at,author,text}:
+acceptance_criteria: "A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives. Every mutation path uses shared explicit relationship/scope intent; random focus and cwd changes cannot add unreviewed relationships, and divergent old scope refuses replay. Public join APIs expose only JoinRefusal and preserve lower-level source codes and remedies for malformed CSV, encoding and SDK failures.; Keyed imports preserve absent columns and empty cells, accept title-only reimport, apply explicit supported edits exactly, and never invent ambient scope defaults; At least 500 seeded column-ownership sequences prove silence, unchanged round trips, explicit edits and older-input replay through SDK read-back across relationships and custom data"
+comments[17]{created_at,author,text}:
   "2026-10-25T22:22:45.644Z",codex-agent,"Overlap check: inspected core SDK contracts, CSV relational import/export and single-table schema contracts, plus Jira, Linear, ADO and Beads adapters. No cross-selected-table external-key join planner found. Provider key mapping remains adapter-owned; join declarations are explicit. Validation will cover non-git trackers, stale revisions, ambiguous/unresolved coordinates, replay, and SDK state readback. Host write-fencing limitation is already tracked by pm-csv-sdk-write-fence."
   "2026-10-25T22:24:03.715Z",codex-agent,"Implement bounded create-only cross-table plans. SDK-generated native IDs are persisted in reviewed plans; external keys never become native identities. Plans embed captured CSV sources with exact SHA-256 digests, explicit scalar mappings and parent/blocked_by declarations. Validate the whole selected graph before writes. Use the SDK create lifecycle and workspace transaction coordinator; inspect exact owned history and current documents on every retry, skip foreign collisions and their dependents, and refuse edited owned targets. No additional shared cache/outbox/lease files. Append-only compensation closes only unchanged owned creates, never deletes tracker records."
   "2026-10-25T22:36:34.558Z",codex,"Targeted tests pass for three-table resolution, zero-byte preview/refusals, foreign-target skip closure, stale owned revisions, strict boundary fuzz, SDK journal transitions, compact commands and safe reconciliation. Model testing uses separate real SDK trackers as the reference oracle so normalization is never hand-written. The pinned SDK normalizes custom status IDs; tests now consume its returned ID. It accepts completedAt only for its configured close status, a host capability limitation to report."
@@ -24,7 +24,10 @@ comments[14]{created_at,author,text}:
   "2026-10-26T04:45:14.853Z",codex-agent,"Follow-up checks passed: linked pm test run executed all 6 mutation-intent regressions; native step-applied crash, compensation crash and concurrent-writer compensation checks passed; 500 ambient-state sequences passed. Focused join/builder coverage is 100% in all dimensions. Documentation now states explicit create clears, legacy keyed-import empty scope clears, preserve-current patch/restore intent, sourceCode/remedy wrapping and rejection of old inherited scope. Full npm/Bun release gates will be rerun in CI on the pushed follow-up head."
   "2026-10-26T05:03:23.567Z",codex-agent,"An additional scope check found that SDK command-input none aliases must be explicit clears too, whereas already stored snapshot strings must stay literal. The shared builder now distinguishes create/patch input from native snapshot state. Focused tests pass for lowercase/uppercase scope-clear aliases, replay after clear, and preservation of literal snapshot values. The seeded ambient model also includes native none scope inputs for the independent SDK reference to normalize."
   "2026-10-26T05:06:04.217Z",codex-agent,"Final builder checks, including native none aliases and literal snapshot preservation, pass. Focused coverage remains 100% lines/branches/functions for join-plans.ts and mutation-intent.ts. The parent-unset behavioral revert was repeated on the final builder and fails as expected; refusal wrapping is unchanged from its independently verified revert proof. The intermediate follow-up head passed npm/Bun release gates; final changed-head CI receipts will be attached to the PR after pushing this last scope fix."
-files[10]{path,scope}:
+  "2026-10-26T22:43:43.927Z",codex-agent,"Re-review identified overbroad scope clearing in keyed legacy imports. Correcting column ownership: absent columns preserve existing values and edges; creates still explicitly suppress invented session defaults. Will prove silence, unchanged round trips and explicit edits with at least 500 seeded model sequences and SDK read-back, plus a behavioral revert proof."
+  "2026-10-26T22:53:39.347Z",codex-agent,"Column ownership correction: keyed updates emit only nonempty source-owned scope fields and never clear silent dependency collections. Missing/empty status preserves existing state; creates retain explicit ambient-default suppression. Body cells reach native SDK normalization without importer trimming. README and import help document preserve/set/native-none clears, additive tags/blockers and export-only custom fields. Revert proof: replacing only appendRelationalArgs with its previous-head clearing implementation makes the fixed title-only review case fail the silence law (parent, assignee, sprint, release and dependency edge removed), exit 1; exact restored bytes pass the fixed case. Focused mutation-intent suite: 6 passed, 0 failed. Seeded column model is running; no full local gate started."
+  "2026-10-26T22:57:55.379Z",codex-agent,"Local verification on the corrected ownership implementation: core CSV plus edge-contract files 91 passed and 0 failed, mutation-intent file 6 passed and 0 failed, linked fixed-review regression 1 passed and 0 failed. Typecheck, test typecheck, build, lint, duplicate scan (0 clones) and docstrings pass. Full 500-sequence/2000-transition column model is assigned to the unchanged npm/Bun CI release gates to respect saturated-host limits; the local exploratory model was stopped rather than run a full gate. SDK read-back comparisons use an independent native model, retain custom objects/resource links, explicitly model atomic provenance tags, and assert original silent dependency records and unchanged round-trip values including edge timestamps. Final exact-head CI receipts will be linked in the PR."
+files[11]{path,scope}:
   atomic-update.ts,project
   index.ts,project
   join-plans.ts,project
@@ -33,13 +36,56 @@ files[10]{path,scope}:
   roundtrip.ts,project
   scripts/validate-join-plans.ts,project
   table-schema.ts,project
+  test/column-ownership.test.ts,project
   test/join-plans.test.ts,project
   test/mutation-intent.test.ts,project
-tests[4]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
-  node --test test/join-plans.test.ts,project,1200,codex-agent,"2026-10-25T22:42:04.478Z",local_mutation,feat/cross-table-join-plans
-  npm run typecheck,project,120,codex-agent,"2026-10-25T22:42:07.353Z",local_mutation,feat/cross-table-join-plans
-  npm run lint,project,120,codex-agent,"2026-10-25T22:42:10.917Z",local_mutation,feat/cross-table-join-plans
-  node --test test/mutation-intent.test.ts,project,300,codex-agent,"2026-10-26T04:39:54.608Z",local_mutation,feat/cross-table-join-plans
+tests[6]:
+  - command: node --test test/join-plans.test.ts
+    scope: project
+    timeout_seconds: 1200
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T22:42:04.478Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: npm run typecheck
+    scope: project
+    timeout_seconds: 120
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T22:42:07.353Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: npm run lint
+    scope: project
+    timeout_seconds: 120
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T22:42:10.917Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: node --test test/mutation-intent.test.ts
+    scope: project
+    timeout_seconds: 300
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T04:39:54.608Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: node --test --test-concurrency=1 test/column-ownership.test.ts
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T22:53:29.549Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: "node --test --test-concurrency=1 --test-name-pattern=\"review regression\" test/column-ownership.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-26T22:56:07.524Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
 docs[3]{path,scope}:
   docs/join-plans.md,project
   docs/join-validation.md,project

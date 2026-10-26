@@ -119,8 +119,9 @@ Stored SDK patch/restore snapshots preserve their literal values and do not
 interpret them as command-input aliases.
 
 Legacy CSV imports use the same builder for standard, streaming, atomic and
-schema-negotiated imports. Their absent or empty supported scope columns clear
-parent, assignment, sprint/release and blocker/dependency values on keyed updates.
+schema-negotiated imports. On keyed updates, absent columns and empty cells
+preserve current values and dependency edges. Nonempty supported cells set values;
+`none` explicitly clears parent/sprint/release, and blocker cells add edges.
 Spreadsheet patches, compensation and marker cleanup preserve unselected native
 scope; raw patches/restores build their selected scope from the current document
 inside the SDK item lock. Native lifecycle policy still owns terminal transitions.
