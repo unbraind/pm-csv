@@ -437,6 +437,15 @@ plus complete CSV export in fresh npm/npx and Bun/bunx projects on the pinned
 development host, and in npm/npx on the declared minimum host. It is mandatory
 inside `npm run release:check`.
 
+Every scenario seeds custom string, number, boolean, ISO date string, list and
+empty-string values through its installed host SDK. Automatic `--all-fields`
+discovery and explicit custom-column selection must export each value exactly,
+including quoted multiline text, zero, false and empty lists. The packed
+package's CSV parser then decodes the export for SDK import into a fresh
+non-git tracker; SDK reads compare every custom value with the source tracker.
+This SDK adapter roundtrip does not certify custom-column support in the legacy
+`pm csv import` command, whose supported columns are listed above.
+
 ```bash
 npm install
 npm run build   # runs tsc → dist/

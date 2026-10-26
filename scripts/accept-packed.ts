@@ -2,6 +2,8 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseCSV } from "../index.ts";
+import { assertCustomFieldExport, CUSTOM_FIELDS } from "./packed-custom-fields.ts";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -25,6 +27,8 @@ interface AcceptanceReceipt {
   readonly stdout_bytes: number;
   readonly stderr_bytes: number;
   readonly all_fields_exported: true;
+  readonly custom_columns_exported: number;
+  readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
   readonly imported_fixture_present: true;
   readonly lineage_imported: 1;
@@ -54,6 +58,8 @@ const cleanEnvironment: NodeJS.ProcessEnv = {
   npm_config_userconfig: devNull,
   NPM_CONFIG_USERCONFIG: devNull,
 };
+// A linked test may select its own tracker. Every scenario owns a fresh one.
+delete cleanEnvironment.PM_PATH;
 for (const key of Object.keys(cleanEnvironment)) {
   if (key.toLowerCase() === "npm_config_allow_scripts") delete cleanEnvironment[key];
 }
@@ -129,6 +135,12 @@ try {
       "progressive",
     ]);
     runPm(scenario, scenarioRoot, ["install", tarball, "--project"]);
+    // Copy this SDK-only fixture module beside the scenario's installed host;
+    // its static SDK import must resolve that host, not the development checkout.
+    writeFileSync(join(scenarioRoot, "packed-custom-fields.mts"), readFileSync(join(repoRoot, "scripts/packed-custom-fields.ts")));
+    run(process.execPath, ["--input-type=module", "-e",
+      'import { seedCustomFields } from "./packed-custom-fields.mts"; await seedCustomFields(process.argv[1]);',
+      join(scenarioRoot, ".agents/pm")], scenarioRoot);
 
     const importedTitle = `Packed CSV import ${scenario.name}`;
     const csvPath = join(scenarioRoot, "acceptance.csv");
@@ -155,6 +167,18 @@ try {
     if (!allFields.stdout.includes(createdTitle) || !allFields.stdout.includes(importedTitle)) {
       throw new Error(`${scenario.name} SDK all-fields export omitted a fixture`);
     }
+    const customExport = JSON.parse(allFields.stdout) as { csv: string };
+    assertCustomFieldExport(parseCSV(customExport.csv));
+    const selectedFields = runPm(scenario, scenarioRoot, ["--json", "csv", "export", "--all-fields",
+      "--columns", ["title", ...CUSTOM_FIELDS.map(([column]) => column)].join(",")]);
+    assertCustomFieldExport(parseCSV((JSON.parse(selectedFields.stdout) as { csv: string }).csv));
+    const roundtripCsv = join(scenarioRoot, "custom-roundtrip.csv");
+    writeFileSync(roundtripCsv, customExport.csv);
+    run(process.execPath, ["--input-type=module", "-e",
+      'import { readFileSync } from "node:fs"; import { parseCSV } from "pm-csv"; '
+      + 'import { reimportCustomFields } from "./packed-custom-fields.mts"; '
+      + 'await reimportCustomFields(process.argv[1], process.argv[2], parseCSV(readFileSync(process.argv[3], "utf8")));',
+      join(scenarioRoot, ".agents/pm"), join(scenarioRoot, "roundtrip-tracker"), roundtripCsv], scenarioRoot);
     const bundleInput = join(scenarioRoot, "lineage.csv");
     writeFileSync(bundleInput, "title,priority,excluded\nPacked lineage,2,omit\n,9,omit\n");
     const firstBundle = join(scenarioRoot, "lineage-first");
@@ -183,6 +207,8 @@ try {
       stdout_bytes: Buffer.byteLength(exported.stdout),
       stderr_bytes: Buffer.byteLength(exported.stderr),
       all_fields_exported: true,
+      custom_columns_exported: CUSTOM_FIELDS.length,
+      custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,
       imported_fixture_present: true,
       lineage_imported: 1,
