@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/unbraind/pm-csv/issues"
   },
-  "homepage": "https://github.com/unbraind/pm-csv#readme",
+  "homepage": "https://pm-cli.unbrained.dev/packages/pm-csv",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -89,7 +89,10 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "author": "@unbraind",
+  "author": {
+    "name": "unbrained",
+    "url": "https://unbrained.dev/about"
+  },
   "pm": {
     "aliases": [
       "csv"
