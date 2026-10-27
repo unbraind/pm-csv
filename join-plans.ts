@@ -366,7 +366,9 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
   const { rows, issues, order } = await compile(settings, plan.input);
   if (rows.length !== plan.ids.length || issues.length) invalid();
   const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
-  const states = await Promise.all(plan.ids.map((id, i) => inspect(pmRoot, id, marker(i), rows[i], plan.ids)));
+  const states: JoinState[] = [];
+  // A refusal must not leave sibling SDK inspections acquiring/releasing leases.
+  for (const [i, id] of plan.ids.entries()) states.push(await inspect(pmRoot, id, marker(i), rows[i], plan.ids));
   const skipped = new Set<number>();
   for (const i of order) {
     const row = rows[i];

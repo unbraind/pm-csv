@@ -5,8 +5,9 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, cpSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { create, update, get, readHistoryEntries, getHistoryPath, WorkspaceTransactionInterruptedError, schemaAddStatus, deleteItem, locateItem, focus } from "@unbrained/pm-cli/sdk";
+import { create, update, get, readHistoryEntries, getHistoryPath, WorkspaceTransactionInterruptedError, schemaAddStatus, deleteItem, locateItem, focus, acquireLock } from "@unbrained/pm-cli/sdk";
 import { applyJoins, previewJoins, JoinRefusal, assertJoinNumbers } from "../join-plans.ts";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { serializeCSV } from "../index.ts";
@@ -103,6 +104,41 @@ test("recovery revalidates current owned revisions even after journal commit", a
     await assert.rejects(applyJoins(root, p, { author: "join-test" }), e => e instanceof JoinRefusal && e.code === "csv_join_target_changed");
     assert.equal(snapshot(root), before);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("preflight refusal waits for earlier SDK leases and returns with no sibling inspections running", async () => {
+  const root = fixture();
+  let release: (() => Promise<void>) | undefined;
+  let retry: Promise<unknown> | undefined;
+  const savedWait = process.env.PM_LOCK_WAIT_MS;
+  try {
+    process.env.PM_LOCK_WAIT_MS = "3000";
+    const p = await plan(root);
+    await applyJoins(root, p, { author: "join-test" });
+    await update(p.ids[1], { title: "Peer edit" }, { pmRoot: root });
+    release = await acquireLock(root, p.ids[0], 30, "peer-test");
+    const before = snapshot(root);
+    let settled = false;
+    retry = applyJoins(root, p, { author: "join-test" }).then(
+      result => { settled = true; return result; },
+      error => { settled = true; return error; },
+    );
+    await delay(150);
+    assert.equal(settled, false, "a later target refusal cannot return while an earlier SDK lease inspection is pending");
+    await release(); release = undefined;
+    const error = await retry;
+    assert.ok(error instanceof JoinRefusal);
+    assert.equal(error.code, "csv_join_target_changed");
+    assert.equal(snapshot(root), before);
+    await delay(150);
+    assert.equal(snapshot(root), before, "no late lease cleanup may change tracker bytes after the public refusal");
+    assert.equal((await get(p.ids[1], {}, { pmRoot: root })).item.title, "Peer edit");
+  } finally {
+    await release?.();
+    await retry;
+    if (savedWait === undefined) delete process.env.PM_LOCK_WAIT_MS; else process.env.PM_LOCK_WAIT_MS = savedWait;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 /** Assert the same structured refusal across malformed SDK and CLI boundaries. */
