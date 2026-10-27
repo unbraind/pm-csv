@@ -20,7 +20,10 @@ pm csv apply planning.csv
 
 For a selection, pass `--ids item-a,item-b` to checkout. The default is a certified
 complete tracker read. A checkout accepts up to 1000 distinct canonical item IDs;
-split larger selections. These examples use illustrative IDs; use IDs from your
+split larger selections. Checkout and apply validate all IDs with the SDK prefix
+before reading targets: bare, case or whitespace aliases and normalized duplicates
+refuse as `csv_session_invalid`. Saved identities are never silently rewritten.
+These examples use illustrative IDs; use IDs from your
 tracker. Files are UTF-8 comma-separated CSV, with quoted multiline cells, and
 can be saved with CRLF or a BOM. Newline-only LF/CRLF conversions in editable
 cells count as unchanged and retain the exact baseline value, including when a

@@ -12,7 +12,7 @@ import {
 import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { assertEditLease } from "./lease-guard.ts";
-import { buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
+import { assertCanonicalMutationIds, buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
 import { captureSettings, inSettingsTransaction, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsChangedIn, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import type { SettingsSnapshot } from "./settings-snapshot.ts";
@@ -363,6 +363,8 @@ async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: 
 async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinApplyOptions): Promise<JoinReceipt> {
   const settings = await readSettings(pmRoot);
   if (settingsDigest(settings) !== plan.settings) throw settingsChanged();
+  assertCanonicalMutationIds(plan.ids, settings.id_prefix, () => new JoinRefusal("csv_join_invalid",
+    "Use distinct canonical native IDs from an unchanged preview. Prefix, case or whitespace aliases cannot identify separate rows; preview a fresh plan."));
   const { rows, issues, order } = await compile(settings, plan.input);
   if (rows.length !== plan.ids.length || issues.length) invalid();
   const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
@@ -492,7 +494,7 @@ function settingsChanged(): JoinRefusal {
 export function registerJoinCommands(api: ExtensionApi): void {
   for (const action of ["preview", "apply"] as const) api.registerCommand({
     name: `csv join ${action}`, description: `${action === "preview" ? "Resolve external table keys without mutations" : "Apply a reviewed cross-table create plan using SDK transactions"}.`,
-    arguments: [{ name: "file", required: true, description: "Version 1 join input (preview) or saved plan (apply) JSON" }],
+    arguments: [{ name: "file", required: true, description: "Version 1 join input or saved plan JSON; saved native IDs must be canonical and distinct under the tracker prefix" }],
     flags: action === "preview" ? [{ long: "--output", value_name: "file", description: "Exclusively create source-bearing plan JSON; never overwrite" }] : [],
     async run(ctx) {
       let value: unknown;

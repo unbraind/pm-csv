@@ -200,3 +200,23 @@ Reproduce with `node --test --test-concurrency=1 test/settings-snapshot.test.ts`
 Installed npm, Bun and minimum-host acceptance also changes settings between
 join rows, checks compensation and stale-plan refusal, previews fresh defaults,
 and verifies real JSON/TOON `csv_join_settings_changed` CLI output.
+
+## Canonical identity review regression
+
+`test/native-identities.test.ts` uses the SDK normalizer for 500 identity families
+across configured prefixes. Validly rehashed plans with bare/canonical collisions
+at every row position refuse before any target lease or journal, including replay;
+the complete tracker byte inventory stays identical. Canonical plans still import
+and replay, and native items written before the change remain readable. Checkout
+selection and rehashed edit sidecars enforce the same shared identity guard.
+
+Every row also fails before and after persistence in one SDK transaction, followed
+by replay. All SDK-visible live documents remain byte-identical to the baseline,
+foreign history is unchanged, and no owned live item remains. Native transaction
+audit/delete history is intentionally retained: the SDK documents each step as an
+append-only compensation and does not erase histories for physical directory
+rollback. Existing tombstone/history regressions remain unchanged.
+
+Installed npm, Bun and minimum-SDK consumers exercise colliding plans through
+both the SDK and real JSON/TOON CLI, and fail before/after each row's persistence.
+Reproduce with `node --test --test-concurrency=1 test/native-identities.test.ts`.

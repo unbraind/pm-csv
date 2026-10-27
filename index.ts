@@ -2996,7 +2996,7 @@ export default {
       description: "Export a conflict-aware CSV edit session and immutable baseline JSON (maximum 1000 items).",
       flags: [
         { long: "--output", value_name: "file", description: "New CSV filename; baseline uses <file>.session.json" },
-        { long: "--ids", value_name: "ids", description: "Comma-separated canonical item IDs (default: complete tracker)" },
+        { long: "--ids", value_name: "ids", description: "Comma-separated distinct canonical item IDs; aliases refuse (default: complete tracker)" },
       ],
       async run(ctx) {
         const output = ctx.options["output"] as string | undefined;

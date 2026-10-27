@@ -79,6 +79,13 @@ the original artifact for crash recovery; a compensated plan requires a fresh pr
 update, export or sync protocol. Existing CSV import/export, spreadsheet checkout
 and row-lineage workflows remain separate APIs.
 
+All saved IDs must be canonical under the reviewed tracker's SDK prefix, and
+uniqueness is checked after SDK identity normalization before any target lease,
+journal or item write. For example, `abcd` and `review-abcd` cannot name two
+rows when the prefix is `review`. Bare, case or whitespace aliases in saved
+artifacts return `csv_join_invalid`, even if the artifact was rehashed. Apply
+never rewrites reviewed IDs to repair an artifact; preview a fresh plan.
+
 Compilation and comparisons use one captured settings/schema view. Type and
 status defaults come from that view's native SDK registries and are passed
 explicitly to create. Live settings reads only revalidate the digest before and
@@ -117,6 +124,12 @@ scope and settings under the SDK item lease. The SDK derived-index lease covers
 removal and authoritative index refresh; the item lease releases last. Foreign
 records and peer edits are preserved. Policy refusal or a changed owned target
 requires explicit journal reconciliation rather than an unsafe cleanup.
+
+Invalid plans leave the entire tracker byte-identical, including history and
+journals. After a persisted row fails, compensation restores byte-identical live
+documents and preserves unrelated records; append-only native audit events and
+the recovery journal remain. It does not erase the audit trail to reproduce the
+entire pre-import directory byte for byte.
 
 An immutable tombstone is recorded before file removal, so interrupted cleanup
 can validate the surviving document against its prior SDK revision and finish

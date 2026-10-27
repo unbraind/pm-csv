@@ -33,6 +33,7 @@ interface AcceptanceReceipt {
   readonly prototype_keys_checked: true;
   readonly atomic_compensation: true;
   readonly settings_snapshot_checked: true;
+  readonly native_identity_checked: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -244,9 +245,10 @@ try {
       'import assert from "node:assert/strict"; import { previewJoins, applyJoins, JoinRefusal } from "pm-csv"; '
       + 'import { listAllComplete, locateItem } from "@unbrained/pm-cli/sdk"; const root = process.argv[1]; '
       + 'const input = { version: 1, tables: [{ name: "tasks", key: "key", csv: "key,title\\na,Atomic first\\nb,Atomic second\\nc,Atomic third\\n", fields: { title: "title" }, references: [] }] }; '
-      + 'for (let row = 0; row < 3; row++) { const { plan } = await previewJoins(root, input); '
+      + 'for (const persisted of [false, true]) for (let row = 0; row < 3; row++) { const { plan } = await previewJoins(root, input); '
       + 'const before = (await listAllComplete({}, { pmRoot: root })).items.length; '
-      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance", onBoundary: (phase, id) => { if (phase === "before_create" && id === plan.ids[row]) throw new Error("Injected refusal"); } }), error => error instanceof JoinRefusal); '
+      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance", onBoundary: (phase, id) => { if (!persisted && phase === "before_create" && id === plan.ids[row]) throw new Error("Injected refusal"); }, '
+      + 'onTransition: event => { if (persisted && event.transition === "step_applied" && event.stepId === plan.ids[row]) throw new Error("Injected persisted refusal"); } }), error => error instanceof JoinRefusal); '
       + 'assert.equal((await listAllComplete({}, { pmRoot: root })).items.length, before); '
       + 'for (const id of plan.ids) assert.equal(await locateItem(root, id), null); }',
       join(scenarioRoot, ".agents/pm")], scenarioRoot);
@@ -266,6 +268,22 @@ try {
     for (const format of [["--json"], []]) {
       const refused = runPm(scenario, scenarioRoot, ["csv", "join", "apply", join(scenarioRoot, "scope-plan.json"), ...format], 2);
       if (!(refused.stdout + refused.stderr).includes("csv_join_settings_changed")) throw new Error(`${scenario.name} did not preserve the settings refusal family`);
+    }
+    const identityPlan = join(scenarioRoot, "identity-plan.json");
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { createHash } from "node:crypto"; import { writeFileSync, readFileSync, readdirSync } from "node:fs"; import { join } from "node:path"; '
+      + 'import { previewJoins, applyJoins, JoinRefusal, exportEditSession, EditRefusal } from "pm-csv"; import { normalizeItemId, readSettings } from "@unbrained/pm-cli/sdk"; '
+      + 'const [root, output] = process.argv.slice(1), prefix = (await readSettings(root)).id_prefix; '
+      + 'const input = { version: 1, tables: [{ name: "tasks", key: "key", csv: "key,title\\na,Identity first\\nb,Identity second\\nc,Identity third\\n", fields: { title: "title" }, references: [] }] }; '
+      + 'const { plan } = await previewJoins(root, input); const bare = "identityalias"; const { digest, ...base } = { ...plan, ids: [bare, normalizeItemId(bare, prefix), plan.ids[2]] }; '
+      + 'const invalid = { ...base, digest: createHash("sha256").update(JSON.stringify(base)).digest("hex") }; '
+      + 'const bytes = () => JSON.stringify(readdirSync(root, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => [join(e.parentPath, e.name).slice(root.length), readFileSync(join(e.parentPath, e.name)).toString("base64")]).sort()); '
+      + 'const before = bytes(); for (let retry = 0; retry < 2; retry++) { await assert.rejects(applyJoins(root, invalid, { author: "packed-acceptance" }), error => error instanceof JoinRefusal && error.code === "csv_join_invalid"); assert.equal(bytes(), before); } '
+      + 'await assert.rejects(exportEditSession(root, [normalizeItemId("abcd", prefix), "abcd"]), error => error instanceof EditRefusal && error.code === "csv_session_invalid"); assert.equal(bytes(), before); writeFileSync(output, JSON.stringify(invalid));',
+      join(scenarioRoot, ".agents/pm"), identityPlan], scenarioRoot);
+    for (const format of [["--json"], []]) {
+      const refused = runPm(scenario, scenarioRoot, ["csv", "join", "apply", identityPlan, ...format], 2);
+      if (!(refused.stdout + refused.stderr).includes("csv_join_invalid")) throw new Error(`${scenario.name} accepted an aliased native identity plan`);
     }
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
@@ -288,6 +306,7 @@ try {
       prototype_keys_checked: true,
       atomic_compensation: true,
       settings_snapshot_checked: true,
+      native_identity_checked: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

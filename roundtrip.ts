@@ -1,4 +1,4 @@
-import { explicitDocumentMutation } from "./mutation-intent.ts";
+import { assertCanonicalMutationIds, explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
@@ -111,6 +111,7 @@ async function exportEditSessionInternal(pmRoot: string, ids: readonly string[])
   if (ids.length > 1000 || new Set(ids).size !== ids.length || ids.some(id => !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id))) {
     throw new EditRefusal("csv_session_invalid", "Export at most 1000 distinct canonical item IDs; split larger selections.");
   }
+  assertCanonicalMutationIds(ids, (await readSettings(pmRoot)).id_prefix, canonicalIdsRequired);
   const rows: EditSessionRow[] = [];
   for (const id of ids) rows.push(await snapshot(pmRoot, id));
   const base = { version: 1 as const, id: randomUUID(), rows };
@@ -249,7 +250,9 @@ function findConflicts(error: unknown): EditConflict[] {
 async function applyEditSessionInternal(
   pmRoot: string, session: EditSession, table: string[][], options: { author: string; dryRun?: boolean; onTransition?: CommitWorkspaceTransactionOptions["onTransition"] },
 ): Promise<EditReceipt> {
-  const planned = plans(session, table, (await readSettings(pmRoot)).schema);
+  const settings = await readSettings(pmRoot);
+  assertCanonicalMutationIds(session.rows.map(row => row.id), settings.id_prefix, canonicalIdsRequired);
+  const planned = plans(session, table, settings.schema);
   const transaction = `csv-edit-${digest([session.digest, table])}`;
   const edited = planned.filter(plan => plan.fields.length > 0);
   const found: EditConflict[] = [];
@@ -301,6 +304,11 @@ async function applyEditSessionInternal(
   }
   await verifySettings(pmRoot);
   return { ...receipt, applied, transaction };
+}
+
+/** Keep alias/duplicate identity refusals in the spreadsheet API family. */
+function canonicalIdsRequired(): EditRefusal {
+  return new EditRefusal("csv_session_invalid", "Use distinct canonical native IDs from an unchanged checkout; prefix, case and whitespace aliases cannot identify separate rows.");
 }
 
 /** Bind each edit attempt, including comparisons and compensation, to stable settings. */

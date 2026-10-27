@@ -568,6 +568,11 @@ After compensation, preview fresh identities. Configured type/field lookups neve
 accept inherited object properties, while prototype-looking external keys remain
 literal data. Foreign records and peer edits are preserved.
 
+Saved join and checkout IDs must use distinct canonical native spellings under
+the reviewed SDK prefix. All IDs validate before target leases or writes;
+`abcd` and `review-abcd` cannot identify two rows with prefix `review`, even in
+a correctly rehashed artifact. Preview a fresh plan after `csv_join_invalid`.
+
 Join planning captures one settings/schema snapshot. Create type and status
 defaults are resolved from that snapshot before writes; every mutation batch
 rechecks its digest inside SDK writer coordination. A settings change between

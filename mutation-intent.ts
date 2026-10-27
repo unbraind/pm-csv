@@ -4,6 +4,17 @@ import type { create, mutateItem, ItemDocument, readSettings } from "@unbrained/
 
 /** Native create/update options accepted by the shared explicit-scope builder. */
 type MutationOptions = NonNullable<Parameters<typeof create>[0]>;
+
+/**
+ * Validate a whole saved identity vector before any lease or mutation. SDK writes
+ * normalize local IDs; raw-distinct aliases must never become separate steps for
+ * one native item. Saved artifacts require canonical spellings rather than
+ * silently changing reviewed identities, digests or ownership markers.
+ */
+export function assertCanonicalMutationIds(ids: readonly string[], prefix: string, refuse: () => Error): void {
+  const normalized = Array.from(ids, id => typeof id === "string" ? nativeSdk.normalizeItemId(id, prefix) : undefined);
+  if (new Set(normalized).size !== ids.length || normalized.some((id, index) => id === undefined || id !== ids[index])) throw refuse();
+}
 /** Scope scalars have native option spellings and SDK unset metadata names. */
 const SCALARS = [
   ["parent", "parent"], ["assignee", "assignee"], ["sprint", "sprint"], ["release", "release"],
