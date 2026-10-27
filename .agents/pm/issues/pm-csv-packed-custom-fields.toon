@@ -6,7 +6,7 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-10-26T08:13:37.474Z"
-updated_at: "2026-10-27T09:09:19.708Z"
+updated_at: "2026-10-27T09:42:07.124Z"
 closed_at: "2026-10-27T09:09:18.352Z"
 completed_at: "2026-10-26T15:02:23.000Z"
 author: codex-agent
@@ -15,7 +15,7 @@ repro_steps: Run NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_PREFER_OFFLINE=true 
 resolution: "Merged PR #202 at 6350dc85597f9019a9148b1ac44221467546ed62; inspected test/packed-custom-fields.test.ts and ran NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_PREFER_OFFLINE=true NPM_CONFIG_FETCH_TIMEOUT=30000 NPM_CONFIG_FETCH_RETRIES=1 node --test --test-concurrency=2 test/packed-custom-fields.test.ts on main. Installed npm-current, Bun-current and minimum hosts export six custom columns and round-trip values through the SDK on non-git trackers; invalid proof fixtures refuse. CLI custom-column import remains a separate open issue."
 expected_result: "Seed string, number, boolean, date, list and empty custom fields through the installed host SDK in a non-git tracker; assert packed exports column by column; re-import into a fresh tracker and compare SDK state; regression fails after behavioral revert; targeted tests, typecheck and lint pass; CI npm and Bun release gates pass."
 actual_result: "Installed npm-current, Bun-current and minimum hosts export six custom columns and round-trip values through the SDK on non-git trackers; invalid proof fixtures refuse. CLI custom-column import remains a separate open issue."
-comments[11]{created_at,author,text}:
+comments[12]{created_at,author,text}:
   "2026-10-26T08:17:29.187Z",codex-agent,"Searched active and historical tracker items; this acceptance gap is distinct from the merged SDK adoption task. Plan: seed six custom columns through each installed SDK in non-git trackers, check discovery and explicit selection cell by cell, add behavioral regression/revert proof, and verify re-import state through the SDK. Runtime schemas encode dates as ISO string values. The legacy importer currently ignores custom columns; requested scope clarification while implementing export proof."
   "2026-10-26T08:23:48.700Z",codex-agent,"Acceptance scope remains export proof plus SDK import-adapter roundtrip: packed CSV decoding feeds a fresh tracker, then source and destination custom metadata are compared through SDK reads. Legacy CLI import custom-column support is a distinct feature tracked by pm-csv-import-custom-columns. Linked test isolation clears inherited PM_PATH so each scenario owns its non-git tracker."
   "2026-10-26T08:26:03.644Z",codex-agent,"Minimum-host diagnosis: schemaAddField(name, {type}) silently registers a string in pm 2026.8.20 because its dispatcher reads fieldType. The fixture supplies both typed and legacy option names and asserts the SDK registry types before persisting data with commitImportedItem. This avoids normalizing a broken seed into expected values; every SDK read must match the original typed fixture. No host dependency bump or upstream modification."
@@ -27,6 +27,7 @@ comments[11]{created_at,author,text}:
   "2026-10-27T09:07:00.213Z",codex-agent,"Closure audit: the custom-export oracle test passed, but the installed-matrix child exceeded its unchanged 290-second deadline without a complete receipt. No closure is justified by that attempt. Retry with cached-package preference and bounded registry fetches; keep all assertions, timeouts and thresholds unchanged."
   "2026-10-27T09:07:10.677Z",codex-agent,"Closure audit: verify every acceptance criterion on current main against merged PR #202 (6350dc85597f9019a9148b1ac44221467546ed62), inspect test/packed-custom-fields.test.ts, and run the focused linked check before closing. Completion will be the merge timestamp 2026-10-26T15:02:23Z."
   "2026-10-27T09:09:17.243Z",codex-agent,"Merged PR #202 at 6350dc85597f9019a9148b1ac44221467546ed62; inspected test/packed-custom-fields.test.ts and ran NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_PREFER_OFFLINE=true NPM_CONFIG_FETCH_TIMEOUT=30000 NPM_CONFIG_FETCH_RETRIES=1 node --test --test-concurrency=2 test/packed-custom-fields.test.ts on main. Installed npm-current, Bun-current and minimum hosts export six custom columns and round-trip values through the SDK on non-git trackers; invalid proof fixtures refuse. CLI custom-column import remains a separate open issue. Full unchanged npm and Bun release gates run in CI for this tracker-only closure PR; prior behavioral revert evidence remains in the merged implementation history."
+  "2026-10-27T09:42:07.123Z",codex-agent,"Bounded CI watch: required checks at 27a4329220e55d3f37631da302eb02429c66e93a remain pending after approximately 28 minutes: test (26), test (22). Runs: https://github.com/unbraind/pm-csv/actions/runs/40479213925. No red check was reported; runner scheduling has not completed these jobs. This append-only receipt changes tracker evidence only. The final receipt commit will have its own CI; no full release-gate pass is claimed for a pending head, and the orchestrator pipeline must wait before merging."
 files[3]{path,scope}:
   scripts/accept-packed.ts,project
   scripts/packed-custom-fields.ts,project
