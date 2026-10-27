@@ -89,7 +89,8 @@ pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 
 **Column ownership on keyed updates:** an absent header means “do not touch”.
 Empty cells also leave existing values alone. A nonempty cell sets a supported
-field; `none` explicitly clears `parent`, `sprint` or `release`. Tags are additive;
+field; `none` or `null` (case-insensitive) explicitly clears a supported nullable scope
+field: `parent`, `assignee`, `sprint`, `release` or `blocked_by`. Tags are additive;
 `blocked_by` adds a blocker without deleting other dependency edges. Custom fields
 are export-only and remain unchanged on import. Thus a title-only `--key title`
 reimport preserves status, assignment, planning fields, body, links and custom data.

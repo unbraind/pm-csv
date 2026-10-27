@@ -113,15 +113,15 @@ A create with no parent uses the SDK's `unset: ["parent"]` form; an empty CSV
 parent cell never means “inherit the current focus”. Absent create assignment,
 reviewer, sprint/release, goal/objective and blocker fields are also explicitly
 unset, and absent dependency/file/doc/test collections are explicitly cleared.
-The intent never reads session focus or the working directory. Native `none`
-clear aliases for parent/sprint/release are converted to explicit unsets too.
+The intent never reads session focus or the working directory. Native `none`/`null`
+clear aliases for every supported nullable scope scalar and linked collection are converted to explicit unsets too.
 Stored SDK patch/restore snapshots preserve their literal values and do not
 interpret them as command-input aliases.
 
 Legacy CSV imports use the same builder for standard, streaming, atomic and
 schema-negotiated imports. On keyed updates, absent columns and empty cells
 preserve current values and dependency edges. Nonempty supported cells set values;
-`none` explicitly clears parent/sprint/release, and blocker cells add edges.
+`none`/`null` explicitly clear supported nullable scope fields, and blocker cells add edges.
 Spreadsheet patches, compensation and marker cleanup preserve unselected native
 scope; raw patches/restores build their selected scope from the current document
 inside the SDK item lock. Native lifecycle policy still owns terminal transitions.

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseCSV } from "../index.ts";
+import { decode } from "@toon-format/toon";
 import { assertCustomFieldExport, CUSTOM_FIELDS } from "./packed-custom-fields.ts";
 
 /** Package fields that define the packed acceptance matrix. */
@@ -27,6 +28,7 @@ interface AcceptanceReceipt {
   readonly stdout_bytes: number;
   readonly stderr_bytes: number;
   readonly all_fields_exported: true;
+  readonly scope_clear_aliases_replayed: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -101,6 +103,7 @@ function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): Spawn
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pm-csv-packed-acceptance-"));
 try {
+  cleanEnvironment.GIT_CEILING_DIRECTORIES = temporaryRoot;
   const packRoot = join(temporaryRoot, "pack");
   mkdirSync(packRoot);
   run(npmCommand, ["pack", "--silent", "--pack-destination", packRoot], repoRoot);
@@ -180,16 +183,32 @@ try {
       + 'await reimportCustomFields(process.argv[1], process.argv[2], parseCSV(readFileSync(process.argv[3], "utf8")));',
       join(scenarioRoot, ".agents/pm"), join(scenarioRoot, "roundtrip-tracker"), roundtripCsv], scenarioRoot);
     const bundleInput = join(scenarioRoot, "lineage.csv");
-    writeFileSync(bundleInput, "title,priority,excluded\nPacked lineage,2,omit\n,9,omit\n");
+    writeFileSync(bundleInput, "title,priority,assignee,excluded\nPacked lineage,2,none,omit\n,9,null,omit\n");
     const firstBundle = join(scenarioRoot, "lineage-first");
-    const bundleOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority", "--output", firstBundle]);
+    const bundleOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority,assignee", "--output", firstBundle]);
     const receipt = JSON.parse(bundleOutput.stdout) as Record<string, unknown>;
     if (receipt.imported !== 1 || receipt.rejected !== 1 || receipt.replayed !== 0) throw new Error(`${scenario.name} lineage import counts differ`);
     const manifest = readFileSync(join(firstBundle, "manifest.json"), "utf8");
     if (manifest.includes("excluded") || manifest.includes('"omit"')) throw new Error(`${scenario.name} lineage disclosed excluded cells`);
-    const retryOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority", "--output", join(scenarioRoot, "lineage-replay")]);
+    const retryOutput = runPm(scenario, scenarioRoot, ["--json", "csv", "bundle", bundleInput, "--columns", "title,priority,assignee", "--output", join(scenarioRoot, "lineage-replay")]);
     const replay = JSON.parse(retryOutput.stdout) as Record<string, unknown>;
     if (replay.imported !== 0 || replay.replayed !== 1 || replay.rejected !== 1) throw new Error(`${scenario.name} lineage replay duplicated an import`);
+    const joinSource = join(scenarioRoot, "scope-joins.json"), joinPlan = join(scenarioRoot, "scope-plan.json");
+    writeFileSync(joinSource, JSON.stringify({ version: 1, tables: [{ name: "scope", key: "key",
+      csv: "key,title,assignee,sprint,release\na,Scope none,none,null,NONE\nb,Scope null, NuLl ,NONE,null\n",
+      fields: { title: "title", assignee: "assignee", sprint: "sprint", release: "release" }, references: [] }] }));
+    const joinPreview = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "join", "preview", joinSource, "--output", joinPlan, "--json"]).stdout) as { ok: boolean };
+    if (!joinPreview.ok) throw new Error(`${scenario.name} scope preview failed`);
+    const joinApplied = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "join", "apply", joinPlan, "--json"]).stdout) as { applied: number };
+    const joinReplay = decode(runPm(scenario, scenarioRoot, ["csv", "join", "apply", joinPlan]).stdout) as { unchanged: number };
+    if (joinApplied.applied !== 2 || joinReplay.unchanged !== 2) throw new Error(`${scenario.name} native clear aliases did not apply/replay`);
+    // This static import resolves the scenario-local host, independently of the development SDK.
+    run(process.execPath, ["--input-type=module", "-e",
+      'import { get } from "@unbrained/pm-cli/sdk"; import { readFileSync } from "node:fs"; '
+      + 'for (const id of JSON.parse(readFileSync(process.argv[2], "utf8")).ids) { '
+      + 'const { item } = await get(id, {}, { pmRoot: process.argv[1] }); '
+      + 'for (const field of ["parent", "assignee", "sprint", "release"]) if (item[field] !== undefined) throw new Error("Unreviewed scope: " + field); }',
+      join(scenarioRoot, ".agents/pm"), joinPlan], scenarioRoot);
     const schemaInput = join(scenarioRoot, "negotiated.csv");
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
@@ -207,6 +226,7 @@ try {
       stdout_bytes: Buffer.byteLength(exported.stdout),
       stderr_bytes: Buffer.byteLength(exported.stderr),
       all_fields_exported: true,
+      scope_clear_aliases_replayed: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

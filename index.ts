@@ -3033,7 +3033,7 @@ export default {
         "--source to record import provenance in the csv_source field, and " +
         "--status/--type/--priority to import only matching rows (others are skipped). " +
         "Keyed updates preserve absent columns and empty cells; nonempty cells set supported fields. " +
-        "Use none to clear parent/sprint/release; tags are additive and dependency edges are preserved. " +
+        "Use none/null to clear parent/assignee/sprint/release/blocked_by; tags are additive and dependency edges are preserved. " +
         "Custom fields are export-only. Creates suppress implicit focus and planning defaults. " +
         "Use --strict to fail before writing when row-level data issues are present.",
       arguments: [{ name: "file", required: true, description: "CSV file to import" }],

@@ -12,11 +12,16 @@ const SCALARS = [
 const LINKS = [["dep", "clearDeps", "--dep", "--clear-deps"], ["file", "clearFiles", "--file", "--clear-files"],
   ["doc", "clearDocs", "--doc", "--clear-docs"], ["test", "clearTests", "--test", "--clear-tests"]] as const;
 
+/** Recognize native command clear aliases without interpreting persisted snapshot values. */
+function isScopeClearAlias(value: string): boolean {
+  return ["none", "null"].includes(value.trim().toLowerCase());
+}
+
 /**
  * Freeze relationship/scope intent before native mutation. Creates explicitly unset
  * absent scalars and clear absent links. Patches preserve unselected fields; an
  * explicitly present empty/undefined scalar clears it. Neither mode reads focus,
- * templates, working directories or other ambient session state. Native `none`
+ * templates, working directories or other ambient session state. Native `none`/`null`
  * scope-clear aliases become explicit unsets; snapshot mode preserves already
  * stored strings literally instead of interpreting command-input aliases.
  */
@@ -27,13 +32,13 @@ export function buildMutationIntent(options: MutationOptions, mode: "create" | "
     if (mode !== "create" && !Object.hasOwn(options, option)) continue;
     const value = options[option];
     const present = mode === "snapshot" ? value !== undefined : Boolean(value?.trim()) &&
-      !(["parent", "sprint", "release"].includes(field) && value!.trim().toLowerCase() === "none");
+      !isScopeClearAlias(value!);
     if (present) unset.delete(field);
     else { delete result[option]; unset.add(field); }
   }
   for (const [option, clear] of LINKS) {
     if (mode !== "create" && !Object.hasOwn(options, option)) continue;
-    if (options[option]?.length) result[clear] = false;
+    if (options[option]?.length && (mode === "snapshot" || !options[option]!.every(isScopeClearAlias))) result[clear] = false;
     else { delete result[option]; result[clear] = true; }
   }
   result.unset = [...unset];

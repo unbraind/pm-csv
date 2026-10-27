@@ -50,5 +50,6 @@ test("packed acceptance proves custom columns on every installed host", { timeou
   for (const receipt of output.receipts) {
     assert.equal(receipt.custom_columns_exported, 6, String(receipt.scenario));
     assert.equal(receipt.custom_fields_sdk_roundtrip, true, String(receipt.scenario));
+    assert.equal(receipt.scope_clear_aliases_replayed, true, String(receipt.scenario));
   }
 });

@@ -108,7 +108,7 @@ recovery tests also pass, including compensation and a competing writer.
 
 Legacy keyed updates now own only nonempty supported CSV cells. Absent headers
 and empty cells preserve current values, native links and dependency edges;
-`none` retains its native explicit-clear meaning for parent/sprint/release.
+`none`/`null` retain native explicit-clear semantics for supported nullable scope fields.
 Creates still unset absent scope through the shared builder. Body cells retain
 source whitespace until the SDK applies its native normalization. README and
 import command help describe this ownership contract, additive tags/blockers,
@@ -131,3 +131,19 @@ The behavioral revert replaces only `appendRelationalArgs` with the clearing
 implementation from the previous head. The fixed review case fails the silence
 law, losing parent, assignment, planning values and the dependency edge. Restoring
 the changed function makes that regression pass.
+
+## Native clear-alias review
+
+The intent builder recognizes both native `none` and `null` command aliases for
+all eight scope scalars and dependency/file/doc/test collections, including case
+and surrounding-whitespace variants. It emits explicit SDK unsets/clear flags;
+stored snapshots preserve literal strings and omitted patch fields remain silent.
+
+`test/scope-aliases.test.ts` exhaustively compares every scalar and linked
+collection against an independent native SDK create/update oracle in non-git
+trackers. It checks snapshots and silent patches, joins and retries, lineage
+replay, standard/streaming/atomic/schema imports, and real JSON/TOON CLI receipts.
+The existing 500-seed ambient-state model also varies assignment/planning clear
+aliases. Packed npm-current, Bun-current and minimum-host acceptance exercise
+join apply/retry and lineage clear aliases, then read scope through each installed
+host's SDK. Mixed alias/concrete collection inputs retain native refusal behavior.
