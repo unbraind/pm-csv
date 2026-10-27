@@ -254,7 +254,7 @@ async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids
       throw new JoinRefusal("csv_join_target_changed", "An owned target has changed since import. Read current items through the SDK, reconcile the interrupted import, and preview a fresh plan; never replay saved inputs over newer state.");
     }
     const parent = row.edges.find(edge => edge.kind === "parent");
-    if (!matchesMutationScope(document, { ...row.options, parent: parent ? ids[parent.target] : undefined },
+    if (!matchesMutationScope(document, { ...row.options, parent: parent ? ids[parent.target] : undefined }, settings,
       row.edges.filter(edge => edge.kind === "blocked_by").map(edge => ({ id: ids[edge.target], kind: edge.kind })))) {
       throw new JoinRefusal("csv_join_target_changed", "Current scope differs from the reviewed sources. Reconcile unreviewed parent, assignment, planning or dependency links and preview a new plan before replaying.");
     }

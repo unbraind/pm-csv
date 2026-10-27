@@ -96,6 +96,11 @@ are export-only and remain unchanged on import. Thus a title-only `--key title`
 reimport preserves status, assignment, planning fields, body, links and custom data.
 New items explicitly suppress implicit focus parents and planning defaults.
 Spreadsheet edit sessions have their own documented explicit-clear contract.
+Replay compares command values through SDK field normalization: local parents such
+as `abcd`, `#ABCD` and `pm-abcd` resolve using the tracker prefix; provider locators
+retain their native spelling. Assignment/planning whitespace and clear aliases
+follow native command semantics. Stored edit-session values instead use SDK document
+canonicalization, preserving literal strings such as `none`.
 
 **Flags**
 

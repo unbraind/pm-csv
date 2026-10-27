@@ -90,7 +90,7 @@ function planMapping(table: readonly string[][], options: LineageOptions): Linea
 async function existingRow(pmRoot: string, id: string, marker: string, intent: Parameters<typeof create>[0]): Promise<"replayed" | "identity_conflict" | undefined> {
   if (!await locateItem(pmRoot, id)) return undefined;
   const document = await readUpdateDocument(pmRoot, id);
-  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!) ? "replayed" : "identity_conflict";
+  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!, await readSettings(pmRoot)) ? "replayed" : "identity_conflict";
 }
 /** Import bounded rows with native SDK validation/history/locking and stable explicit IDs.
  * Rejected artifacts contain only allowed columns plus a stable retry key. Replaying

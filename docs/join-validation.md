@@ -147,3 +147,23 @@ The existing 500-seed ambient-state model also varies assignment/planning clear
 aliases. Packed npm-current, Bun-current and minimum-host acceptance exercise
 join apply/retry and lineage clear aliases, then read scope through each installed
 host's SDK. Mixed alias/concrete collection inputs retain native refusal behavior.
+
+
+Native input replay uses the public SDK parent-reference and relationship-ID
+normalizers, sprint/release validation and document canonicalization. Every shared
+scope comparison receives the tracker settings explicitly. Raw parent aliases are
+never compared directly with persisted IDs, and expected dependency IDs use the
+same SDK reference normalizer. Older supported hosts that store trimmed parent
+spellings use their public parent-value normalizer; dependency IDs still follow
+that host's ID normalization. Packed oracles compare against native create/get
+on each installed host, including the minimum version. Edit sessions canonicalize their desired stored
+values with `canonicalDocument`, including leading blank body lines; they do not
+interpret command clear aliases.
+
+`test/native-replay.test.ts` covers the exact bare-parent atomic retry, all twelve
+legacy import fields across atomic/standard/stream/schema paths, native remote
+locators, hash/case/prefix variants, whitespace, Unicode and sentinels. Seeds
+1..500 import and replay both joins and lineage (1000 successful replayed rows),
+comparing full SDK documents and immutable histories with their post-import model.
+The installed npm/Bun/minimum-host acceptance also repeats an atomic bare-parent
+import in JSON and TOON and replays a body edit, checking native SDK reads/history.

@@ -5,7 +5,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { create, update, focus, commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
+import { create, update, focus, readSettings, commitWorkspaceTransaction } from "@unbrained/pm-cli/sdk";
 import type { ItemDocument } from "@unbrained/pm-cli/sdk";
 import { decode } from "@toon-format/toon";
 import { buildMutationIntent, matchesMutationScope, mutationScopeArguments } from "../mutation-intent.ts";
@@ -54,7 +54,7 @@ test("every scope scalar and linked collection follows native none/null semantic
         const expected = await create(options, { pmRoot: f.oracle });
         const document = await readUpdateDocument(f.root, actual.item.id);
         assert.deepEqual(scope(document), scope(await readUpdateDocument(f.oracle, expected.item.id)), `${option}=${JSON.stringify(alias)} create`);
-        assert.equal(matchesMutationScope(document, options, document.metadata.dependencies), true, `${option} create comparison`);
+        assert.equal(matchesMutationScope(document, options, await readSettings(f.root), document.metadata.dependencies), true, `${option} create comparison`);
         await update(actual.item.id, buildMutationIntent({ [option]: alias }, "patch"), { pmRoot: f.root });
         await update(expected.item.id, { [option]: alias }, { pmRoot: f.oracle });
         assert.deepEqual(scope(await readUpdateDocument(f.root, actual.item.id)), scope(await readUpdateDocument(f.oracle, expected.item.id)), `${option} patch`);

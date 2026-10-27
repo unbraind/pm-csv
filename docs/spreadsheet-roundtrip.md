@@ -23,7 +23,7 @@ normal conflict checks. Keep column names/order and digest cells intact.
 Rows may be reordered or omitted. Omission never deletes an item. Blank optional
 scalar cells unset that metadata; blank body clears it. Priority must be 0..4,
 and title must be nonblank. Scalar edits must be trimmed. Body uses the host's
-canonical trailing-whitespace normalization. Checkout prefixes editable values
+canonical document normalization, which removes leading blank body lines and trailing whitespace. Checkout prefixes editable values
 that start with `=`, `+`, `-`, `@`, tab, carriage return or an apostrophe
 with an apostrophe. Apply removes one recognized display prefix before comparison
 and storage, preserving raw baseline values and digests. Keep these prefixes when

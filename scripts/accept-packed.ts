@@ -29,6 +29,7 @@ interface AcceptanceReceipt {
   readonly stderr_bytes: number;
   readonly all_fields_exported: true;
   readonly scope_clear_aliases_replayed: true;
+  readonly native_reference_replayed: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -209,6 +210,26 @@ try {
       + 'const { item } = await get(id, {}, { pmRoot: process.argv[1] }); '
       + 'for (const field of ["parent", "assignee", "sprint", "release"]) if (item[field] !== undefined) throw new Error("Unreviewed scope: " + field); }',
       join(scenarioRoot, ".agents/pm"), joinPlan], scenarioRoot);
+    // Reproduce bare local parent replay through each installed CLI and SDK.
+    runPm(scenario, scenarioRoot, ["create", "--title", "Packed parent", "--id", "abcd", "--unset", "parent"]);
+    const nativeInput = join(scenarioRoot, "native-reference.csv");
+    writeFileSync(nativeInput, "title,parent,assignee,sprint,release\r\nPacked bare reference,#ABCD, NuLl ,none,NONE\r\n");
+    runPm(scenario, scenarioRoot, ["csv", "import", nativeInput, "--atomic", "--json"]);
+    runPm(scenario, scenarioRoot, ["csv", "import", nativeInput, "--atomic"]);
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { create, get, listAllComplete, getHistoryPath } from "@unbrained/pm-cli/sdk"; '
+      + 'import { readFileSync } from "node:fs"; import { importCSV, exportEditSession, applyEditSession } from "pm-csv"; '
+      + 'const pmRoot = process.argv[1]; const items = await listAllComplete({ full: true }, { pmRoot }); '
+      + 'const matches = items.items.filter(item => item.title === "Packed bare reference"); assert.equal(matches.length, 1); const id = matches[0].id; '
+      + 'const saved = await get(id, { full: true }, { pmRoot }); '
+      + 'const oracle = await create({ title: "SDK parent oracle", parent: "#ABCD" }, { pmRoot }); '
+      + 'assert.equal(saved.item.parent, (await get(oracle.item.id, { full: true }, { pmRoot })).item.parent); '
+      + 'const checkout = await exportEditSession(pmRoot, [id]); checkout.table[1][checkout.table[0].indexOf("body")] = "\\n\\nEdited packed body  "; '
+      + 'assert.equal((await applyEditSession(pmRoot, checkout.session, checkout.table, { author: "packed-acceptance" })).applied, 1); '
+      + 'const before = readFileSync(getHistoryPath(pmRoot, id), "utf8"); '
+      + 'assert.equal((await applyEditSession(pmRoot, checkout.session, checkout.table, { author: "packed-acceptance" })).unchanged, 1); '
+      + 'assert.equal(readFileSync(getHistoryPath(pmRoot, id), "utf8"), before);',
+      join(scenarioRoot, ".agents/pm")], scenarioRoot);
     const schemaInput = join(scenarioRoot, "negotiated.csv");
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
@@ -227,6 +248,7 @@ try {
       stderr_bytes: Buffer.byteLength(exported.stderr),
       all_fields_exported: true,
       scope_clear_aliases_replayed: true,
+      native_reference_replayed: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

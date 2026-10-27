@@ -62,10 +62,10 @@ test("builder declares absent scope, honors reviewed values, clears selected emp
     assert.equal(stored.metadata.parent, ambient.item.id);
     assert.equal(stored.metadata.dependencies?.length, 1);
     assert.equal(stored.metadata.docs?.length, 1);
-    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id }, undefined, "patch"), true);
-    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, doc: [] }, undefined, "patch"), false);
-    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, file: [] }, undefined, "patch"), false);
-    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, test: [] }, undefined, "patch"), false);
+    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id }, await readSettings(root), undefined, "patch"), true);
+    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, doc: [] }, await readSettings(root), undefined, "patch"), false);
+    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, file: [] }, await readSettings(root), undefined, "patch"), false);
+    assert.equal(matchesMutationScope(stored, { parent: ambient.item.id, test: [] }, await readSettings(root), undefined, "patch"), false);
     const preserve = buildMutationIntent({ title: "Patch title" }, "patch");
     assert.deepEqual(preserve.unset, []);
     await update(linked.item.id, preserve, { pmRoot: root });

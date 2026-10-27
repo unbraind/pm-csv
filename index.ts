@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:f
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+import { certifyCompleteListResult, inspectCompleteListResult, readSettings, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
 
 import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts";
 import type { LineageField } from "./lineage.ts";
@@ -1922,13 +1922,14 @@ async function importCSVAtomic(
 
   // Recheck current scope before the SDK can reuse a committed journal receipt.
   // In particular, legacy creates may carry an unreviewed focus-inherited parent.
+  const comparisonSettings = await readSettings(pmRoot);
   for (const row of planned) {
     const owned = applied.byRowIndex.get(row.rowIndex);
     if (!owned || row.isUpdate) continue;
     const document = await readUpdateDocument(pmRoot, owned);
     if (!matchesMutationScope(document, { parent: row.parsed.parent, assignee: row.parsed.assignee,
       sprint: row.parsed.sprint, release: row.parsed.release, blockedBy: row.parsed.blocked_by,
-      ...(!row.parsed.blocked_by ? { dep: [] } : {}) }, undefined, "patch")) {
+      ...(!row.parsed.blocked_by ? { dep: [] } : {}) }, comparisonSettings, undefined, "patch")) {
       throw new CommandError("Atomic CSV replay scope differs from the reviewed rows. Reconcile current parent, assignment, planning and dependency fields before importing again.", EXIT_CODE.USAGE);
     }
   }

@@ -1,5 +1,6 @@
-import { canonicalDocument } from "@unbrained/pm-cli/sdk";
-import type { create, mutateItem, ItemDocument } from "@unbrained/pm-cli/sdk";
+import * as nativeSdk from "@unbrained/pm-cli/sdk";
+import { canonicalDocument, validateSprintOrReleaseValue } from "@unbrained/pm-cli/sdk";
+import type { create, mutateItem, ItemDocument, readSettings } from "@unbrained/pm-cli/sdk";
 
 /** Native create/update options accepted by the shared explicit-scope builder. */
 type MutationOptions = NonNullable<Parameters<typeof create>[0]>;
@@ -79,17 +80,52 @@ export function mutationMessageBase(message: string | undefined): string | undef
   return message?.split(" | explicit_unset=", 1)[0];
 }
 
-/** Compare reviewed scope with current native state using SDK canonicalization, never session defaults. */
-export function matchesMutationScope(document: ItemDocument, options: MutationOptions, edges?: readonly { id: string; kind: string }[], mode: "create" | "patch" = "create"): boolean {
+/**
+ * Use the host's relationship normalizer, falling back to its local-ID normalizer
+ * on older hosts whose dependency writes use local-ID normalization.
+ */
+export function normalizeMutationReference(reference: string, prefix: string, normalizers: {
+  normalizeItemId: typeof nativeSdk.normalizeItemId;
+  normalizeItemReference?: (reference: string, prefix: string) => string;
+} = nativeSdk): string {
+  return (normalizers.normalizeItemReference ?? normalizers.normalizeItemId)(reference, prefix);
+}
+
+/** Match parent storage on the selected host: legacy SDKs only trimmed parents. */
+export function normalizeMutationParent(reference: string, prefix: string, normalizers: {
+  normalizeParentReferenceValue: typeof nativeSdk.normalizeParentReferenceValue;
+  normalizeItemReference?: (reference: string, prefix: string) => string;
+} = nativeSdk): string {
+  const parent = normalizers.normalizeParentReferenceValue(reference);
+  return normalizers.normalizeItemReference?.(parent, prefix) ?? parent;
+}
+
+/**
+ * Normalize command scope with the same public field normalizers used by native
+ * create/update before comparing it with stored state. Document canonicalization
+ * alone cannot resolve local ID prefixes or parent placeholder syntax. Provider
+ * locators retain their native case; snapshots never pass through this function.
+ */
+export function normalizeMutationInput(options: MutationOptions, settings: Awaited<ReturnType<typeof readSettings>>, mode: "create" | "patch" = "create"): MutationOptions {
   const intent = buildMutationIntent(options, mode);
+  if (intent.parent !== undefined) intent.parent = normalizeMutationParent(intent.parent, settings.id_prefix);
+  for (const field of ["sprint", "release"] as const) {
+    if (intent[field] !== undefined) intent[field] = validateSprintOrReleaseValue(field, intent[field], settings.validation.sprint_release_format).value;
+  }
+  return intent;
+}
+
+/** Compare reviewed scope with current native state using SDK canonicalization, never session defaults. */
+export function matchesMutationScope(document: ItemDocument, options: MutationOptions, settings: Awaited<ReturnType<typeof readSettings>>, edges?: readonly { id: string; kind: string }[], mode: "create" | "patch" = "create"): boolean {
+  const intent = normalizeMutationInput(options, settings, mode);
   const expected = canonicalDocument({ metadata: { ...document.metadata,
     ...Object.fromEntries(SCALARS.map(([option, field]) => [field, mode === "patch" && !Object.hasOwn(options, option) ? document.metadata[field] : intent[option]])),
-  }, body: document.body });
+  }, body: document.body }, { schema: settings.schema });
   if (SCALARS.some(([, field]) => document.metadata[field] !== expected.metadata[field])) return false;
   if ((intent.clearFiles && document.metadata.files?.length) || (intent.clearDocs && document.metadata.docs?.length) ||
       (intent.clearTests && document.metadata.tests?.length)) return false;
   const actualEdges = (document.metadata.dependencies ?? []).map(e => JSON.stringify([e.id, e.kind])).sort();
   const expectedEdges = edges === undefined && mode === "patch" && !intent.clearDeps ? actualEdges
-    : (edges ?? []).map(e => JSON.stringify([e.id, e.kind])).sort();
+    : (edges ?? []).map(e => JSON.stringify([normalizeMutationReference(e.id, settings.id_prefix), e.kind])).sort();
   return JSON.stringify(actualEdges) === JSON.stringify(expectedEdges);
 }

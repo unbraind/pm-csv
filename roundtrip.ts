@@ -1,7 +1,7 @@
 import { explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  acquireLock, commitWorkspaceTransaction, getHistoryPath, mutateItem,
+  acquireLock, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
   readHistoryEntries, readSettings, verifyHistoryEntries,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep } from "@unbrained/pm-cli/sdk";
@@ -169,14 +169,19 @@ function plans(session: EditSession, table: string[][]): EditPlan[] {
     for (const field of EDIT_FIELDS) {
       if (desired[field].replace(/\r\n/g, "\n") === base.values[field].replace(/\r\n/g, "\n")) desired[field] = base.values[field];
     }
-    // The host canonical document contract trims trailing body whitespace.
-    desired.body = desired.body.trimEnd();
     const fields = EDIT_FIELDS.filter(field => desired[field] !== base.values[field]);
     if (!desired.title.trim() || !/^[0-4]$/.test(desired.priority)
         || fields.some(field => field !== "body" && desired[field] !== desired[field].trim())) {
-      throw new EditRefusal("csv_edit_invalid", "Provide a nonblank title, priority 0..4, and trim scalar cells; body follows host trailing-whitespace normalization.");
+      throw new EditRefusal("csv_edit_invalid", "Provide a nonblank title, priority 0..4, and trim scalar cells; body follows SDK document canonicalization.");
     }
-    return { base, desired, fields };
+    // Edits write stored documents, not command options: canonicalize with the
+    // same SDK contract as mutateItem (literal "none" remains a stored string).
+    const normalized = cells(canonicalDocument({ metadata: {
+      id: base.id, title: desired.title, description: "", type: "Task", status: base.status,
+      priority: Number(desired.priority) as 0 | 1 | 2 | 3 | 4, tags: [], created_at: "", updated_at: "",
+      assignee: desired.assignee, sprint: desired.sprint, release: desired.release,
+    }, body: desired.body }));
+    return { base, desired: normalized, fields: EDIT_FIELDS.filter(field => normalized[field] !== base.values[field]) };
   });
 }
 
