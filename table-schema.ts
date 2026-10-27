@@ -232,7 +232,7 @@ async function importNegotiatedTableInternal(pmRoot: string, text: string, schem
 /** Describe a table using one native settings/schema snapshot. */
 export async function describeTable(pmRoot: string, text: string, options: DescribeTableOptions = {}): Promise<TableDescription> {
   pmRoot = resolve(pmRoot);
-  const captured = { ...options, fieldMap: { ...options.fieldMap } };
+  const captured = { ...options, fieldMap: options.fieldMap === undefined ? undefined : { ...options.fieldMap } };
   return withSettings(pmRoot, settingsChanged, () => describeTableInternal(pmRoot, text, captured));
 }
 

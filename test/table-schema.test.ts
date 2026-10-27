@@ -77,6 +77,22 @@ test("saved mapping rejects renamed/reordered/added headers and dialect drift; p
   }
 });
 
+test("schema mapping snapshots preserve absent options and capture explicit maps before SDK reads", async () => {
+  const root = fixture();
+  try {
+    const before = snapshot(root);
+    const text = "title,body\nCaptured,Original\n";
+    const omitted = await describeTable(root, text);
+    assert.deepEqual(await describeTable(root, text, { fieldMap: {} }), omitted);
+    assert.deepEqual(await describeTable(root, text, { fieldMap: undefined }), omitted);
+    const fieldMap = { summary: "title" };
+    const pending = describeTable(root, text.replace("title,", "Summary,"), { fieldMap });
+    fieldMap.summary = "body";
+    assert.equal((await pending).schema.columns[0].field, "title", "caller mutation must not replace the mapping captured at entry");
+    assert.equal(snapshot(root), before, "describing a captured mapping remains read-only");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("quoted BOM/delimiter fixtures serialize and negotiate losslessly including embedded line endings", async () => {
   const root = fixture();
   try {

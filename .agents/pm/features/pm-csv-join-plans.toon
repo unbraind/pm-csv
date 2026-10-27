@@ -6,10 +6,10 @@ status: in_progress
 priority: 2
 tags: []
 created_at: "2026-10-25T22:22:43.054Z"
-updated_at: "2026-10-27T08:23:19.995Z"
+updated_at: "2026-10-27T08:56:17.521Z"
 author: codex-agent
 acceptance_criteria: "A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives. Every mutation path uses shared explicit relationship/scope intent; random focus and cwd changes cannot add unreviewed relationships, and divergent old scope refuses replay. Public join APIs expose only JoinRefusal and preserve lower-level source codes and remedies for malformed CSV, encoding and SDK failures.; Keyed imports preserve absent columns and empty cells, accept title-only reimport, apply explicit supported edits exactly, and never invent ambient scope defaults; At least 500 seeded column-ownership sequences prove silence, unchanged round trips, explicit edits and older-input replay through SDK read-back across relationships and custom data; Native none/null clear aliases in every supported scope scalar and linked collection apply and replay consistently across SDK, CLI, JSON/TOON and packed consumers while snapshots stay literal and silent patches preserve existing state; Reviewed settings/schema are captured once, type/status defaults are pinned before mutations, and every mutation batch validates the digest inside SDK writer coordination; settings changes at every row boundary return typed settings_changed and compensate unchanged owned targets; API inputs and tracker roots are captured before asynchronous reads"
-comments[42]{created_at,author,text}:
+comments[44]{created_at,author,text}:
   "2026-10-25T22:22:45.644Z",codex-agent,"Overlap check: inspected core SDK contracts, CSV relational import/export and single-table schema contracts, plus Jira, Linear, ADO and Beads adapters. No cross-selected-table external-key join planner found. Provider key mapping remains adapter-owned; join declarations are explicit. Validation will cover non-git trackers, stale revisions, ambiguous/unresolved coordinates, replay, and SDK state readback. Host write-fencing limitation is already tracked by pm-csv-sdk-write-fence."
   "2026-10-25T22:24:03.715Z",codex-agent,"Implement bounded create-only cross-table plans. SDK-generated native IDs are persisted in reviewed plans; external keys never become native identities. Plans embed captured CSV sources with exact SHA-256 digests, explicit scalar mappings and parent/blocked_by declarations. Validate the whole selected graph before writes. Use the SDK create lifecycle and workspace transaction coordinator; inspect exact owned history and current documents on every retry, skip foreign collisions and their dependents, and refuse edited owned targets. No additional shared cache/outbox/lease files. Append-only compensation closes only unchanged owned creates, never deletes tracker records."
   "2026-10-25T22:36:34.558Z",codex,"Targeted tests pass for three-table resolution, zero-byte preview/refusals, foreign-target skip closure, stale owned revisions, strict boundary fuzz, SDK journal transitions, compact commands and safe reconciliation. Model testing uses separate real SDK trackers as the reference oracle so normalization is never hand-written. The pinned SDK normalizes custom status IDs; tests now consume its returned ID. It accepts completedAt only for its configured close status, a host capability limitation to report."
@@ -52,7 +52,9 @@ comments[42]{created_at,author,text}:
   "2026-10-27T07:58:22.951Z",codex-agent,"Six function-only behavioral reverts completed. Bypass withSettingsFence: the default-change test leaves 4 SDK-visible owned rows instead of zero (0 pass/1 fail). Restore live readPinnedSettings: captured settings differ after a native peer configuration edit (0/1). Remove pinCreateDefaults: snapshot options disagree with SDK-read native default oracles (0/1). Disable settingsChangedIn: nested typed errors lose their settings classification (0/1). Remove inSettingsTransaction: the unchanged SIGKILL retry test fails because an auxiliary settings lease outlives the coordinator lease (0/1; built dist rebuilt for proof and restored). Defer importNegotiatedTable artifact parsing until after the first await: the unchanged caller-mutation mapping test imports the altered mapping (0/1). Each run retained all other changes; exact function bytes were restored afterward. The initial related suite found the latter two regressions; both fixed standalone regressions now pass. Current source uses coordinator writer leases for transaction steps, not an extra persistent settings lock; standalone batches use the shared SDK settings writer lease. This corrects the earlier broad wording about leases. Packed npm-current, bun-current and minimum SDK 2026.8.20 acceptance passes all 3 settings_snapshot_checked receipts including typed JSON/TOON refusals. No additional non-blocking findings were supplied or exposed in PR review comments."
   "2026-10-27T08:19:45.867Z",codex-agent,"Final focused settings/lineage run passes 13/13 with settings-snapshot.ts at 100% lines, branches and functions. It includes 500 native-default oracle cases, every join row boundary, all reviewed API families, nested/concurrent scopes, malformed/sparse inputs, immutable source capture and relative tracker roots under changed cwd. Low-level locateItem tests now pass the SDK configured type folders; positive custom-type state is checked with SDK get. The unchanged SIGKILL and caller-mutated schema regressions pass separately. Current lint, build/test typecheck, 147 documented declarations and zero-clone duplication checks pass. SDK create has no public settings-snapshot parameter; resolved defaults are passed explicitly and live reads are used only to guard before/after SDK batches under their writer coordination. Existing SDK lease-expiry persistence fencing remains tracked by #1549. No dependency pins or SDK internals changed."
   "2026-10-27T08:23:19.084Z",codex-agent,"Final review scope: snapshot data and API-specific refusal factories compose without leaking another API family across nested operations. SDK registries own type/status resolution; all user-keyed registry lookups remain Maps. Caller inputs are captured synchronously before SDK awaits and relative tracker roots resolve once. The source audit found no other package-owned live settings reads in planned mutation paths; the remaining readSettingsWithMetadata is the single read-only custom-field discovery path preserving SDK warnings. Latest typecheck/build:test/lint, zero-clone duplication, 147 documented declarations, linked typecheck and isolated strict health pass. Full npm/Bun release results will be attached to the final pushed head in PR 198. Existing original 500-seed models and all assertions/thresholds are retained. Releasing the claim for verification; item remains in progress."
-files[20]{path,scope}:
+  "2026-10-27T08:49:09.637Z",codex-agent,"Current-head CI run 40473450821 passed 389/389 tests on Node 22 with zero skips or cancellations, then correctly refused the 100% branch gate: table-schema.ts reported 99.50% branches (aggregate 99.95%). Reclaimed to cover the missing branch without changing thresholds or existing assertions; focused coverage first, then repeat both npm/Bun CI gates."
+  "2026-10-27T08:56:13.598Z",codex-agent,"Coverage follow-up: both Node 22/26 gates passed 389/389 tests, zero failures/skips/cancellations, but table-schema.ts had one unreachable absent-map fallback (line 151, LCOV BRDA 82) introduced by snapshot capture always manufacturing an empty map. Preserve an omitted map as undefined while still copying explicit maps before SDK reads. Added read-only non-git regression proving omitted/undefined/empty maps agree and caller mutation cannot alter the captured mapping. Focused table suite: 11/11, 100% branches; lines 99.04% and functions 98.04% in this focused selection because the settings-change refusal is covered by the separate API-boundary suite/full CI. Function-only describeTable revert removes capture: new regression fails 0 passed/1 failed (exit 1), restored wrapper passes 1/1. Linked pm test passes 1/1; result tracking disabled, receipt recorded here. Typecheck, build, build:test, lint, zero duplicate clones, 147 docstrings and diff checks pass. Main is an ancestor (0 behind). Repeating full npm/Bun gates on the new pushed head, preserving all existing tests and 100% thresholds; exact CI counts will be attached to the PR."
+files[21]{path,scope}:
   atomic-update.ts,project
   edit-refusal.ts,project
   index.ts,project
@@ -73,7 +75,8 @@ files[20]{path,scope}:
   test/packed-custom-fields.test.ts,project
   test/scope-aliases.test.ts,project
   test/settings-snapshot.test.ts,project
-tests[12]:
+  test/table-schema.test.ts,project
+tests[13]:
   - command: node --test test/join-plans.test.ts
     scope: project
     timeout_seconds: 1200
@@ -166,6 +169,13 @@ tests[12]:
     provenance:
       author: codex-agent
       created_at: "2026-10-27T07:15:37.154Z"
+      source_kind: local_mutation
+      source_ref: feat/cross-table-join-plans
+  - command: "node --test --test-concurrency=1 --test-name-pattern=\"schema mapping snapshots\" test/table-schema.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-27T08:55:31.930Z"
       source_kind: local_mutation
       source_ref: feat/cross-table-join-plans
 docs[4]{path,scope}:
