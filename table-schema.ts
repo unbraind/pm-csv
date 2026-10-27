@@ -152,7 +152,7 @@ export async function describeTable(pmRoot: string, text: string, options: Descr
   }
   const { fieldMap } = resolveImportFieldMap(headers, explicit, options.autoMap ?? false);
   const columns = table[0].map((name, index) => {
-    const field = fieldMap[headers[index]] ?? headers[index];
+    const field = Object.hasOwn(fieldMap, headers[index]) ? fieldMap[headers[index]] : headers[index];
     return { name, domain: inferDomain(table.slice(1).map(row => row[index])), field: IMPORT_COLUMNS.includes(field as TableField) ? field as TableField : null };
   });
   const target = await targetContract(pmRoot);

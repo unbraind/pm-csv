@@ -234,7 +234,7 @@ test("CLI JSON and TOON remain compact, save exclusively and preserve typed IO r
   } finally { await harness.deactivate(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("failure reconciliation never deletes or overwrites earlier creates or foreign records", async () => {
+test("failure compensation removes unchanged owned creates, retains audit history and preserves foreign records", async () => {
   const root = fixture();
   try {
     const value = input();
@@ -242,8 +242,12 @@ test("failure reconciliation never deletes or overwrites earlier creates or fore
     value.tables[2].fields.completedAt = "completed";
     const p = await plan(root, value);
     await assert.rejects(applyJoins(root, p, { author: "join-test" }), e => e instanceof JoinRefusal && e.code === "csv_join_apply_failed");
-    assert.equal((await get(p.ids[0], {}, { pmRoot: root })).item.title, "Project");
-    assert.equal((await get(p.ids[1], {}, { pmRoot: root })).item.parent, p.ids[0]);
+    for (const id of p.ids.slice(0, 2)) {
+      assert.equal(await locateItem(root, id), null);
+      const history = await readHistoryEntries(getHistoryPath(root, id), id);
+      assert.equal(history.length, 2);
+      assert.equal(history[1].op, "delete");
+    }
     const independent = { version: 1 as const, tables: [input().tables[0]] };
     const p2 = await plan(root, independent);
     const result = await applyJoins(root, p2, { author: "join-test", onTransition: async e => {

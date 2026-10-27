@@ -57,7 +57,11 @@ and requires `closeReason`. Priority is an integer 0–4; estimates are finite
 0–1,000,000,000 minutes. Lifecycle policy remains enforced by native SDK create.
 
 The version 1 boundary is strict: unknown properties, sparse arrays and wrong
-primitive types are rejected. Limits: 16 tables, 16 reference declarations per
+primitive types are rejected. Configured type/status membership and all
+input-keyed field/header/reference lookups use Map or own-property checks.
+Prototype names such as `constructor` and `__proto__` cannot impersonate configured
+types or fields; they remain valid literal external keys and mapped source headers.
+Limits: 16 tables, 16 reference declarations per
 table, 128 columns, 1,000 selected rows total, 8 MiB total UTF-8 CSV. Comma CSV
 accepts quoted cells, BOM, consistent LF or CRLF. Keys compare case-sensitively
 after trimming surrounding whitespace. Empty keys, duplicates (including unused
@@ -71,7 +75,7 @@ Plans bind exact SHA-256 source-byte digests, tracker settings, generated native
 IDs and explicit `expected: "absent"` target revisions. Sources are captured inline, so
 apply never rereads external files. Any source or artifact edit invalidates the
 review. A new preview assigns new identities and represents a new import; use
-the original artifact for retry. This is a create-only import, with no keyed
+the original artifact for crash recovery; a compensated plan requires a fresh preview. This is a create-only import, with no keyed
 update, export or sync protocol. Existing CSV import/export, spreadsheet checkout
 and row-lineage workflows remain separate APIs.
 
@@ -85,12 +89,25 @@ item locks and transaction writer locks own concurrency. As with existing CSV
 atomic import, host persistence fencing beyond item-lease expiry remains a
 host SDK requirement (tracked separately).
 
-This operation does not delete or close created records on failure. If a later
-native create fails, earlier creates and their immutable history remain and the
-SDK journal records the reconciliation requirement. Inspect current targets and
-the journal before retrying; never claim that an unsuccessful import rolled back
-all creates. Crash interruptions can resume the same reviewed plan when all owned
-revisions are unchanged. If an owned target changed, reconcile and preview again.
+Ordinary apply failures run reverse-order compensation through the SDK transaction
+coordinator. Unchanged creates from this transaction are removed, with native
+append-only delete events retained. The deterministic transaction ID uses
+`deriveMutationTransactionId` where available and binds reviewed source/settings,
+native target identities and expected absent revisions; existing journals keep
+their original keys across upgrades. Before removing anything, compensation runs
+native SDK delete policy/guard checks and revalidates ownership, complete history,
+scope and settings under the SDK item lease. The SDK derived-index lease covers
+removal and authoritative index refresh; the item lease releases last. Foreign
+records and peer edits are preserved. Policy refusal or a changed owned target
+requires explicit journal reconciliation rather than an unsafe cleanup.
+
+An immutable tombstone is recorded before file removal, so interrupted cleanup
+can validate the surviving document against its prior SDK revision and finish
+removal without rewriting history. Recovery then refuses to resurrect the old
+plan's reserved native IDs: preview fresh identities after cleanup completes.
+A crash during forward apply can resume the original plan when all owned
+revisions are unchanged. This is compensating atomicity, rather than isolation
+from readers during an in-progress transaction.
 
 Receipts contain bounded counts and at most 20 coordinate-only issues;
 `issueCount` reports the complete total. `ok: false` means no reviewable plan or

@@ -128,7 +128,7 @@ export function parseEditSession(input: unknown): EditSession {
     for (const row of session.rows) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(row.id) || typeof row.status !== "string"
           || !/^[a-f0-9]{64}$/.test(row.revision) || !/^[a-f0-9]{64}$/.test(row.itemDigest)
-          || EDIT_FIELDS.some(field => typeof row.values[field] !== "string" || row.digests[field] !== digest([field, row.values[field]]))) throw new Error();
+          || EDIT_FIELDS.some(field => !Object.hasOwn(row.values, field) || !Object.hasOwn(row.digests, field) || typeof row.values[field] !== "string" || row.digests[field] !== digest([field, row.values[field]]))) throw new Error();
     }
     return structuredClone(session);
   } catch {

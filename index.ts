@@ -426,7 +426,7 @@ function streamCSVFile(
  */
 function readBoolOption(options: Record<string, unknown>, ...keys: string[]): boolean {
   for (const key of keys) {
-    if (options[key] !== undefined) return Boolean(options[key]);
+    if (Object.hasOwn(options, key) && options[key] !== undefined) return Boolean(options[key]);
   }
   return false;
 }
@@ -581,7 +581,7 @@ function completeListArgs(pmRoot: string): string[] {
 /** Narrow an unknown JSON value to a non-array record. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? Object.assign(Object.create(null) as Record<string, unknown>, value)
     : undefined;
 }
 
@@ -771,8 +771,8 @@ function errorMessage(error: unknown): string {
  * Example: `--map "Summary=title,Owner=tags"`.
  */
 function parseFieldMap(spec: string | string[] | undefined): Record<string, string> {
-  const map: Record<string, string> = {};
-  if (spec === undefined) return map;
+  const map = Object.create(null) as Record<string, string>;
+  if (spec === undefined) return { ...map };
   const parts = (Array.isArray(spec) ? spec : [spec]).flatMap((s) => s.split(","));
   for (const part of parts) {
     const trimmed = part.trim();
@@ -794,7 +794,7 @@ function parseFieldMap(spec: string | string[] | undefined): Record<string, stri
     }
     map[from] = to;
   }
-  return map;
+  return { ...map };
 }
 
 /**
@@ -802,7 +802,7 @@ function parseFieldMap(spec: string | string[] | undefined): Record<string, stri
  * (canonical) header used for column lookup.
  */
 function applyFieldMap(headers: string[], fieldMap: Record<string, string>): string[] {
-  return headers.map((h) => fieldMap[h] ?? h);
+  return headers.map((h) => Object.hasOwn(fieldMap, h) ? fieldMap[h] : h);
 }
 
 /**
@@ -927,8 +927,8 @@ function resolveImportFieldMap(
   explicitMap: Record<string, string>,
   autoMap: boolean,
 ): FieldMapResolution {
-  const fieldMap: Record<string, string> = { ...explicitMap };
-  if (!autoMap || headers.length === 0) return { fieldMap, autoMappings: [] };
+  const fieldMap = Object.assign(Object.create(null) as Record<string, string>, explicitMap);
+  if (!autoMap || headers.length === 0) return { fieldMap: { ...fieldMap }, autoMappings: [] };
 
   const headerCounts = new Map<string, number>();
   for (const header of headers) {
@@ -955,7 +955,7 @@ function resolveImportFieldMap(
     autoMappings.push({ from, to: target });
   }
 
-  return { fieldMap, autoMappings };
+  return { fieldMap: { ...fieldMap }, autoMappings };
 }
 
 function formatAutoMappings(mappings: AutoFieldMapping[]): string {
@@ -963,9 +963,9 @@ function formatAutoMappings(mappings: AutoFieldMapping[]): string {
 }
 
 function autoMappingsToRecord(mappings: AutoFieldMapping[]): Record<string, string> {
-  const record: Record<string, string> = {};
+  const record = Object.create(null) as Record<string, string>;
   for (const m of mappings) record[m.from] = m.to;
-  return record;
+  return { ...record };
 }
 
 /**
@@ -993,7 +993,7 @@ function normalizeStatus(raw: string): ItemStatus {
     cancelled: "canceled",
     draft: "draft",
   };
-  return map[s] ?? "open";
+  return Object.hasOwn(map, s) ? map[s] : "open";
 }
 
 /**
@@ -1597,12 +1597,12 @@ async function loadAtomicBindings(pmRoot: string, transactionId: string): Promis
   if (!entry) return bindings;
   const journal: unknown = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8"));
   if (journal === null || typeof journal !== "object" || Array.isArray(journal)
-      || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
+      || !Object.hasOwn(journal, "stepIds") || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
       || !journal.stepIds.every((id: unknown) => typeof id === "string")) {
     throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
   }
-  if (!("schemaVersion" in journal) || journal.schemaVersion !== 1
-      || !("transactionId" in journal) || journal.transactionId !== transactionId) {
+  if (!Object.hasOwn(journal, "schemaVersion") || !("schemaVersion" in journal) || journal.schemaVersion !== 1
+      || !Object.hasOwn(journal, "transactionId") || !("transactionId" in journal) || journal.transactionId !== transactionId) {
     throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV journal identity. Refusing before transaction coordination.`);
   }
   const pattern = new RegExp(String.raw`^csv-import-v${UPDATE_COMPENSATION_VERSION}-(?:create|update-(.+))-row-(\d+)$`);
@@ -2025,7 +2025,7 @@ async function importCSVAtomic(
   // are already in the tracker and must not be double-counted.
   for (const row of planned) {
     const stepId = atomicStepId(row.rowIndex, row.existingId);
-    const res = committed.results[stepId];
+    const res = Object.hasOwn(committed.results, stepId) ? committed.results[stepId] : undefined;
     if (res === undefined) continue;
     const alreadyApplied = applied.byRowIndex.has(row.rowIndex);
     if (alreadyApplied) continue;
@@ -2762,7 +2762,7 @@ async function resolveExportColumns(
   discover: boolean,
 ): Promise<{ columns: string[]; columnSource: Record<string, string> }> {
   const discovered = discover ? await discoverCustomFields(pmRoot) : [];
-  const columnSource: Record<string, string> = {};
+  const columnSource = Object.create(null) as Record<string, string>;
   for (const f of discovered) {
     if (f.key !== f.metadataKey) columnSource[f.key] = f.metadataKey;
   }
@@ -2849,8 +2849,8 @@ function buildCsvExport(
 
   const dataRows = items.map((item) =>
     opts.columns.map((col) => {
-      const prop = opts.columnSource?.[col] ?? col;
-      const val = (item as unknown as Record<string, unknown>)[prop];
+      const prop = opts.columnSource && Object.hasOwn(opts.columnSource, col) ? opts.columnSource[col] : col;
+      const val = Object.hasOwn(item, prop) ? (item as unknown as Record<string, unknown>)[prop] : undefined;
       if (val === undefined || val === null) return "";
       if (Array.isArray(val)) {
         // Strip internal provenance tags (csv-key / csv-source) so a round-trip

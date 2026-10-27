@@ -561,7 +561,12 @@ pm csv join apply reviewed.json --json
 
 Duplicate or unresolved keys include cell coordinates and block import. See the
 [three-table example, typed SDK API, bounds and recovery contract](docs/join-plans.md).
-These create-only plans work without git. Retain the reviewed artifact for retries.
+These create-only plans work without git. Retain the reviewed artifact for crash
+recovery. Ordinary failures compensate unchanged owned creates and retain native
+delete history; interrupted cleanup revalidates every target before continuing.
+After compensation, preview fresh identities. Configured type/field lookups never
+accept inherited object properties, while prototype-looking external keys remain
+literal data. Foreign records and peer edits are preserved.
 
 CSV mutations use explicit source-owned scope: missing or empty create parents
 are unset through the SDK, so session focus cannot add links. Empty supported

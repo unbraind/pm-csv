@@ -110,7 +110,7 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
   const rejected = [["_csv_key", ...mapping.map(cell => cell.field)]];
   for (const [index, row] of table.slice(1).entries()) {
     const key = keys[index];
-    const values = Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()]));
+    const values = Object.assign(Object.create(null) as Record<string, string>, Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()])));
     const marker = `csv-lineage:${lineageDigest([key, values])}`;
     const id = normalizeItemId(`csv-${key}`, settings.id_prefix);
     const intent = buildMutationIntent({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id,

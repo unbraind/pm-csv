@@ -30,6 +30,8 @@ interface AcceptanceReceipt {
   readonly all_fields_exported: true;
   readonly scope_clear_aliases_replayed: true;
   readonly native_reference_replayed: true;
+  readonly prototype_keys_checked: true;
+  readonly atomic_compensation: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -74,14 +76,14 @@ for (const key of Object.keys(cleanEnvironment)) {
  * @param cwd - Fresh scenario directory or the package root.
  * @returns Captured UTF-8 process output.
  */
-function run(command: string, args: string[], cwd: string): SpawnSyncReturns<string> {
+function run(command: string, args: string[], cwd: string, expectedStatus = 0): SpawnSyncReturns<string> {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: cleanEnvironment,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0) {
+  if (result.status !== expectedStatus) {
     throw new Error(
       `${command} ${args.join(" ")} failed with status ${String(result.status)}: ${(result.stderr || result.error?.message || result.stdout).trim()}`,
     );
@@ -96,10 +98,10 @@ function run(command: string, args: string[], cwd: string): SpawnSyncReturns<str
  * @param args - pm arguments after the executable name.
  * @returns Captured pm output.
  */
-function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): SpawnSyncReturns<string> {
+function runPm(scenario: AcceptanceScenario, cwd: string, args: string[], expectedStatus = 0): SpawnSyncReturns<string> {
   return scenario.manager === "npm"
-    ? run(npxCommand, ["--no-install", "pm", ...args], cwd)
-    : run(bunxCommand, ["--no-install", "pm", ...args], cwd);
+    ? run(npxCommand, ["--no-install", "pm", ...args], cwd, expectedStatus)
+    : run(bunxCommand, ["--no-install", "pm", ...args], cwd, expectedStatus);
 }
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pm-csv-packed-acceptance-"));
@@ -230,6 +232,23 @@ try {
       + 'assert.equal((await applyEditSession(pmRoot, checkout.session, checkout.table, { author: "packed-acceptance" })).unchanged, 1); '
       + 'assert.equal(readFileSync(getHistoryPath(pmRoot, id), "utf8"), before);',
       join(scenarioRoot, ".agents/pm")], scenarioRoot);
+    const prototypeSource = join(scenarioRoot, "prototype-types.json");
+    writeFileSync(prototypeSource, JSON.stringify({ version: 1, tables: [{ name: "tasks", key: "key",
+      csv: "key,title,type\na,Valid,Task\nb,Invalid,constructor\n", fields: { title: "title", type: "type" }, references: [] }] }));
+    for (const format of [["--json"], []]) {
+      const refused = runPm(scenario, scenarioRoot, ["csv", "join", "preview", prototypeSource, ...format], 2);
+      if (!(refused.stdout + refused.stderr).includes("csv_join_invalid")) throw new Error(`${scenario.name} prototype lookup did not use JoinRefusal`);
+    }
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { previewJoins, applyJoins, JoinRefusal } from "pm-csv"; '
+      + 'import { listAllComplete, locateItem } from "@unbrained/pm-cli/sdk"; const root = process.argv[1]; '
+      + 'const input = { version: 1, tables: [{ name: "tasks", key: "key", csv: "key,title\\na,Atomic first\\nb,Atomic second\\nc,Atomic third\\n", fields: { title: "title" }, references: [] }] }; '
+      + 'for (let row = 0; row < 3; row++) { const { plan } = await previewJoins(root, input); '
+      + 'const before = (await listAllComplete({}, { pmRoot: root })).items.length; '
+      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance", onBoundary: (phase, id) => { if (phase === "before_create" && id === plan.ids[row]) throw new Error("Injected refusal"); } }), error => error instanceof JoinRefusal); '
+      + 'assert.equal((await listAllComplete({}, { pmRoot: root })).items.length, before); '
+      + 'for (const id of plan.ids) assert.equal(await locateItem(root, id), null); }',
+      join(scenarioRoot, ".agents/pm")], scenarioRoot);
     const schemaInput = join(scenarioRoot, "negotiated.csv");
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
@@ -249,6 +268,8 @@ try {
       all_fields_exported: true,
       scope_clear_aliases_replayed: true,
       native_reference_replayed: true,
+      prototype_keys_checked: true,
+      atomic_compensation: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

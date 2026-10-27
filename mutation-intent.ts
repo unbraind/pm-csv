@@ -27,11 +27,11 @@ function isScopeClearAlias(value: string): boolean {
  * stored strings literally instead of interpreting command-input aliases.
  */
 export function buildMutationIntent(options: MutationOptions, mode: "create" | "patch" | "snapshot" = "create"): MutationOptions {
-  const result = { ...options };
-  const unset = new Set(options.unset);
+  const result = Object.assign(Object.create(null) as MutationOptions, options);
+  const unset = new Set(Object.hasOwn(options, "unset") ? options.unset : undefined);
   for (const [option, field] of SCALARS) {
     if (mode !== "create" && !Object.hasOwn(options, option)) continue;
-    const value = options[option];
+    const value = Object.hasOwn(options, option) ? options[option] : undefined;
     const present = mode === "snapshot" ? value !== undefined : Boolean(value?.trim()) &&
       !isScopeClearAlias(value!);
     if (present) unset.delete(field);
@@ -39,7 +39,7 @@ export function buildMutationIntent(options: MutationOptions, mode: "create" | "
   }
   for (const [option, clear] of LINKS) {
     if (mode !== "create" && !Object.hasOwn(options, option)) continue;
-    if (options[option]?.length && (mode === "snapshot" || !options[option]!.every(isScopeClearAlias))) result[clear] = false;
+    if (Object.hasOwn(options, option) && options[option]?.length && (mode === "snapshot" || !options[option]!.every(isScopeClearAlias))) result[clear] = false;
     else { delete result[option]; result[clear] = true; }
   }
   result.unset = [...unset];

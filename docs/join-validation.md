@@ -4,6 +4,7 @@
 
 - `npm run build && npm run build:test`
 - `node --test test/join-plans.test.ts`
+- `node --test --test-concurrency=1 test/keyed-atomic.test.ts`
 - `npm run typecheck`
 - `npm run lint`
 - `npm run duplicates`
@@ -24,7 +25,7 @@ Interleaving tests use one real non-git tracker and native competing writers at
 every emitted forward SDK transaction transition and internal inspected,
 before-dependency and before-create boundary. They cover identical peer success,
 foreign collisions, dependent skips, removed targets, missing durable state,
-interruption and retained creates after failed compensation. No SDK mocks are used.
+interruption, reverse compensation, retained tombstone history and refusal to overwrite peer edits. No SDK mocks are used.
 The built CLI is also run with only Node and pm on PATH, using real JSON and TOON
 rendering. Input and output fuzz cases include sparse arrays, extra keys, wrong
 primitive types, size bounds, nonfinite numbers and fractional/out-of-range values.
@@ -167,3 +168,13 @@ locators, hash/case/prefix variants, whitespace, Unicode and sentinels. Seeds
 comparing full SDK documents and immutable histories with their post-import model.
 The installed npm/Bun/minimum-host acceptance also repeats an atomic bare-parent
 import in JSON and TOON and replays a body edit, checking native SDK reads/history.
+`test/keyed-atomic.test.ts` exercises 500 deterministic prototype-name mapping
+permutations and real SDK paths for type/status/field refusals, headers, external
+keys, references, lineage, table contracts and export. A valid first row followed
+by an inherited type or status refuses before transaction writes, including a
+validly rehashed adversarial plan. Failure injection before and after persistence
+at each row proves no owned live items remain. Recovery covers each compensation
+phase, native item-lock contention, peer revisions and foreign replacements.
+SDK-derived transaction identities also match the minimum-host fallback; legacy
+journals keep their original identities. Serialized mapping snapshots retain their
+public plain-record shape, with own-property reads at every consumption site.

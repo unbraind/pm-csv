@@ -36,13 +36,15 @@ test("custom export proof rejects missing, duplicate and corrupted columns and f
   assert.throws(() => assertCustomFieldExport(duplicate), /custom fixture/);
 });
 
-test("packed acceptance proves custom columns on every installed host", { timeout: 300_000 }, () => {
+// Three installed hosts now also exercise native rollback at every row position.
+test("packed acceptance proves custom columns on every installed host", { timeout: 600_000 }, () => {
   const childEnvironment = { ...process.env };
   delete childEnvironment.PM_PATH;
   const result = spawnSync(process.execPath, ["scripts/accept-packed.ts"], {
-    cwd: resolve(import.meta.dirname, ".."), encoding: "utf8", timeout: 290_000,
+    cwd: resolve(import.meta.dirname, ".."), encoding: "utf8", timeout: 590_000,
     env: childEnvironment, maxBuffer: 4 * 1024 * 1024,
   });
+  assert.equal(result.error, undefined, result.error?.message ?? "Packed acceptance process error");
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const output = JSON.parse(result.stdout) as { ok: boolean; receipts: Array<Record<string, unknown>> };
   assert.equal(output.ok, true);
@@ -52,5 +54,7 @@ test("packed acceptance proves custom columns on every installed host", { timeou
     assert.equal(receipt.custom_fields_sdk_roundtrip, true, String(receipt.scenario));
     assert.equal(receipt.scope_clear_aliases_replayed, true, String(receipt.scenario));
     assert.equal(receipt.native_reference_replayed, true, String(receipt.scenario));
+    assert.equal(receipt.prototype_keys_checked, true, String(receipt.scenario));
+    assert.equal(receipt.atomic_compensation, true, String(receipt.scenario));
   }
 });

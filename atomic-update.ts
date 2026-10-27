@@ -91,7 +91,7 @@ export type CompensationPhase = "canonical_restored" | "representation_written" 
 function parsePriorDocument(raw: string, id: string): ItemDocument {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !("metadata" in parsed)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !Object.hasOwn(parsed, "metadata") || !("metadata" in parsed)
       || parsed.metadata === null || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata)) {
     throw new Error(`Atomic update item ${id} has missing or incompatible prior values; reconcile before retrying.`);
   }
