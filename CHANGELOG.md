@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Prove packed CSV custom fields survive export and re-import ([pm-csv-packed-custom-fields](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-packed-custom-fields.toon))
+
 ### Other
 
 - Use the pm SDK for runtime CSV export fields ([pm-csv-sdk-adoption-1025](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-sdk-adoption-1025.toon))
