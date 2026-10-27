@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:f
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult, readSettings, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+import { certifyCompleteListResult, inspectCompleteListResult, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+import { captureSettings, inSettingsTransaction, readPinnedSettings as readSettings, rethrowSettingsChange, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
+import type { SettingsSnapshot } from "./settings-snapshot.ts";
 
 import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts";
 import type { LineageField } from "./lineage.ts";
@@ -49,10 +51,13 @@ const EXIT_CODE = {
 export class CommandError extends Error {
   /** Numeric exit code the runtime propagates to the shell. */
   exitCode: number;
-  constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE) {
+  /** Optional stable category for snapshot-sensitive mutation refusals. */
+  code?: string;
+  constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE, code?: string) {
     super(message);
     this.name = "CommandError";
     this.exitCode = exitCode;
+    if (code) this.code = code;
   }
 }
 
@@ -1821,12 +1826,13 @@ function compensateCreate(
  * prevent safe update compensation. An interrupted run resumes from the
  * durable journal (inspect() skips already applied rows).
  */
-async function importCSVAtomic(
+async function importCSVAtomicInternal(
   pmRoot: string,
   filePath: string,
   opts: CsvImportOptions,
+  prepared: ReturnType<typeof prepareInMemoryImport>,
 ): Promise<ImportResult> {
-  const { rawHeaders, dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  const { rawHeaders, dataRows, result, resolvedHeaders } = prepared;
   if (!resolvedHeaders) return result;
   result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
   result.autoMappings = resolvedHeaders.autoMappings;
@@ -1854,6 +1860,7 @@ async function importCSVAtomic(
     fingerprintContent(rawHeaders, dataRows),
   );
   const author = opts.atomicAuthor ?? "pm-csv";
+  let rollback: Promise<SettingsSnapshot> | undefined;
   const ownershipTag = `${TX_TAG_PREFIX}${transactionId}`;
   // Per-row ownership marker source of truth: `csv-txrow:<transactionId>#<rowIndex>`.
   const rowTagFor = (rowIndex: number): string =>
@@ -1969,7 +1976,7 @@ async function importCSVAtomic(
       if (id) return { state: "applied", result: id };
       return { state: "pending" };
     };
-    const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => {
+    const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => inSettingsTransaction(pmRoot, () => withSettingsFence(pmRoot, async () => {
       const ownershipTags = [ownershipTag, rowTag];
       if (row.isUpdate) {
         upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, ownershipTags, `${rowTag}:apply`);
@@ -1985,10 +1992,13 @@ async function importCSVAtomic(
       );
       appliedId = newId;
       return newId;
-    };
+    }));
     const prepareCompensation = async (): Promise<WorkspaceTransactionJsonValue | undefined> =>
-      row.isUpdate ? captureUpdateCompensation(pmRoot, row.existingId!, rowTag, author) : undefined;
+      row.isUpdate ? inSettingsTransaction(pmRoot, () => withSettingsFence(pmRoot, () => captureUpdateCompensation(pmRoot, row.existingId!, rowTag, author))) : undefined;
     const compensate = async (data?: WorkspaceTransactionJsonValue): Promise<void> => {
+      rollback ??= captureSettings(pmRoot, importSettingsChanged);
+      const snapshot = await rollback;
+      return inSettingsTransaction(pmRoot, () => useSettings(pmRoot, snapshot, () => withSettingsFence(pmRoot, async () => {
       if (row.isUpdate) {
         await compensateUpdate(pmRoot, row.existingId!, rowTag, author, data);
         return;
@@ -1999,6 +2009,7 @@ async function importCSVAtomic(
       // Strip both markers so the rolled-back row is no longer recognized as
       // applied on a retry (marker-presence — not status — is the applied signal).
       if (typeof id === "string" && id) compensateCreate(pmRoot, id, [rowTag, ownershipTag]);
+      })));
     };
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
@@ -2007,6 +2018,7 @@ async function importCSVAtomic(
   try {
     committed = await commitTransaction({ transactionId, author, steps });
   } catch (err: unknown) {
+    rethrowSettingsChange(err, importSettingsChanged);
     const msg = errorMessage(err);
     // The coordinator invokes compensations in reverse order, but this package
     // cannot prove a clean tracker: create cleanup deliberately tolerates an
@@ -2017,6 +2029,7 @@ async function importCSVAtomic(
       EXIT_CODE.GENERIC_FAILURE,
     );
   }
+  await verifySettings(pmRoot);
 
   // Tally the ImportResult from the committed step results. Each committed
   // result is the created/updated item id. Only rows that were NOT already
@@ -2033,6 +2046,20 @@ async function importCSVAtomic(
     else result.imported++;
   }
   return result;
+}
+
+/** Pin atomic planning, retry inspection and row batches to one settings revision. */
+async function importCSVAtomic(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
+  pmRoot = resolve(pmRoot); filePath = resolve(filePath);
+  const captured = { ...opts, fieldMap: { ...opts.fieldMap }, filter: opts.filter ? { ...opts.filter } : undefined };
+  const prepared = prepareInMemoryImport(filePath, captured);
+  if (captured.dryRun || !captured.commitTransaction) return importCSVAtomicInternal(pmRoot, filePath, captured, prepared);
+  return withSettings(pmRoot, importSettingsChanged, () => importCSVAtomicInternal(pmRoot, filePath, captured, prepared));
+}
+
+/** Keep settings drift within the existing command error family. */
+function importSettingsChanged(): CommandError {
+  return new CommandError("csv_settings_changed: Settings changed during atomic import. Inspect compensation and preview current settings before retrying.", EXIT_CODE.USAGE, "csv_settings_changed");
 }
 
 /**

@@ -79,6 +79,23 @@ the original artifact for crash recovery; a compensated plan requires a fresh pr
 update, export or sync protocol. Existing CSV import/export, spreadsheet checkout
 and row-lineage workflows remain separate APIs.
 
+Compilation and comparisons use one captured settings/schema view. Type and
+status defaults come from that view's native SDK registries and are passed
+explicitly to create. Live settings reads only revalidate the digest before and
+after each mutation batch inside the SDK transaction writer lease. Settings
+changes at any between-row boundary refuse with `csv_join_settings_changed`;
+they cannot produce a successful receipt with mixed defaults. Before cleanup,
+the attempt captures a separate current-policy snapshot and guards it throughout
+compensation. Another settings change or a peer revision can stop cleanup with
+an explicit reconciliation remedy.
+
+SDK transaction steps reuse their coordinator's lease, preserving its existing
+SIGKILL/retry lifetime. Standalone lineage and negotiated-table batches use the
+SDK settings/schema writer lease. These APIs retain their documented partial
+import semantics. Spreadsheet and legacy atomic operations use the same snapshot
+checks with their existing native compensation. Source arrays, saved artifacts,
+options and the tracker root are captured before the first asynchronous SDK read.
+
 Apply uses `commitWorkspaceTransaction` and native SDK create. Every retry reads
 current target documents and immutable history, including after a committed
 journal. An unchanged target must still have the exact owned create revision;

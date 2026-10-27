@@ -1,10 +1,13 @@
 import { explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import {
   acquireLock, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
-  readHistoryEntries, readSettings, verifyHistoryEntries,
+  readHistoryEntries, verifyHistoryEntries,
 } from "@unbrained/pm-cli/sdk";
-import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep } from "@unbrained/pm-cli/sdk";
+import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep, PmSettings } from "@unbrained/pm-cli/sdk";
+import { captureSettings, inSettingsTransaction, readPinnedSettings as readSettings, rethrowSettingsChange, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
+import type { SettingsSnapshot } from "./settings-snapshot.ts";
 import { EditRefusal } from "./edit-refusal.ts";
 import type { EditConflict } from "./edit-refusal.ts";
 import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
@@ -104,7 +107,7 @@ function fromCell(cell: string): string {
 }
 
 /** Export explicit stable keys and digests without creating tracker metadata. */
-export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
+async function exportEditSessionInternal(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
   if (ids.length > 1000 || new Set(ids).size !== ids.length || ids.some(id => !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(id))) {
     throw new EditRefusal("csv_session_invalid", "Export at most 1000 distinct canonical item IDs; split larger selections.");
   }
@@ -112,10 +115,18 @@ export async function exportEditSession(pmRoot: string, ids: readonly string[]):
   for (const id of ids) rows.push(await snapshot(pmRoot, id));
   const base = { version: 1 as const, id: randomUUID(), rows };
   const session = { ...base, digest: digest(base) };
+  await verifySettings(pmRoot);
   return { session, table: [editSessionHeader(), ...rows.map(row => [
     session.digest, row.id, row.revision, row.itemDigest, row.status,
     ...EDIT_FIELDS.flatMap(field => [toCell(row.values[field]), row.digests[field]]),
   ])] };
+}
+
+/** Export one internally consistent settings/schema view across all selected items. */
+export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
+  pmRoot = resolve(pmRoot);
+  const captured = [...ids];
+  return withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured));
 }
 
 /** Validate an untrusted sidecar structurally as well as by its content digest. */
@@ -143,10 +154,7 @@ interface EditPlan {
 }
 
 /** Parse all edited rows before reading or writing tracker state. */
-function plans(session: EditSession, table: string[][]): EditPlan[] {
-  if (!Array.isArray(table) || table.some(row => !Array.isArray(row) || row.some(cell => typeof cell !== "string"))) {
-    throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
-  }
+function plans(session: EditSession, table: string[][], schema: PmSettings["schema"]): EditPlan[] {
   const header = table[0];
   if (JSON.stringify(header) !== JSON.stringify(editSessionHeader())) {
     throw new EditRefusal("csv_edit_invalid", "Keep the checkout column names and order, including all digest columns.");
@@ -180,7 +188,7 @@ function plans(session: EditSession, table: string[][]): EditPlan[] {
       id: base.id, title: desired.title, description: "", type: "Task", status: base.status,
       priority: Number(desired.priority) as 0 | 1 | 2 | 3 | 4, tags: [], created_at: "", updated_at: "",
       assignee: desired.assignee, sprint: desired.sprint, release: desired.release,
-    }, body: desired.body }));
+    }, body: desired.body }, { schema }));
     return { base, desired: normalized, fields: EDIT_FIELDS.filter(field => normalized[field] !== base.values[field]) };
   });
 }
@@ -193,7 +201,7 @@ function conflicts(plan: EditPlan, current: EditSessionRow): EditField[] {
 /** Check and apply a field patch under the host item lease; write-time fencing remains a host prerequisite. */
 async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author: string): Promise<boolean> {
   const settings = await readSettings(pmRoot);
-  const result = await mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
+  const result = await withSettingsFence(pmRoot, () => mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
     mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
       const current = await documentRow(pmRoot, plan.base.id, document);
@@ -212,7 +220,7 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
       }
       return { changedFields };
     })),
-  });
+  }));
   return result.changedFields.length > 0;
 }
 
@@ -238,11 +246,10 @@ function findConflicts(error: unknown): EditConflict[] {
  * after lease expiry needs host write fencing. Prior rows are compensated on
  * ordinary failure, which explicitly requires reconciliation.
  */
-export async function applyEditSession(
-  pmRoot: string, input: unknown, table: string[][], options: { author: string; dryRun?: boolean; onTransition?: CommitWorkspaceTransactionOptions["onTransition"] },
+async function applyEditSessionInternal(
+  pmRoot: string, session: EditSession, table: string[][], options: { author: string; dryRun?: boolean; onTransition?: CommitWorkspaceTransactionOptions["onTransition"] },
 ): Promise<EditReceipt> {
-  const session = parseEditSession(input);
-  const planned = plans(session, table);
+  const planned = plans(session, table, (await readSettings(pmRoot)).schema);
   const transaction = `csv-edit-${digest([session.digest, table])}`;
   const edited = planned.filter(plan => plan.fields.length > 0);
   const found: EditConflict[] = [];
@@ -261,28 +268,54 @@ export async function applyEditSession(
   }
   if (found.length) throw new EditRefusal("csv_edit_conflict", "Export a fresh session and reconcile the reported fields before applying; this preflight wrote zero items.", found);
   const receipt: EditReceipt = { rows: planned.length, changed: pending, unchanged: planned.length - pending, concurrent, applied: 0 };
-  if (options.dryRun || !pending) return receipt;
+  if (options.dryRun || !pending) { await verifySettings(pmRoot); return receipt; }
   // Bind the journal to the exact selected rows and edits, independent of file path.
   let applied = 0;
+  let compensating = false;
+  let rollback: SettingsSnapshot | undefined;
   const steps: WorkspaceTransactionStep[] = edited.map((plan, index) => {
     const marker = `csv-txrow:${transaction}#${index}`;
     return {
       id: `${index}-${plan.base.id}`,
       inspect: () => inspectUpdate(pmRoot, plan.base.id, marker, false),
-      prepareCompensation: () => captureUpdateCompensation(pmRoot, plan.base.id, marker, options.author),
-      apply: async () => {
+      prepareCompensation: () => inSettingsTransaction(pmRoot, () => withSettingsFence(pmRoot, () => captureUpdateCompensation(pmRoot, plan.base.id, marker, options.author))),
+      apply: () => inSettingsTransaction(pmRoot, async () => {
         if (await applyPlan(pmRoot, plan, marker, options.author)) applied++;
         return plan.base.id;
-      },
-      compensate: data => compensateUpdate(pmRoot, plan.base.id, marker, options.author, data),
+      }),
+      compensate: data => inSettingsTransaction(pmRoot, () => useSettings(pmRoot, rollback!, () => withSettingsFence(pmRoot, () => compensateUpdate(pmRoot, plan.base.id, marker, options.author, data)))),
     };
   });
   try {
-    await commitWorkspaceTransaction({ pmRoot, transactionId: transaction, author: options.author, steps, onTransition: options.onTransition });
+    await commitWorkspaceTransaction({ pmRoot, transactionId: transaction, author: options.author, steps, onTransition: async event => {
+      if (event.transition === "compensating") { compensating = true; rollback = await captureSettings(pmRoot, settingsChanged); }
+      if (event.transition === "prepared") compensating = false;
+      await options.onTransition?.(event);
+      if (!compensating && event.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
+    } });
   } catch (error) {
+    rethrowSettingsChange(error, settingsChanged);
     const refusal = new EditRefusal("csv_edit_apply_failed", `Inspect and reconcile transaction ${transaction} before retrying. Item fields were checked before persistence; the host must keep its item lease valid through the write. Reverse compensation was attempted and may have refused a concurrent writer.`, findConflicts(error));
     refusal.cause = error;
     throw refusal;
   }
+  await verifySettings(pmRoot);
   return { ...receipt, applied, transaction };
+}
+
+/** Bind each edit attempt, including comparisons and compensation, to stable settings. */
+export async function applyEditSession(
+  pmRoot: string, input: unknown, table: string[][], options: { author: string; dryRun?: boolean; onTransition?: CommitWorkspaceTransactionOptions["onTransition"] },
+): Promise<EditReceipt> {
+  pmRoot = resolve(pmRoot);
+  if (!Array.isArray(table) || Array.from(table).some(row => !Array.isArray(row) || Array.from(row).some(cell => typeof cell !== "string"))) {
+    throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
+  }
+  const session = parseEditSession(input), captured = table.map(row => [...row]), configuration = { ...options };
+  return withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration));
+}
+
+/** Preserve the edit API refusal taxonomy for changing schema/settings. */
+function settingsChanged(): EditRefusal {
+  return new EditRefusal("csv_edit_settings_changed", "Settings changed during the edit attempt. Inspect pending compensation and export a fresh session before retrying.");
 }

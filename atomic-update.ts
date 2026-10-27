@@ -1,12 +1,13 @@
 import { explicitDocumentMutation } from "./mutation-intent.ts";
 import {
   acquireLock, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
-  readLocatedItem, readSettings, resolveItemTypeRegistry, verifyHistoryEntries,
+  readLocatedItem, resolveItemTypeRegistry, verifyHistoryEntries,
 } from "@unbrained/pm-cli/sdk";
 import type { ItemDocument, WorkspaceTransactionStepInspection, WorkspaceTransactionJsonValue } from "@unbrained/pm-cli/sdk";
 import { decode, encode } from "@toon-format/toon";
 import { createHash } from "node:crypto";
 import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
+import { readPinnedSettings as readSettings } from "./settings-snapshot.ts";
 
 /** Version of CSV prior-document compensation; also bound into every step id. */
 export const UPDATE_COMPENSATION_VERSION = 2;

@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { create, locateItem, normalizeItemId, PmCliError, readSettings } from "@unbrained/pm-cli/sdk";
+import { create, locateItem, normalizeItemId, PmCliError } from "@unbrained/pm-cli/sdk";
+import { pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import { buildMutationIntent, matchesMutationScope } from "./mutation-intent.ts";
 import { serializeCSV } from "./index.ts";
 import { readUpdateDocument } from "./atomic-update.ts";
@@ -13,10 +14,10 @@ export type LineageField = typeof LINEAGE_FIELDS[number];
 /** Stable actionable refusals never contain source values or filesystem paths. */
 export class LineageRefusal extends PmCliError {
   /** Stable machine-readable category. */
-  readonly code: "csv_lineage_invalid" | "csv_bundle_io";
+  readonly code: "csv_lineage_invalid" | "csv_bundle_io" | "csv_lineage_settings_changed";
   /** Action required before retry. */
   readonly remedy: string;
-  constructor(code: "csv_lineage_invalid" | "csv_bundle_io", remedy: string) {
+  constructor(code: "csv_lineage_invalid" | "csv_bundle_io" | "csv_lineage_settings_changed", remedy: string) {
     super(`${code}: ${remedy}`, 2, { code, required: remedy, nextSteps: [remedy] });
     this.code = code;
     this.remedy = remedy;
@@ -96,8 +97,7 @@ async function existingRow(pmRoot: string, id: string, marker: string, intent: P
  * Rejected artifacts contain only allowed columns plus a stable retry key. Replaying
  * corrected rejects cannot apply successful source rows because those rows are absent.
  */
-export async function importLineage(pmRoot: string, table: string[][], options: LineageOptions): Promise<LineageBundle> {
-  const mapping = planMapping(table, options);
+async function importLineageInternal(pmRoot: string, table: string[][], options: LineageOptions, mapping: ReturnType<typeof planMapping>): Promise<LineageBundle> {
   const sourceDigest = lineageDigest(table);
   const mappingRevision = lineageDigest([1, mapping]);
   const keyColumn = table[0].indexOf("_csv_key");
@@ -113,8 +113,8 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
     const values = Object.assign(Object.create(null) as Record<string, string>, Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()])));
     const marker = `csv-lineage:${lineageDigest([key, values])}`;
     const id = normalizeItemId(`csv-${key}`, settings.id_prefix);
-    const intent = buildMutationIntent({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id,
-      tags: [values.tags, marker].filter(Boolean).join(",") });
+    const intent = buildMutationIntent(pinCreateDefaults({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id,
+      tags: [values.tags, marker].filter(Boolean).join(",") }, settings));
     const record: RowLineage = { row: index + 2, key, outcome: "rejected", cells: [] };
     rows.push(record);
     if (row.length !== table[0].length || !values.title || (values.priority && !/^[0-4]$/.test(values.priority))) {
@@ -123,9 +123,11 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
       let outcome = await existingRow(pmRoot, id, marker, intent);
       if (!outcome) {
         try {
-          await create(intent, { pmRoot, author: options.author ?? "pm-csv" });
+          await withSettingsFence(pmRoot, () => create(intent, { pmRoot, author: options.author ?? "pm-csv" }));
           record.outcome = "imported";
-        } catch {
+        } catch (error) {
+          rethrowSettingsChange(error, lineageSettingsChanged);
+          await verifySettings(pmRoot);
           // A racing writer may have won the same native create; inspect durable state.
           outcome = await existingRow(pmRoot, id, marker, intent);
           record.code = outcome ? undefined : "create_refused";
@@ -150,11 +152,29 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
     identity_conflict: "This key already belongs to different imported values. Restore the unchanged rejected artifact or use pm update for intentional changes.",
   }, rejectedDigest: lineageDigest(rejected) };
   const manifest = { ...base, digest: lineageDigest(base) };
+  await verifySettings(pmRoot);
   return { manifest, rejected, receipt: { rows: rows.length,
     imported: rows.filter(row => row.outcome === "imported").length,
     replayed: rows.filter(row => row.outcome === "replayed").length,
     rejected: rejected.length - 1, manifest: manifest.digest,
   } };
+}
+
+/** Keep all lineage rows and replay comparisons on one settings revision. */
+export async function importLineage(pmRoot: string, table: string[][], options: LineageOptions): Promise<LineageBundle> {
+  pmRoot = resolve(pmRoot);
+  if (!Array.isArray(table) || Array.from(table).some(row => !Array.isArray(row) || Array.from(row).some(cell => typeof cell !== "string")) || !options || !Array.isArray(options.columns)) {
+    throw new LineageRefusal("csv_lineage_invalid", "Provide dense CSV string rows and explicitly allowed columns.");
+  }
+  const capturedTable = table.map(row => [...row]);
+  const capturedOptions = { ...options, columns: [...options.columns], fieldMap: options.fieldMap === undefined ? undefined : { ...options.fieldMap } };
+  const mapping = planMapping(capturedTable, capturedOptions);
+  return withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping));
+}
+
+/** Keep lineage configuration drift within its documented refusal family. */
+function lineageSettingsChanged(): LineageRefusal {
+  return new LineageRefusal("csv_lineage_settings_changed", "Settings changed during import. Inspect current rows and retry unchanged stable keys against current settings.");
 }
 
 /** Publish only new artifacts; exact-byte checksums complement parsed-content digests. */

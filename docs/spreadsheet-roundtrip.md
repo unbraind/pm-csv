@@ -1,5 +1,11 @@
 # Edit a CSV checkout safely
 
+Each export/apply attempt captures one native settings/schema snapshot. Changes
+during apply refuse with `csv_edit_settings_changed`; earlier patches use the
+existing SDK transaction compensation. Inputs are copied before asynchronous
+reads, and each mutation batch revalidates the settings digest inside writer
+coordination. Inspect pending cleanup before exporting a fresh session.
+
 `csv export` and `csv import --key` remain format conversion and keyed upsert.
 For a spreadsheet edit session, use the separate checkout/apply protocol:
 

@@ -1,10 +1,10 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import * as nativeSdk from "@unbrained/pm-cli/sdk";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import {
   acquireLock, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
-  PmCliError, readHistoryEntries, readLocatedItem, readSettings, resolveItemTypeRegistry,
+  PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry,
   resolveRuntimeStatusRegistry, verifyHistoryEntries,
   appendHistoryEntry, createHistoryEntry, emptyImportedDocument, removeFileIfExists, nowIso,
   PmClient, runWithActiveExtensions, runActiveOnWriteHooks, runWorkspaceTransactionGc,
@@ -14,6 +14,8 @@ import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { assertEditLease } from "./lease-guard.ts";
 import { buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
+import { captureSettings, inSettingsTransaction, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsChangedIn, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
+import type { SettingsSnapshot } from "./settings-snapshot.ts";
 
 /** Explicit SDK create-option vocabulary: no implicit header mappings or field coercion. */
 const FIELDS = ["title", "body", "type", "status", "priority", "tags", "assignee", "sprint", "release", "estimatedMinutes", "acceptanceCriteria", "closeReason", "completedAt"] as const;
@@ -187,8 +189,7 @@ interface Row {
   edges: { target: number; kind: "parent" | "blocked_by"; column: number }[];
 }
 /** Compile and validate all tables before generating a plan or invoking mutation primitives. */
-async function compile(pmRoot: string, input: JoinInput): Promise<{ rows: Row[]; issues: JoinIssue[]; order: number[] }> {
-  const settings = await readSettings(pmRoot);
+async function compile(settings: PmSettings, input: JoinInput): Promise<{ rows: Row[]; issues: JoinIssue[]; order: number[] }> {
   const statuses = resolveRuntimeStatusRegistry(settings.schema);
   const types = new Map(Object.entries(resolveItemTypeRegistry(settings).type_to_folder));
   const issues: JoinIssue[] = [], rows: Row[] = [];
@@ -206,6 +207,7 @@ async function compile(pmRoot: string, input: JoinInput): Promise<{ rows: Row[];
           (options.status !== undefined && !statuses.by_id.has(options.status.trim())) ||
           (options.type !== undefined && !types.has(options.type.trim())) ||
           (options.status !== undefined && statuses.terminal_statuses.has(options.status.trim()) && !options.closeReason?.trim())) invalid();
+      Object.assign(options, pinCreateDefaults(options, settings));
       if (!key) issues.push({ table: t.name, row, column: keyColumn, code: "empty_key" });
       const entries = t.keys.get(key) ?? [];
       entries.push(rows.length);
@@ -258,15 +260,15 @@ function receipt(input: JoinInput, rows: Row[], issues: JoinIssue[], applied = 0
 }
 
 /** Resolve every selected table in a single read-only preview and mint SDK-owned native identities. */
-async function previewJoinsInternal(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
-  const input = boundary(value, false) as JoinInput;
-  const { rows, issues } = await compile(pmRoot, input);
+async function previewJoinsInternal(pmRoot: string, input: JoinInput): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
+  const settings = await readSettings(pmRoot);
+  const { rows, issues } = await compile(settings, input);
   const result = receipt(input, rows, issues);
   if (!result.ok) return { receipt: result };
-  const settings = await readSettings(pmRoot);
   const namespace = await generateItemId(pmRoot, settings.id_prefix, { tokenLength: 12 });
   const ids = rows.map((_, i) => normalizeItemId(`${namespace}-${i}`, settings.id_prefix));
   const base = { version: 1 as const, input, sources: input.tables.map(t => hash(t.csv)), settings: hash(settings), ids, expected: "absent" as const };
+  await verifySettings(pmRoot);
   return { receipt: result, plan: { ...base, digest: hash(base) } };
 }
 
@@ -322,14 +324,15 @@ async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: 
     const prior = await inspect(pmRoot, id, marker, row, plan.ids);
     if (prior === "foreign") return "foreign";
     if (prior === "pending" || prior === "compensated") return;
-    if (prior === "applied") await PmClient.forActiveExtensionHost({ pmRoot, author: options.author }).delete(id, { dryRun: true, force: true });
+    if (prior === "applied") await withSettingsFence(pmRoot, () => PmClient.forActiveExtensionHost({ pmRoot, author: options.author }).delete(id, { dryRun: true, force: true }));
     await options.onBoundary?.("compensation_validated", id);
+    return withSettingsFence(pmRoot, async () => {
     const settings = await readSettings(pmRoot);
     const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, options.author, false, false, settings.locks.wait_ms);
     const started = performance.now();
     try {
       await options.onBoundary?.("compensation_locked", id);
-      if (hash(await readSettings(pmRoot)) !== plan.settings) throw new JoinRefusal("csv_join_settings_changed", "Reconcile changed policy/settings before resuming compensation.");
+      await verifySettings(pmRoot);
       const current = await inspectLocked(pmRoot, id, marker, row, plan.ids, settings);
       if (current === "foreign") return "foreign";
       if (current === "pending" || current === "compensated") return;
@@ -352,14 +355,15 @@ async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: 
       for (const [path, op] of [[located.itemPath, "delete"], [historyPath, "delete:history"]]) await runActiveOnWriteHooks({ path, scope: "project", op,
         item_id: id, item_type: document.metadata.type, before: document, after: empty, changed_fields: ["deleted"] });
     } finally { await release(); }
+    });
   });
 }
 
 /** Apply captured source bytes under SDK journal coordination; retries always revalidate every target revision. */
-async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
-  const plan = boundary(value, true) as JoinPlan;
-  if (hash(await readSettings(pmRoot)) !== plan.settings) throw new JoinRefusal("csv_join_settings_changed", "Preview a new plan against current tracker settings and review its source digests and identities.");
-  const { rows, issues, order } = await compile(pmRoot, plan.input);
+async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinApplyOptions): Promise<JoinReceipt> {
+  const settings = await readSettings(pmRoot);
+  if (settingsDigest(settings) !== plan.settings) throw settingsChanged();
+  const { rows, issues, order } = await compile(settings, plan.input);
   if (rows.length !== plan.ids.length || issues.length) invalid();
   const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
   const states = await Promise.all(plan.ids.map((id, i) => inspect(pmRoot, id, marker(i), rows[i], plan.ids)));
@@ -382,6 +386,7 @@ async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinA
     return "applied";
   };
   let compensating = false;
+  let rollbackSettings: SettingsSnapshot | undefined;
   /** Inspect current target and dependency revisions; a peer's identical success is applied. */
   const state = async (i: number, allowRollback = false): Promise<"pending" | "applied"> => {
     if (skipped.has(i)) return "applied";
@@ -400,7 +405,7 @@ async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinA
       await options.onBoundary?.("inspected", plan.ids[i]);
       return { state: current, result: plan.ids[i] };
     },
-    apply: async () => {
+    apply: () => inSettingsTransaction(pmRoot, async () => {
       const revision = await inspect(pmRoot, plan.ids[i], marker(i), rows[i], plan.ids);
       if (revision === "compensated" || revision === "rollback_pending") throw new JoinRefusal("csv_join_reconcile", "This plan was compensated and its native identities retain tombstone history. Finish journal recovery, then preview fresh identities; never resurrect a compensated plan blindly.");
       if (await state(i) === "applied") return plan.ids[i];
@@ -412,19 +417,20 @@ async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinA
       const parent = row.edges.find(e => e.kind === "parent");
       await options.onBoundary?.("before_create", plan.ids[i]);
       try {
-        await create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
+        await withSettingsFence(pmRoot, () => create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
           ...(parent ? { parent: plan.ids[parent.target] } : {}),
           dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
-        }), { pmRoot });
+        }), { pmRoot }));
         applied++;
       } catch (error) {
+        if (settingsChangedIn(error)) throw error;
         if (await state(i) !== "applied") throw error;
       }
       return plan.ids[i];
-    },
+    }),
     compensate: async () => {
       await options.onBoundary?.("compensating", plan.ids[i]);
-      if (await compensateCreate(pmRoot, plan, i, rows[i], options) === "foreign") skip(i, "foreign");
+      if (await inSettingsTransaction(pmRoot, () => useSettings(pmRoot, rollbackSettings!, () => compensateCreate(pmRoot, plan, i, rows[i], options))) === "foreign") skip(i, "foreign");
     },
   }));
   try {
@@ -434,9 +440,13 @@ async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinA
       const journals = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
       const transactionId = journals.entries.some(entry => basename(entry.file) === `${legacy}.json`) ? legacy : joinTransactionId(plan, selected);
       await commitWorkspaceTransaction({ pmRoot, transactionId, author: options.author, steps, onTransition: async context => {
-        if (context.transition === "compensating") compensating = true;
+        if (context.transition === "compensating") {
+          compensating = true;
+          rollbackSettings = await captureSettings(pmRoot, settingsChanged);
+        }
         if (context.transition === "prepared") compensating = false;
         await options.onTransition?.(context);
+        if (!compensating && context.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
       } });
     }
     // The SDK fast-paths committed journals without calling step inspectors. Never trust that frozen receipt.
@@ -444,21 +454,36 @@ async function applyJoinsInternal(pmRoot: string, value: unknown, options: JoinA
       throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing after coordination. Read current SDK state, reconcile the journal and preview a fresh plan.");
     }
   } catch (error) {
+    rethrowSettingsChange(error, settingsChanged);
     throw joinRefusal(error, "csv_join_apply_failed", "Inspect the SDK transaction journal and current targets before retrying this reviewed plan. Reverse compensation removes only owned unchanged creates and retains SDK tombstones. Inspect pending or blocked cleanup before retry; changed, foreign or policy-blocked targets require reconciliation.");
   }
+  await verifySettings(pmRoot);
   return receipt(plan.input, rows, issues, applied, rows.length - applied - skipped.size, skipped.size);
 }
 
 /** Resolve selected sources, exposing only JoinRefusal for malformed CSV, SDK and input failures. */
 export async function previewJoins(pmRoot: string, value: unknown): Promise<{ receipt: JoinReceipt; plan?: JoinPlan }> {
-  try { return await previewJoinsInternal(pmRoot, value); }
+  pmRoot = resolve(pmRoot);
+  try {
+    const input = boundary(value, false) as JoinInput;
+    return await withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input));
+  }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the selected sources and initialized tracker, then preview again."); }
 }
 
 /** Apply a saved source/revision plan using the same documented JoinRefusal boundary on every path. */
 export async function applyJoins(pmRoot: string, value: unknown, options: JoinApplyOptions): Promise<JoinReceipt> {
-  try { return await applyJoinsInternal(pmRoot, value, options); }
+  pmRoot = resolve(pmRoot);
+  try {
+    const plan = boundary(value, true) as JoinPlan, captured = { ...options };
+    return await withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured));
+  }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the reviewed plan and current SDK state before retrying."); }
+}
+
+/** Keep settings drift in the join API's documented refusal family. */
+function settingsChanged(): JoinRefusal {
+  return new JoinRefusal("csv_join_settings_changed", "Settings or schema changed since review. Reconcile any interrupted cleanup, then preview a fresh plan against current settings.");
 }
 
 /** Register compact native TOON/JSON commands; full source-bearing plans require an explicit output artifact. */

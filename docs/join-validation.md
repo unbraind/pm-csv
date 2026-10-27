@@ -178,3 +178,25 @@ phase, native item-lock contention, peer revisions and foreign replacements.
 SDK-derived transaction identities also match the minimum-host fallback; legacy
 journals keep their original identities. Serialized mapping snapshots retain their
 public plain-record shape, with own-property reads at every consumption site.
+
+## Settings snapshot review regression
+
+`test/settings-snapshot.test.ts` changes a custom type's default status at every
+boundary from before row one through after row four. The join API must return
+`csv_join_settings_changed`, remove every unchanged owned materialization, and
+retain native tombstones. A fresh plan's defaults are compared with native SDK
+creates read back through the SDK. Five hundred deterministic type/status cases
+also compare snapshot resolution against native SDK oracles.
+
+The tests cover all reviewed API refusal families, edits and atomic imports at
+each following-row boundary, concurrent/nested snapshot scopes, settings writers
+contending with standalone batches, post-persistence settings changes, cause
+graphs and input ownership before SDK reads. Relative tracker roots stay fixed
+across ambient working-directory changes. Existing SIGKILL recovery and caller-
+mutated table-schema tests remain intact; these caught and verified fixes to an
+overlong auxiliary lease and deferred input capture during implementation.
+
+Reproduce with `node --test --test-concurrency=1 test/settings-snapshot.test.ts`.
+Installed npm, Bun and minimum-host acceptance also changes settings between
+join rows, checks compensation and stale-plan refusal, previews fresh defaults,
+and verifies real JSON/TOON `csv_join_settings_changed` CLI output.

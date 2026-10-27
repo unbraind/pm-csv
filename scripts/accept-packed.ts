@@ -32,6 +32,7 @@ interface AcceptanceReceipt {
   readonly native_reference_replayed: true;
   readonly prototype_keys_checked: true;
   readonly atomic_compensation: true;
+  readonly settings_snapshot_checked: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -250,6 +251,22 @@ try {
       + 'for (const id of plan.ids) assert.equal(await locateItem(root, id), null); }',
       join(scenarioRoot, ".agents/pm")], scenarioRoot);
     const schemaInput = join(scenarioRoot, "negotiated.csv");
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { previewJoins, applyJoins, JoinRefusal } from "pm-csv"; '
+      + 'import { schemaAddStatus, listAllComplete, locateItem, create, get } from "@unbrained/pm-cli/sdk"; const root = process.argv[1]; '
+      + 'const input = { version: 1, tables: [{ name: "tasks", key: "key", csv: "key,title\\na,Snapshot first\\nb,Snapshot second\\nc,Snapshot third\\n", fields: { title: "title" }, references: [] }] }; '
+      + 'const { plan } = await previewJoins(root, input); const count = (await listAllComplete({}, { pmRoot: root })).items.length; let changed = false; '
+      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance", onTransition: async event => { if (event.transition === "step_applied" && !changed) { changed = true; await schemaAddStatus("snapshot-active", { role: ["active"] }, { pmRoot: root }); } } }), error => error instanceof JoinRefusal && error.code === "csv_join_settings_changed"); '
+      + 'assert.equal(changed, true); assert.equal((await listAllComplete({}, { pmRoot: root })).items.length, count); for (const id of plan.ids) assert.equal(await locateItem(root, id), null); '
+      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance" }), error => error instanceof JoinRefusal && error.code === "csv_join_settings_changed"); '
+      + 'const oracle = await create({ title: "Snapshot oracle", unset: ["parent"] }, { pmRoot: root }); const expected = (await get(oracle.item.id, {}, { pmRoot: root })).item.status; '
+      + 'const fresh = (await previewJoins(root, input)).plan; assert.equal((await applyJoins(root, fresh, { author: "packed-acceptance" })).applied, 3); '
+      + 'for (const id of fresh.ids) assert.equal((await get(id, {}, { pmRoot: root })).item.status, expected);',
+      join(scenarioRoot, ".agents/pm")], scenarioRoot);
+    for (const format of [["--json"], []]) {
+      const refused = runPm(scenario, scenarioRoot, ["csv", "join", "apply", join(scenarioRoot, "scope-plan.json"), ...format], 2);
+      if (!(refused.stdout + refused.stderr).includes("csv_join_settings_changed")) throw new Error(`${scenario.name} did not preserve the settings refusal family`);
+    }
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
     writeFileSync(schemaInput, `\uFEFFSummary;priority\r\n"${negotiatedTitle}";2\r\n`);
@@ -270,6 +287,7 @@ try {
       native_reference_replayed: true,
       prototype_keys_checked: true,
       atomic_compensation: true,
+      settings_snapshot_checked: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

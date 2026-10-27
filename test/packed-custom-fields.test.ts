@@ -56,5 +56,6 @@ test("packed acceptance proves custom columns on every installed host", { timeou
     assert.equal(receipt.native_reference_replayed, true, String(receipt.scenario));
     assert.equal(receipt.prototype_keys_checked, true, String(receipt.scenario));
     assert.equal(receipt.atomic_compensation, true, String(receipt.scenario));
+    assert.equal(receipt.settings_snapshot_checked, true, String(receipt.scenario));
   }
 });

@@ -568,6 +568,15 @@ After compensation, preview fresh identities. Configured type/field lookups neve
 accept inherited object properties, while prototype-looking external keys remain
 literal data. Foreign records and peer edits are preserved.
 
+Join planning captures one settings/schema snapshot. Create type and status
+defaults are resolved from that snapshot before writes; every mutation batch
+rechecks its digest inside SDK writer coordination. A settings change between
+rows returns `csv_join_settings_changed` and compensates unchanged owned creates.
+Recovery uses one separately guarded current-policy snapshot for cleanup. Peer
+edits or further policy changes can require journal reconciliation. Inputs and
+the tracker root are captured before asynchronous SDK reads, so caller edits or
+working-directory changes cannot redirect an in-flight plan.
+
 CSV mutations use explicit source-owned scope: missing or empty create parents
 are unset through the SDK, so session focus cannot add links. Empty supported
 scope cells preserve legacy keyed-import state; spreadsheet patches preserve

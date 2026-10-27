@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { getWorkspaceContracts, PmCliError } from "@unbrained/pm-cli/sdk";
+import { resolve } from "node:path";
+import { resolveItemTypeRegistry, resolveRuntimeStatusRegistry, PmCliError } from "@unbrained/pm-cli/sdk";
+import { readPinnedSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { IMPORT_COLUMNS, parseCSV, stripBOM, resolveDelimiter, parseFieldMap, resolveImportFieldMap,
   validateFieldMapTargets, checkMapSourcesPresent, validateParsedCSV, strictValidationIssues,
@@ -10,7 +12,7 @@ import { IMPORT_COLUMNS, parseCSV, stripBOM, resolveDelimiter, parseFieldMap, re
 export type TableField = typeof IMPORT_COLUMNS[number];
 /** Stable machine-readable refusal categories. Messages never echo source values or paths. */
 export type TableRefusalCode = "csv_table_invalid" | "csv_schema_invalid" | "csv_schema_changed" |
-  "csv_domain_changed" | "csv_target_changed" | "csv_schema_io" | "csv_table_import_failed";
+  "csv_domain_changed" | "csv_target_changed" | "csv_schema_io" | "csv_table_import_failed" | "csv_table_settings_changed";
 /** Expected SDK/CLI refusal with an actionable remedy and semantic usage exit code. */
 export class TableSchemaRefusal extends PmCliError {
   /** Stable category for automated refusal handling. */
@@ -114,8 +116,8 @@ function revision(base: Omit<TableSchema, "revision">): string {
 
 /** Read native target enums without activating extensions or invoking git. */
 async function targetContract(pmRoot: string): Promise<TableSchema["target"]> {
-  const contracts = await getWorkspaceContracts(pmRoot, { noExtensions: true });
-  return { types: contracts.types.sort(), statuses: contracts.statuses.sort() };
+  const settings = await readPinnedSettings(pmRoot);
+  return { types: resolveItemTypeRegistry(settings).types.sort(), statuses: [...resolveRuntimeStatusRegistry(settings.schema).by_id.keys()].sort() };
 }
 
 /** Project only explicitly mapped columns; ignored canonical-looking headers cannot acquire meaning. */
@@ -142,7 +144,7 @@ function receipt(schema: TableSchema, rows: number): TableReceipt {
 }
 
 /** Describe and propose a reusable schema without writing tracker state or artifacts. */
-export async function describeTable(pmRoot: string, text: string, options: DescribeTableOptions = {}): Promise<TableDescription> {
+async function describeTableInternal(pmRoot: string, text: string, options: DescribeTableOptions): Promise<TableDescription> {
   const delimiter = resolveDelimiter(options.delimiter);
   const { table, dialect } = readTable(text, delimiter);
   const headers = table[0].map(header => header.trim().toLowerCase());
@@ -159,6 +161,7 @@ export async function describeTable(pmRoot: string, text: string, options: Descr
   validateMapping(table, columns, target);
   const base = { version: 1 as const, dialect, columns, target };
   const schema = { ...base, revision: revision(base) };
+  await verifySettings(pmRoot);
   return { schema, receipt: receipt(schema, table.length - 1) };
 }
 
@@ -193,8 +196,7 @@ export function parseTableSchema(value: unknown): TableSchema {
 }
 
 /** Enforce a saved mapping against the full new table before any tracker mutation. */
-export async function previewTable(pmRoot: string, text: string, saved: unknown): Promise<TableReceipt> {
-  const schema = parseTableSchema(saved);
+async function previewTableInternal(pmRoot: string, text: string, schema: TableSchema): Promise<TableReceipt> {
   const { table, dialect } = readTable(text, schema.dialect.delimiter);
   if (JSON.stringify(dialect) !== JSON.stringify(schema.dialect) || JSON.stringify(table[0]) !== JSON.stringify(schema.columns.map(column => column.name))) {
     throw new TableSchemaRefusal("csv_schema_changed", "Review changed headers, order or dialect; run csv schema describe into a new artifact and explicitly approve its mappings.");
@@ -210,21 +212,47 @@ export async function previewTable(pmRoot: string, text: string, saved: unknown)
     throw new TableSchemaRefusal("csv_target_changed", "Review tracker type/status changes and describe a new table schema against the current tracker.");
   }
   validateMapping(table, schema.columns, schema.target);
+  await verifySettings(pmRoot);
   return receipt(schema, table.length - 1);
 }
 
 /** Negotiate a captured UTF-8 table then use the existing import mutation/upsert core.
  * Preview never runs mutation hooks. Import retains legacy partial-write semantics on row failures.
  */
-export async function importNegotiatedTable(pmRoot: string, text: string, saved: unknown, options: { dryRun?: boolean; keyField?: TableField } = {}): Promise<TableReceipt & { imported: number; updated: number; skipped: number }> {
-  const schema = parseTableSchema(saved);
+async function importNegotiatedTableInternal(pmRoot: string, text: string, schema: TableSchema, options: { dryRun?: boolean; keyField?: TableField }): Promise<TableReceipt & { imported: number; updated: number; skipped: number }> {
   const { dryRun, keyField } = options;
-  const summary = await previewTable(pmRoot, text, schema);
+  const summary = await previewTableInternal(pmRoot, text, schema);
   if (dryRun) return { ...summary, imported: 0, updated: 0, skipped: 0 };
   const { table } = readTable(text, schema.dialect.delimiter);
-  const result = importParsedCSV(pmRoot, mappedTable(table, schema.columns), { delimiter: schema.dialect.delimiter, fieldMap: {}, dryRun: false, keyField });
+  const result = await withSettingsFence(pmRoot, async () => importParsedCSV(pmRoot, mappedTable(table, schema.columns), { delimiter: schema.dialect.delimiter, fieldMap: {}, dryRun: false, keyField }));
   if (result.errors.length) throw new TableSchemaRefusal("csv_table_import_failed", `Inspect tracker state and import policies before retrying: imported=${result.imported}, updated=${result.updated}, skipped=${result.skipped}, errors=${result.errors.length}. Use csv import --atomic when rollback is required.`);
   return { ...summary, imported: result.imported, updated: result.updated, skipped: result.skipped };
+}
+
+/** Describe a table using one native settings/schema snapshot. */
+export async function describeTable(pmRoot: string, text: string, options: DescribeTableOptions = {}): Promise<TableDescription> {
+  pmRoot = resolve(pmRoot);
+  const captured = { ...options, fieldMap: { ...options.fieldMap } };
+  return withSettings(pmRoot, settingsChanged, () => describeTableInternal(pmRoot, text, captured));
+}
+
+/** Validate a saved mapping without mixing settings during the preview. */
+export async function previewTable(pmRoot: string, text: string, saved: unknown): Promise<TableReceipt> {
+  pmRoot = resolve(pmRoot);
+  const schema = parseTableSchema(saved);
+  return withSettings(pmRoot, settingsChanged, () => previewTableInternal(pmRoot, text, schema));
+}
+
+/** Fence the legacy synchronous import batch after its snapshot-bound preview. */
+export async function importNegotiatedTable(pmRoot: string, text: string, saved: unknown, options: { dryRun?: boolean; keyField?: TableField } = {}): Promise<TableReceipt & { imported: number; updated: number; skipped: number }> {
+  pmRoot = resolve(pmRoot);
+  const schema = parseTableSchema(saved), captured = { ...options };
+  return withSettings(pmRoot, settingsChanged, () => importNegotiatedTableInternal(pmRoot, text, schema, captured));
+}
+
+/** Preserve the table API refusal family when its settings snapshot changes. */
+function settingsChanged(): TableSchemaRefusal {
+  return new TableSchemaRefusal("csv_table_settings_changed", "Settings changed during table planning/import. Inspect current rows and describe a fresh schema before retrying.");
 }
 
 /** Read UTF-8 input and optional JSON contract without leaking IO paths in refusals. */
