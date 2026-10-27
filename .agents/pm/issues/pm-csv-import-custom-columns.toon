@@ -6,11 +6,13 @@ status: open
 priority: 2
 tags: []
 created_at: "2026-10-26T08:23:24.402Z"
-updated_at: "2026-10-26T08:23:59.361Z"
+updated_at: "2026-10-27T09:07:08.370Z"
 author: codex-agent
 acceptance_criteria: "Resolve registered columns and metadata aliases through the SDK; preserve supported field types and empty values through CLI re-import; cover create, update, preview, stream and atomic paths with real tracker tests; reject invalid typed cells before mutation."
-comments[1]{created_at,author,text}:
+comments[3]{created_at,author,text}:
   "2026-10-26T08:23:59.361Z",codex-agent,Follow-up from pm-csv-packed-custom-fields. The packed acceptance fixture roundtrip uses the SDK import adapter and must not be described as proof that the legacy CLI importer preserves custom columns.
+  "2026-10-27T09:00:25.751Z",codex-agent,PR #202 proves SDK adapter round-trip and packed export only. Native CLI custom-column import across create/update/preview/stream/atomic paths and typed-cell validation remain undelivered; this issue stays open. Reviewed merged PR #202 (6350dc85597f9019a9148b1ac44221467546ed62).
+  "2026-10-27T09:07:06.414Z",codex-agent,PR #202 proves SDK adapter round-trip and packed export only. Native CLI custom-column import across create/update/preview/stream/atomic paths and typed-cell validation remain undelivered; this issue stays open. Reviewed merged PR #202 (6350dc85597f9019a9148b1ac44221467546ed62).
 files[1]{path,scope}:
   index.ts,project
 body: ""
