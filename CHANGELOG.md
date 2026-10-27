@@ -12,9 +12,9 @@
 
 ## 2026.10.26 - 2026-10-26
 
-### Fixed
+### Closed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-195](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-195.toon))
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-195](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-195.toon))
 
 ## 2026.10.25 - 2026-10-25
 
@@ -50,9 +50,7 @@
 
 ### Fixed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
 - Development README names TypeScript 5 while the manifest pins TypeScript 7 ([pm-csv-bqyu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bqyu.toon))
-- Harden the release merge wait against mergeStateStatus deadlock ([pm-csv-7izf](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7izf.toon))
 - The changelog gate stamps an untagged version with the current date, so its verdict flips every midnight with no commit ([pm-csv-bv81](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bv81.toon))
 - Keep toolchain acceptance aligned with built-in merge drivers and shipped history ([pm-csv-9y0w](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-9y0w.toon))
 - Make legacy CSV importer accept file input and native flags ([pm-csv-76cu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-76cu.toon))
@@ -62,6 +60,11 @@
 ### Other
 
 - Certify pm-csv with pm CLI and SDK 2026.9.28 ([pm-csv-3044](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3044.toon))
+
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
+- Closed: Harden the release merge wait against mergeStateStatus deadlock ([pm-csv-7izf](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7izf.toon))
 
 ## 2026.10.12 - 2026-10-12
 
@@ -83,12 +86,15 @@
 
 ### Fixed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
 - A publish that npm accepts late is reported as failed and the GitHub Release is skipped on bun mirror lag ([pm-csv-c2a8](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-c2a8.toon))
 
 ### Other
 
 - Certify pm CLI 2026.9.23 and adopt the guarded pm-ops merge-driver launcher ([pm-csv-nqi5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-nqi5.toon))
+
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
 
 ## 2026.9.18 - 2026-09-18
 
@@ -146,10 +152,10 @@
 
 ## 2026.9.1 - 2026-09-01
 
-### Fixed
+### Closed
 
-- Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
-- Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
+- Closed: Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
 
 ## 2026.8.31 - 2026-08-31
 
@@ -163,8 +169,11 @@
 ### Fixed
 
 - A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
-- Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand ([pm-csv-v9cs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v9cs.toon))
 - The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-csv-ab5t](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ab5t.toon))
+
+### Closed
+
+- Closed: Fix joinContinuations whitespace, add action.yml to EXECUTABLE_PATHS, and skip value-flag args in isPublishCommand ([pm-csv-v9cs](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v9cs.toon))
 
 ## 2026.8.28 - 2026-08-28
 
@@ -174,7 +183,6 @@
 
 ### Fixed
 
-- Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 - Changelog scripts consume bounded tracker output and erase release history ([pm-csv-zmcb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zmcb.toon))
 - Adopt the canonical certified complete-list reader ([pm-csv-t4cc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-t4cc.toon))
 - Resume reader comment falsely permits empty map on list-all failure ([pm-csv-u254](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-u254.toon))
@@ -185,14 +193,15 @@
 - Dry-run upserts misreport existing keys as creates ([pm-csv-njaq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-njaq.toon))
 - Latest published manifest fails pm 2026.8.20 strict health ([pm-csv-0aal](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0aal.toon))
 
-### Security
-
-- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-csv-om24](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-om24.toon))
-
 ### Other
 
 - Enable GitHub CodeQL code scanning ([pm-csv-pam9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-pam9.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-csv-76gz](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-76gz.toon))
+
+### Closed
+
+- Closed: Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
+- Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-csv-om24](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-om24.toon))
 
 ## 2026.8.16 - 2026-08-16
 
@@ -204,24 +213,30 @@
 
 ### Fixed
 
-- Converge changelog generation and verification on replace mode ([pm-csv-mal7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mal7.toon))
 - The release merge-wait read branch protection which the workflow token can never read ([pm-csv-7ifl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7ifl.toon))
 
 ### Other
 
 - Adopt the canonical docstring gate against a pm-ops release that skips installed extension artifacts ([pm-csv-hi55](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-hi55.toon))
 
+### Closed
+
+- Closed: Converge changelog generation and verification on replace mode ([pm-csv-mal7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mal7.toon))
+
 ## 2026.8.9 - 2026-08-09
 
 ### Fixed
 
-- Release workflow publishes npm before advancing git main, so a protected-branch push rejection permanently desyncs npm from git ([pm-csv-exz4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-exz4.toon))
-- The overrun guard asserted a recovery outcome it never checked and reported update failures with no item id ([pm-csv-158c](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-158c.toon))
 - pm shell-outs silently degrade to wrong answers when stdout exceeds the spawnSync buffer ([pm-csv-02hc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-02hc.toon))
 
 ### Other
 
 - Reconcile main to 2026.8.9 so git matches the npm version already published ([pm-csv-usmi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-usmi.toon))
+
+### Closed
+
+- Closed: Release workflow publishes npm before advancing git main, so a protected-branch push rejection permanently desyncs npm from git ([pm-csv-exz4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-exz4.toon))
+- Closed: The overrun guard asserted a recovery outcome it never checked and reported update failures with no item id ([pm-csv-158c](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-158c.toon))
 
 ## 2026.8.7 - 2026-08-07
 
@@ -257,44 +272,44 @@
 
 ## 2026.7.27 - 2026-07-27
 
-### Fixed
-
-- csv validate fails to register on pm-cli 2026.7.27 because it redeclares the host-owned --json global ([pm-csv-0orl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0orl.toon))
-
 ### Removed
 
 - Adopt pm-cli 2026.7.26 typed authoring contracts and remove the any-cast defineExtension shim ([pm-csv-28sk](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-28sk.toon))
 
+### Closed
+
+- Closed: csv validate fails to register on pm-cli 2026.7.27 because it redeclares the host-owned --json global ([pm-csv-0orl](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-0orl.toon))
+
 ## 2026.7.26 - 2026-07-26
-
-### Fixed
-
-- Documented install command fails: pm install github.com/unbraind/pm-csv cannot resolve an entry file ([pm-csv-agf5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-agf5.toon))
 
 ### Other
 
 - Enable governance duplicate-detection advisory mode and adopt pm-cli 2026.7.25 ([pm-csv-kjqq](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-kjqq.toon))
 
+### Closed
+
+- Closed: Documented install command fails: pm install github.com/unbraind/pm-csv cannot resolve an entry file ([pm-csv-agf5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-agf5.toon))
+
 ## 2026.7.25 - 2026-07-25
-
-### Fixed
-
-- pm item reads are capped at Node's 1 MiB spawnSync default, so a mature tracker fails with no diagnosis ([pm-csv-m13h](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-m13h.toon))
 
 ### Other
 
 - Adopt --respect-item-release in changelog scripts and close the shipped-but-stale export terminator tracker ([pm-csv-qnax](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-qnax.toon))
 - Redact local host paths (/home/<user\>) from tracker item history ([pm-csv-tl5j](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-tl5j.toon))
 
+### Closed
+
+- Closed: pm item reads are capped at Node's 1 MiB spawnSync default, so a mature tracker fails with no diagnosis ([pm-csv-m13h](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-m13h.toon))
+
 ## 2026.7.23 - 2026-07-23
-
-### Fixed
-
-- Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-csv-9c2s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-9c2s.toon))
 
 ### Other
 
 - Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-csv-3lxi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-3lxi.toon))
+
+### Closed
+
+- Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-csv-9c2s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-9c2s.toon))
 
 ## 2026.7.19-1 - 2026-07-19
 
@@ -308,13 +323,13 @@
 
 ## 2026.7.19 - 2026-07-19
 
-### Fixed
-
-- Fix --no-header: host rejects bare --no- flag as negation of missing --header ([pm-csv-ik4l](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ik4l.toon))
-
 ### Other
 
 - Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-csv-m7i9](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-m7i9.toon))
+
+### Closed
+
+- Closed: Fix --no-header: host rejects bare --no- flag as negation of missing --header ([pm-csv-ik4l](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ik4l.toon))
 
 ## 2026.7.11 - 2026-07-11
 
@@ -417,13 +432,16 @@
 
 ### Fixed
 
-- csv export drops body (no --include-body) and uses nonexistent due_date/milestone create flags ([pm-csv-l4vy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-l4vy.toon))
-- csv import/export return error object instead of throwing (exit 0 on failure) ([pm-csv-e9v4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-e9v4.toon))
 - csv import --dry-run silently ignored (still writes) ([pm-csv-zw3a](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-zw3a.toon))
 
 ### Other
 
 - Production-readiness audit 2026-05-28 ([pm-csv-7jbc](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-7jbc.toon))
+
+### Closed
+
+- Closed: csv export drops body (no --include-body) and uses nonexistent due_date/milestone create flags ([pm-csv-l4vy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-l4vy.toon))
+- Closed: csv import/export return error object instead of throwing (exit 0 on failure) ([pm-csv-e9v4](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-e9v4.toon))
 
 ## 2026.5.28 - 2026-05-28
 
