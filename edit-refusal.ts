@@ -6,7 +6,7 @@ export interface EditConflict {
   fields: string[];
 }
 /** Stable refusal taxonomy shared by SDK callers and command errors. */
-export type EditRefusalCode = "csv_session_invalid" | "csv_edit_invalid" | "csv_edit_conflict" | "csv_edit_apply_failed" | "csv_lease_expired";
+export type EditRefusalCode = "csv_session_invalid" | "csv_edit_invalid" | "csv_edit_conflict" | "csv_edit_apply_failed" | "csv_lease_expired" | "csv_edit_settings_changed";
 /** Typed refusal with an actionable remedy and at most twenty conflict keys. */
 export class EditRefusal extends PmCliError {
   /** Stable machine-readable refusal category. */

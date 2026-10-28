@@ -1,11 +1,13 @@
+import { explicitDocumentMutation } from "./mutation-intent.ts";
 import {
   acquireLock, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
-  readLocatedItem, readSettings, resolveItemTypeRegistry, verifyHistoryEntries,
+  readLocatedItem, resolveItemTypeRegistry, verifyHistoryEntries,
 } from "@unbrained/pm-cli/sdk";
 import type { ItemDocument, WorkspaceTransactionStepInspection, WorkspaceTransactionJsonValue } from "@unbrained/pm-cli/sdk";
 import { decode, encode } from "@toon-format/toon";
 import { createHash } from "node:crypto";
 import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
+import { readPinnedSettings as readSettings } from "./settings-snapshot.ts";
 
 /** Version of CSV prior-document compensation; also bound into every step id. */
 export const UPDATE_COMPENSATION_VERSION = 2;
@@ -90,7 +92,7 @@ export type CompensationPhase = "canonical_restored" | "representation_written" 
 function parsePriorDocument(raw: string, id: string): ItemDocument {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !("metadata" in parsed)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !Object.hasOwn(parsed, "metadata") || !("metadata" in parsed)
       || parsed.metadata === null || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata)) {
     throw new Error(`Atomic update item ${id} has missing or incompatible prior values; reconcile before retrying.`);
   }
@@ -127,7 +129,7 @@ export async function compensateUpdate(
   await mutateItem({
     pmRoot, settings, id, op: "restore", author, message: restoreMessage,
     skipNoop: true,
-    mutate: guardEditMutation(settings.locks.ttl_seconds, async document => {
+    mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
       const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
       if (!verifyHistoryEntries(history, document).ok
           || journalHash(history.slice(0, historyLength)) !== historyHash
@@ -150,7 +152,7 @@ export async function compensateUpdate(
       document.metadata = structuredClone(prior.metadata);
       document.body = prior.body;
       return { changedFields };
-    }),
+    })),
   });
   if (completed) return;
   await onPhase("canonical_restored");

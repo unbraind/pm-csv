@@ -1,7 +1,9 @@
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { create, locateItem, normalizeItemId, PmCliError, readSettings } from "@unbrained/pm-cli/sdk";
+import { create, locateItem, normalizeItemId, PmCliError } from "@unbrained/pm-cli/sdk";
+import { pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
+import { buildMutationIntent, matchesMutationScope } from "./mutation-intent.ts";
 import { serializeCSV } from "./index.ts";
 import { readUpdateDocument } from "./atomic-update.ts";
 
@@ -12,10 +14,10 @@ export type LineageField = typeof LINEAGE_FIELDS[number];
 /** Stable actionable refusals never contain source values or filesystem paths. */
 export class LineageRefusal extends PmCliError {
   /** Stable machine-readable category. */
-  readonly code: "csv_lineage_invalid" | "csv_bundle_io";
+  readonly code: "csv_lineage_invalid" | "csv_bundle_io" | "csv_lineage_settings_changed";
   /** Action required before retry. */
   readonly remedy: string;
-  constructor(code: "csv_lineage_invalid" | "csv_bundle_io", remedy: string) {
+  constructor(code: "csv_lineage_invalid" | "csv_bundle_io" | "csv_lineage_settings_changed", remedy: string) {
     super(`${code}: ${remedy}`, 2, { code, required: remedy, nextSteps: [remedy] });
     this.code = code;
     this.remedy = remedy;
@@ -86,17 +88,16 @@ function planMapping(table: readonly string[][], options: LineageOptions): Linea
   return mapping;
 }
 /** Recover a committed native create by its stable key, including a crash before artifact export. */
-async function existingRow(pmRoot: string, id: string, marker: string): Promise<"replayed" | "identity_conflict" | undefined> {
+async function existingRow(pmRoot: string, id: string, marker: string, intent: Parameters<typeof create>[0]): Promise<"replayed" | "identity_conflict" | undefined> {
   if (!await locateItem(pmRoot, id)) return undefined;
   const document = await readUpdateDocument(pmRoot, id);
-  return document.metadata.tags?.includes(marker) ? "replayed" : "identity_conflict";
+  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!, await readSettings(pmRoot)) ? "replayed" : "identity_conflict";
 }
 /** Import bounded rows with native SDK validation/history/locking and stable explicit IDs.
  * Rejected artifacts contain only allowed columns plus a stable retry key. Replaying
  * corrected rejects cannot apply successful source rows because those rows are absent.
  */
-export async function importLineage(pmRoot: string, table: string[][], options: LineageOptions): Promise<LineageBundle> {
-  const mapping = planMapping(table, options);
+async function importLineageInternal(pmRoot: string, table: string[][], options: LineageOptions, mapping: ReturnType<typeof planMapping>): Promise<LineageBundle> {
   const sourceDigest = lineageDigest(table);
   const mappingRevision = lineageDigest([1, mapping]);
   const keyColumn = table[0].indexOf("_csv_key");
@@ -109,22 +110,26 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
   const rejected = [["_csv_key", ...mapping.map(cell => cell.field)]];
   for (const [index, row] of table.slice(1).entries()) {
     const key = keys[index];
-    const values = Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()]));
+    const values = Object.assign(Object.create(null) as Record<string, string>, Object.fromEntries([...mapping].sort((left, right) => left.field.localeCompare(right.field)).map(cell => [cell.field, (row[cell.column - 1] ?? "").trim()])));
     const marker = `csv-lineage:${lineageDigest([key, values])}`;
     const id = normalizeItemId(`csv-${key}`, settings.id_prefix);
+    const intent = buildMutationIntent(pinCreateDefaults({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id,
+      tags: [values.tags, marker].filter(Boolean).join(",") }, settings));
     const record: RowLineage = { row: index + 2, key, outcome: "rejected", cells: [] };
     rows.push(record);
     if (row.length !== table[0].length || !values.title || (values.priority && !/^[0-4]$/.test(values.priority))) {
       record.code = "invalid_row";
     } else {
-      let outcome = await existingRow(pmRoot, id, marker);
+      let outcome = await existingRow(pmRoot, id, marker, intent);
       if (!outcome) {
         try {
-          await create({ ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== "")), id, tags: [values.tags, marker].filter(Boolean).join(",") }, { pmRoot, author: options.author ?? "pm-csv" });
+          await withSettingsFence(pmRoot, () => create(intent, { pmRoot, author: options.author ?? "pm-csv" }));
           record.outcome = "imported";
-        } catch {
+        } catch (error) {
+          rethrowSettingsChange(error, lineageSettingsChanged);
+          await verifySettings(pmRoot);
           // A racing writer may have won the same native create; inspect durable state.
-          outcome = await existingRow(pmRoot, id, marker);
+          outcome = await existingRow(pmRoot, id, marker, intent);
           record.code = outcome ? undefined : "create_refused";
         }
       }
@@ -147,11 +152,29 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
     identity_conflict: "This key already belongs to different imported values. Restore the unchanged rejected artifact or use pm update for intentional changes.",
   }, rejectedDigest: lineageDigest(rejected) };
   const manifest = { ...base, digest: lineageDigest(base) };
+  await verifySettings(pmRoot);
   return { manifest, rejected, receipt: { rows: rows.length,
     imported: rows.filter(row => row.outcome === "imported").length,
     replayed: rows.filter(row => row.outcome === "replayed").length,
     rejected: rejected.length - 1, manifest: manifest.digest,
   } };
+}
+
+/** Keep all lineage rows and replay comparisons on one settings revision. */
+export async function importLineage(pmRoot: string, table: string[][], options: LineageOptions): Promise<LineageBundle> {
+  pmRoot = resolve(pmRoot);
+  if (!Array.isArray(table) || Array.from(table).some(row => !Array.isArray(row) || Array.from(row).some(cell => typeof cell !== "string")) || !options || !Array.isArray(options.columns)) {
+    throw new LineageRefusal("csv_lineage_invalid", "Provide dense CSV string rows and explicitly allowed columns.");
+  }
+  const capturedTable = table.map(row => [...row]);
+  const capturedOptions = { ...options, columns: [...options.columns], fieldMap: options.fieldMap === undefined ? undefined : { ...options.fieldMap } };
+  const mapping = planMapping(capturedTable, capturedOptions);
+  return withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping));
+}
+
+/** Keep lineage configuration drift within its documented refusal family. */
+function lineageSettingsChanged(): LineageRefusal {
+  return new LineageRefusal("csv_lineage_settings_changed", "Settings changed during import. Inspect current rows and retry unchanged stable keys against current settings.");
 }
 
 /** Publish only new artifacts; exact-byte checksums complement parsed-content digests. */

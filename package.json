@@ -122,11 +122,13 @@
       "docs/spreadsheet-roundtrip.md",
       "docs/row-lineage.md",
       "docs/table-schema.md",
-      "CHANGELOG.md"
+      "CHANGELOG.md",
+      "docs/join-plans.md"
     ],
     "examples": [
       "README.md",
-      "docs/table-schema.md"
+      "docs/table-schema.md",
+      "docs/join-plans.md"
     ]
   },
   "publishConfig": {

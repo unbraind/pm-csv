@@ -4,20 +4,25 @@ import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { certifyCompleteListResult, inspectCompleteListResult, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk";
+import { captureSettings, inSettingsTransaction, readPinnedSettings as readSettings, rethrowSettingsChange, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
+import type { SettingsSnapshot } from "./settings-snapshot.ts";
 
 import { importLineage, writeLineageBundle, LineageRefusal } from "./lineage.ts";
 import type { LineageField } from "./lineage.ts";
 
 import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts";
+import { mutationScopeArguments, matchesMutationScope } from "./mutation-intent.ts";
+import { registerJoinCommands } from "./join-plans.ts";
 import { registerTableSchemaCommands } from "./table-schema.ts";
 
-import { captureUpdateCompensation, compensateUpdate, inspectUpdate, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
+import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
 import type {
   WorkspaceTransactionStep,
   WorkspaceTransactionCommitResult,
   WorkspaceTransactionStepInspection,
   WorkspaceTransactionJsonValue,
+  CommitWorkspaceTransactionOptions,
 } from "@unbrained/pm-cli/sdk";
 
 
@@ -47,10 +52,13 @@ const EXIT_CODE = {
 export class CommandError extends Error {
   /** Numeric exit code the runtime propagates to the shell. */
   exitCode: number;
-  constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE) {
+  /** Optional stable category for snapshot-sensitive mutation refusals. */
+  code?: string;
+  constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE, code?: string) {
     super(message);
     this.name = "CommandError";
     this.exitCode = exitCode;
+    if (code) this.code = code;
   }
 }
 
@@ -424,7 +432,7 @@ function streamCSVFile(
  */
 function readBoolOption(options: Record<string, unknown>, ...keys: string[]): boolean {
   for (const key of keys) {
-    if (options[key] !== undefined) return Boolean(options[key]);
+    if (Object.hasOwn(options, key) && options[key] !== undefined) return Boolean(options[key]);
   }
   return false;
 }
@@ -579,7 +587,7 @@ function completeListArgs(pmRoot: string): string[] {
 /** Narrow an unknown JSON value to a non-array record. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? Object.assign(Object.create(null) as Record<string, unknown>, value)
     : undefined;
 }
 
@@ -769,8 +777,8 @@ function errorMessage(error: unknown): string {
  * Example: `--map "Summary=title,Owner=tags"`.
  */
 function parseFieldMap(spec: string | string[] | undefined): Record<string, string> {
-  const map: Record<string, string> = {};
-  if (spec === undefined) return map;
+  const map = Object.create(null) as Record<string, string>;
+  if (spec === undefined) return { ...map };
   const parts = (Array.isArray(spec) ? spec : [spec]).flatMap((s) => s.split(","));
   for (const part of parts) {
     const trimmed = part.trim();
@@ -792,7 +800,7 @@ function parseFieldMap(spec: string | string[] | undefined): Record<string, stri
     }
     map[from] = to;
   }
-  return map;
+  return { ...map };
 }
 
 /**
@@ -800,7 +808,7 @@ function parseFieldMap(spec: string | string[] | undefined): Record<string, stri
  * (canonical) header used for column lookup.
  */
 function applyFieldMap(headers: string[], fieldMap: Record<string, string>): string[] {
-  return headers.map((h) => fieldMap[h] ?? h);
+  return headers.map((h) => Object.hasOwn(fieldMap, h) ? fieldMap[h] : h);
 }
 
 /**
@@ -925,8 +933,8 @@ function resolveImportFieldMap(
   explicitMap: Record<string, string>,
   autoMap: boolean,
 ): FieldMapResolution {
-  const fieldMap: Record<string, string> = { ...explicitMap };
-  if (!autoMap || headers.length === 0) return { fieldMap, autoMappings: [] };
+  const fieldMap = Object.assign(Object.create(null) as Record<string, string>, explicitMap);
+  if (!autoMap || headers.length === 0) return { fieldMap: { ...fieldMap }, autoMappings: [] };
 
   const headerCounts = new Map<string, number>();
   for (const header of headers) {
@@ -953,7 +961,7 @@ function resolveImportFieldMap(
     autoMappings.push({ from, to: target });
   }
 
-  return { fieldMap, autoMappings };
+  return { fieldMap: { ...fieldMap }, autoMappings };
 }
 
 function formatAutoMappings(mappings: AutoFieldMapping[]): string {
@@ -961,9 +969,9 @@ function formatAutoMappings(mappings: AutoFieldMapping[]): string {
 }
 
 function autoMappingsToRecord(mappings: AutoFieldMapping[]): Record<string, string> {
-  const record: Record<string, string> = {};
+  const record = Object.create(null) as Record<string, string>;
   for (const m of mappings) record[m.from] = m.to;
-  return record;
+  return { ...record };
 }
 
 /**
@@ -991,7 +999,7 @@ function normalizeStatus(raw: string): ItemStatus {
     cancelled: "canceled",
     draft: "draft",
   };
-  return map[s] ?? "open";
+  return Object.hasOwn(map, s) ? map[s] : "open";
 }
 
 /**
@@ -1106,6 +1114,7 @@ interface CsvImportOptions {
     steps: readonly WorkspaceTransactionStep[];
     lockTtlSeconds?: number;
     lockWaitMs?: number;
+    onTransition?: CommitWorkspaceTransactionOptions["onTransition"];
   }) => Promise<WorkspaceTransactionCommitResult>;
   /** Author attributed to the atomic transaction journal (defaults to `pm-csv`). */
   atomicAuthor?: string;
@@ -1156,7 +1165,7 @@ function createImportResult(): ImportResult {
 
 interface ParsedRow {
   title: string;
-  status: ItemStatus;
+  status?: ItemStatus;
   priority?: number;
   tags: string[];
   type?: string;
@@ -1190,13 +1199,13 @@ function rowFields(
     get,
     parsed: {
       title: get("title"),
-      status: rawStatus ? normalizeStatus(rawStatus) : "open",
+      status: rawStatus ? normalizeStatus(rawStatus) : undefined,
       priority: priority !== undefined && !isNaN(priority) ? priority : undefined,
       tags: parseTags(get("tags")),
       type: get("type") || undefined,
       // pm has no milestone/due_date fields; map deadline (accept legacy header).
       deadline: get("deadline") || get("due_date") || undefined,
-      body: get("body") || undefined,
+      body: get("body") ? row[col("body")] : undefined,
       parent: get("parent") || undefined,
       assignee: get("assignee") || undefined,
       sprint: get("sprint") || undefined,
@@ -1247,7 +1256,7 @@ function parseImportFilter(
  */
 function rowMatchesFilter(row: ParsedRow, filter: ImportRowFilter | undefined): boolean {
   if (!filter) return true;
-  if (filter.status !== undefined && row.status !== filter.status) return false;
+  if (filter.status !== undefined && (row.status ?? "open") !== filter.status) return false;
   if (filter.type !== undefined && (row.type ?? "").toLowerCase() !== filter.type) return false;
   if (filter.priority !== undefined && row.priority !== filter.priority) return false;
   return true;
@@ -1345,6 +1354,7 @@ function processImportRow(
     result.previews.push({
       action: existingId ? "update" : "create",
       ...parsed,
+      status: parsed.status ?? (existingId ? undefined : "open"),
       ...(opts.keyField ? { key: keyValue } : {}),
       ...(opts.source ? { csv_source: opts.source } : {}),
     });
@@ -1587,19 +1597,21 @@ function atomicStepId(rowIndex: number, existingId: string | undefined): string 
  * The public read-only inventory supplies the path, including after SDK layout
  * changes. Infinite retention and dry-run prevent recovery receipts being pruned.
  */
-async function loadAtomicBindings(pmRoot: string, transactionId: string): Promise<Map<number, string | undefined>> {
+export async function loadAtomicBindings(pmRoot: string, transactionId: string): Promise<{ bindings: Map<number, string | undefined>; status?: string | null }> {
   const bindings = new Map<number, string | undefined>();
   const inventory = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
   const entry = inventory.entries.find(candidate => basename(candidate.file) === `${transactionId}.json`);
-  if (!entry) return bindings;
-  const journal: unknown = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8"));
+  if (!entry) return { bindings };
+  let journal: unknown;
+  try { journal = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8")); }
+  catch { throw new CommandError("The recorded atomic journal cannot be read. Preserve its audit and reconcile the original attempt before retrying or previewing this import.", EXIT_CODE.USAGE); }
   if (journal === null || typeof journal !== "object" || Array.isArray(journal)
-      || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
+      || !Object.hasOwn(journal, "stepIds") || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
       || !journal.stepIds.every((id: unknown) => typeof id === "string")) {
     throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
   }
-  if (!("schemaVersion" in journal) || journal.schemaVersion !== 1
-      || !("transactionId" in journal) || journal.transactionId !== transactionId) {
+  if (!Object.hasOwn(journal, "schemaVersion") || !("schemaVersion" in journal) || journal.schemaVersion !== 1
+      || !Object.hasOwn(journal, "transactionId") || !("transactionId" in journal) || journal.transactionId !== transactionId) {
     throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV journal identity. Refusing before transaction coordination.`);
   }
   const pattern = new RegExp(String.raw`^csv-import-v${UPDATE_COMPENSATION_VERSION}-(?:create|update-(.+))-row-(\d+)$`);
@@ -1608,7 +1620,7 @@ async function loadAtomicBindings(pmRoot: string, transactionId: string): Promis
     if (!match) throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
     bindings.set(Number(match[2]), match[1]);
   }
-  return bindings;
+  return { bindings, status: entry.status };
 }
 
 /**
@@ -1798,7 +1810,7 @@ function compensateCreate(
   if (markers.length > 0) {
     const markerCleanup = spawnSync(
       "pm",
-      ["--path", pmRoot, "update", id, "--remove-tags", markers.join(",")],
+      ["--path", pmRoot, "update", id, "--remove-tags", markers.join(","), ...mutationScopeArguments({}, "patch")],
       { encoding: "utf-8", maxBuffer: pmListMaxBuffer() },
     );
     if (markerCleanup.status !== 0) {
@@ -1818,12 +1830,13 @@ function compensateCreate(
  * prevent safe update compensation. An interrupted run resumes from the
  * durable journal (inspect() skips already applied rows).
  */
-async function importCSVAtomic(
+async function importCSVAtomicInternal(
   pmRoot: string,
   filePath: string,
   opts: CsvImportOptions,
+  prepared: ReturnType<typeof prepareInMemoryImport>,
 ): Promise<ImportResult> {
-  const { rawHeaders, dataRows, result, resolvedHeaders } = prepareInMemoryImport(filePath, opts);
+  const { rawHeaders, dataRows, result, resolvedHeaders } = prepared;
   if (!resolvedHeaders) return result;
   result.fieldMapWarnings = resolvedHeaders.fieldMapWarnings;
   result.autoMappings = resolvedHeaders.autoMappings;
@@ -1831,6 +1844,8 @@ async function importCSVAtomic(
   // A dry-run atomic import just previews like the non-atomic path (no
   // transaction is committed, nothing is written).
   if (opts.dryRun) {
+    const existing = await loadAtomicBindings(pmRoot, deriveTransactionId(resolve(filePath), fingerprintContent(rawHeaders, dataRows)));
+    if (existing.status === "compensating") throw new CommandError("Pending atomic compensation must be recovered with the original import options before previewing new work; dry-run did not modify the journal.", EXIT_CODE.USAGE);
     processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
     return result;
   }
@@ -1851,6 +1866,7 @@ async function importCSVAtomic(
     fingerprintContent(rawHeaders, dataRows),
   );
   const author = opts.atomicAuthor ?? "pm-csv";
+  let rollback: Promise<SettingsSnapshot> | undefined;
   const ownershipTag = `${TX_TAG_PREFIX}${transactionId}`;
   // Per-row ownership marker source of truth: `csv-txrow:<transactionId>#<rowIndex>`.
   const rowTagFor = (rowIndex: number): string =>
@@ -1858,7 +1874,7 @@ async function importCSVAtomic(
 
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
-  const bindings = await loadAtomicBindings(pmRoot, transactionId);
+  const { bindings, status: journalStatus } = await loadAtomicBindings(pmRoot, transactionId);
   const applied = loadAppliedByTransaction(pmRoot, transactionId);
   const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
   // In-batch duplicate-KEY guard: keys already claimed by an earlier planned
@@ -1917,6 +1933,23 @@ async function importCSVAtomic(
     planned.push({ rowIndex, lineNo, parsed, keyValue, existingId, isUpdate: Boolean(existingId) });
   }
 
+  // Recheck current scope before the SDK can reuse a committed journal receipt.
+  if (bindings.size && (planned.length !== bindings.size || planned.some(row => !bindings.has(row.rowIndex)))) {
+    throw new CommandError("An existing atomic CSV journal has a different recorded row domain. Resume with its original filters, mappings and key options to finish recovery; no new journal or successful empty receipt was produced.", EXIT_CODE.USAGE);
+  }
+  // In particular, legacy creates may carry an unreviewed focus-inherited parent.
+  const comparisonSettings = await readSettings(pmRoot);
+  for (const row of planned) {
+    const owned = applied.byRowIndex.get(row.rowIndex);
+    if (!owned || row.isUpdate) continue;
+    const document = await readUpdateDocument(pmRoot, owned);
+    if (!matchesMutationScope(document, { parent: row.parsed.parent, assignee: row.parsed.assignee,
+      sprint: row.parsed.sprint, release: row.parsed.release, blockedBy: row.parsed.blocked_by,
+      ...(!row.parsed.blocked_by ? { dep: [] } : {}) }, comparisonSettings, undefined, "patch")) {
+      throw new CommandError("Atomic CSV replay scope differs from the reviewed rows. Reconcile current parent, assignment, planning and dependency fields before importing again.", EXIT_CODE.USAGE);
+    }
+  }
+
   // Build one transaction step per row to be written (create or update).
   //   - create: apply() shells out to the same `pm create` as the non-atomic
   //     path (parity) plus the csv-tx batch marker AND the per-row marker;
@@ -1952,7 +1985,7 @@ async function importCSVAtomic(
       if (id) return { state: "applied", result: id };
       return { state: "pending" };
     };
-    const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => {
+    const apply = async (): Promise<WorkspaceTransactionJsonValue | undefined> => inSettingsTransaction(pmRoot, () => withSettingsFence(pmRoot, async () => {
       const ownershipTags = [ownershipTag, rowTag];
       if (row.isUpdate) {
         upsertUpdate(pmRoot, row.existingId!, row.parsed, opts.source, ownershipTags, `${rowTag}:apply`);
@@ -1968,10 +2001,13 @@ async function importCSVAtomic(
       );
       appliedId = newId;
       return newId;
-    };
+    }));
     const prepareCompensation = async (): Promise<WorkspaceTransactionJsonValue | undefined> =>
-      row.isUpdate ? captureUpdateCompensation(pmRoot, row.existingId!, rowTag, author) : undefined;
+      row.isUpdate ? inSettingsTransaction(pmRoot, () => withSettingsFence(pmRoot, () => captureUpdateCompensation(pmRoot, row.existingId!, rowTag, author))) : undefined;
     const compensate = async (data?: WorkspaceTransactionJsonValue): Promise<void> => {
+      rollback ??= captureSettings(pmRoot, importSettingsChanged);
+      const snapshot = await rollback;
+      return inSettingsTransaction(pmRoot, () => useSettings(pmRoot, snapshot, () => withSettingsFence(pmRoot, async () => {
       if (row.isUpdate) {
         await compensateUpdate(pmRoot, row.existingId!, rowTag, author, data);
         return;
@@ -1982,14 +2018,20 @@ async function importCSVAtomic(
       // Strip both markers so the rolled-back row is no longer recognized as
       // applied on a retry (marker-presence — not status — is the applied signal).
       if (typeof id === "string" && id) compensateCreate(pmRoot, id, [rowTag, ownershipTag]);
+      })));
     };
     return { id: stepId, inspect, apply, prepareCompensation, compensate };
   });
 
   let committed: WorkspaceTransactionCommitResult;
   try {
-    committed = await commitTransaction({ transactionId, author, steps });
+    committed = await commitTransaction({ transactionId, author, steps, onTransition: event => {
+      if (journalStatus === "compensating" && ["compensated", "prepared"].includes(event.transition)) {
+        throw new CommandError("Pending atomic compensation was recovered. Inspect the retained audit and retry the original import; this attempt did not restart forward work.", EXIT_CODE.USAGE);
+      }
+    } });
   } catch (err: unknown) {
+    rethrowSettingsChange(err, importSettingsChanged);
     const msg = errorMessage(err);
     // The coordinator invokes compensations in reverse order, but this package
     // cannot prove a clean tracker: create cleanup deliberately tolerates an
@@ -2000,6 +2042,7 @@ async function importCSVAtomic(
       EXIT_CODE.GENERIC_FAILURE,
     );
   }
+  await verifySettings(pmRoot);
 
   // Tally the ImportResult from the committed step results. Each committed
   // result is the created/updated item id. Only rows that were NOT already
@@ -2008,7 +2051,7 @@ async function importCSVAtomic(
   // are already in the tracker and must not be double-counted.
   for (const row of planned) {
     const stepId = atomicStepId(row.rowIndex, row.existingId);
-    const res = committed.results[stepId];
+    const res = Object.hasOwn(committed.results, stepId) ? committed.results[stepId] : undefined;
     if (res === undefined) continue;
     const alreadyApplied = applied.byRowIndex.has(row.rowIndex);
     if (alreadyApplied) continue;
@@ -2016,6 +2059,20 @@ async function importCSVAtomic(
     else result.imported++;
   }
   return result;
+}
+
+/** Pin atomic planning, retry inspection and row batches to one settings revision. */
+async function importCSVAtomic(pmRoot: string, filePath: string, opts: CsvImportOptions): Promise<ImportResult> {
+  pmRoot = resolve(pmRoot); filePath = resolve(filePath);
+  const captured = { ...opts, fieldMap: { ...opts.fieldMap }, filter: opts.filter ? { ...opts.filter } : undefined };
+  const prepared = prepareInMemoryImport(filePath, captured);
+  if (captured.dryRun || !captured.commitTransaction) return importCSVAtomicInternal(pmRoot, filePath, captured, prepared);
+  return withSettings(pmRoot, importSettingsChanged, () => importCSVAtomicInternal(pmRoot, filePath, captured, prepared));
+}
+
+/** Keep settings drift within the existing command error family. */
+function importSettingsChanged(): CommandError {
+  return new CommandError("csv_settings_changed: Settings changed during atomic import. Inspect compensation and preview current settings before retrying.", EXIT_CODE.USAGE, "csv_settings_changed");
 }
 
 /**
@@ -2071,12 +2128,12 @@ async function importCSVStreaming(pmRoot: string, filePath: string, opts: CsvImp
  * Flag names verified against the installed `pm create`/`pm update` contracts:
  * --parent, --assignee, --sprint, --release, --blocked-by.
  */
-function appendRelationalArgs(args: string[], p: ParsedRow): void {
-  if (p.parent) args.push("--parent", p.parent);
-  if (p.assignee) args.push("--assignee", p.assignee);
-  if (p.sprint) args.push("--sprint", p.sprint);
-  if (p.release) args.push("--release", p.release);
-  if (p.blocked_by) args.push("--blocked-by", p.blocked_by);
+function appendRelationalArgs(args: string[], p: ParsedRow, mode: "create" | "patch"): void {
+  // Updates own only nonempty cells. Absent/empty cells preserve current state,
+  // including all dependency edges; create mode still suppresses ambient defaults.
+  const selected = Object.fromEntries(Object.entries({ parent: p.parent, assignee: p.assignee,
+    sprint: p.sprint, release: p.release, blockedBy: p.blocked_by }).filter(([, value]) => value !== undefined));
+  args.push(...mutationScopeArguments(selected, mode));
 }
 
 /** Append item fields shared by create and update mutation commands. */
@@ -2085,7 +2142,7 @@ function appendMutableItemArgs(args: string[], p: ParsedRow, preserveEmptyBody: 
   if (p.priority !== undefined) args.push("--priority", String(p.priority));
   if (p.type) args.push("--type", p.type);
   if (p.deadline) args.push("--deadline", p.deadline);
-  appendRelationalArgs(args, p);
+  appendRelationalArgs(args, p, preserveEmptyBody ? "patch" : "create");
 }
 
 /** Build a normal validated close with factual CSV provenance and outcome fields. */
@@ -2161,7 +2218,7 @@ function upsertCreate(
 
   // See the function docstring: terminal `closed` is applied via pm close
   // after the create, never via `pm create --status closed`.
-  const createStatus = p.status === "closed" ? "open" : p.status;
+  const createStatus = !p.status || p.status === "closed" ? "open" : p.status;
   const args = ["--path", pmRoot, "create", "--title", p.title, "--status", createStatus, "--json"];
   appendMutableItemArgs(args, p, false);
   if (tags.length > 0) args.push("--tags", tags.join(","));
@@ -2324,7 +2381,7 @@ function upsertUpdate(
   if (extraTags && extraTags.length > 0) addTags.push(...extraTags);
   if (addTags.length > 0) args.push("--add-tags", addTags.join(","));
   // `update` cannot set a closed status; only set non-closed statuses here.
-  if (p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
+  if (p.status && p.status !== "closed" && p.status !== "canceled") args.push("--status", p.status);
 
   const r = spawnSync("pm", args, { encoding: "utf-8", maxBuffer: pmListMaxBuffer() });
   // `pm update` is a WRITE: a null status (receipt overrun or a signal kill)
@@ -2745,7 +2802,7 @@ async function resolveExportColumns(
   discover: boolean,
 ): Promise<{ columns: string[]; columnSource: Record<string, string> }> {
   const discovered = discover ? await discoverCustomFields(pmRoot) : [];
-  const columnSource: Record<string, string> = {};
+  const columnSource = Object.create(null) as Record<string, string>;
   for (const f of discovered) {
     if (f.key !== f.metadataKey) columnSource[f.key] = f.metadataKey;
   }
@@ -2832,8 +2889,8 @@ function buildCsvExport(
 
   const dataRows = items.map((item) =>
     opts.columns.map((col) => {
-      const prop = opts.columnSource?.[col] ?? col;
-      const val = (item as unknown as Record<string, unknown>)[prop];
+      const prop = opts.columnSource && Object.hasOwn(opts.columnSource, col) ? opts.columnSource[col] : col;
+      const val = Object.hasOwn(item, prop) ? (item as unknown as Record<string, unknown>)[prop] : undefined;
       if (val === undefined || val === null) return "";
       if (Array.isArray(val)) {
         // Strip internal provenance tags (csv-key / csv-source) so a round-trip
@@ -2897,6 +2954,7 @@ export default {
 
   activate(api: ExtensionApi) {
     registerTableSchemaCommands(api);
+    registerJoinCommands(api);
     // -----------------------------------------------------------------------
     // Schema: register an optional `csv_source` provenance field so imported
     // items can record where they came from (set via `pm csv import --source`).
@@ -2951,7 +3009,7 @@ export default {
       description: "Export a conflict-aware CSV edit session and immutable baseline JSON (maximum 1000 items).",
       flags: [
         { long: "--output", value_name: "file", description: "New CSV filename; baseline uses <file>.session.json" },
-        { long: "--ids", value_name: "ids", description: "Comma-separated canonical item IDs (default: complete tracker)" },
+        { long: "--ids", value_name: "ids", description: "Comma-separated distinct canonical item IDs; aliases refuse (default: complete tracker)" },
       ],
       async run(ctx) {
         const output = ctx.options["output"] as string | undefined;
@@ -3015,6 +3073,9 @@ export default {
         "--key for idempotent re-import (upsert), --encoding for non-UTF-8 files, " +
         "--source to record import provenance in the csv_source field, and " +
         "--status/--type/--priority to import only matching rows (others are skipped). " +
+        "Keyed updates preserve absent columns and empty cells; nonempty cells set supported fields. " +
+        "Use none/null to clear parent/assignee/sprint/release/blocked_by; tags are additive and dependency edges are preserved. " +
+        "Custom fields are export-only. Creates suppress implicit focus and planning defaults. " +
         "Use --strict to fail before writing when row-level data issues are present.",
       arguments: [{ name: "file", required: true, description: "CSV file to import" }],
       intent: "import items from a CSV file into pm",
@@ -3365,3 +3426,6 @@ export type { LineageField, LineageOptions, CellLineage, RowLineage, LineageMani
 
 export { describeTable, previewTable, parseTableSchema, importNegotiatedTable, TableSchemaRefusal } from "./table-schema.ts";
 export type { TableSchema, TableDomain, TableField, TableRefusalCode, TableReceipt, TableDescription, DescribeTableOptions } from "./table-schema.ts";
+
+export { previewJoins, applyJoins, JoinRefusal } from "./join-plans.ts";
+export type { JoinInput, JoinPlan, JoinReceipt, JoinIssue, JoinApplyOptions, JoinRefusalCode } from "./join-plans.ts";

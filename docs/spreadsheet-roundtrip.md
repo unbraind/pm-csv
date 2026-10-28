@@ -1,5 +1,17 @@
 # Edit a CSV checkout safely
 
+Each export/apply attempt captures one native settings/schema snapshot. Changes
+during apply refuse with `csv_edit_settings_changed`; earlier patches use the
+existing SDK transaction compensation. Inputs are copied before asynchronous
+reads, and each mutation batch revalidates the settings digest inside writer
+coordination. Inspect pending cleanup before exporting a fresh session.
+
+A table whose cells already match the desired values still enters native journal
+recovery when an attempt is unfinished. Pending compensation restores the earlier
+state and returns `csv_edit_apply_failed`; it cannot be bypassed by an unchanged
+receipt. A compensated edit requires a fresh checkout. Dry-run preserves pending
+cleanup and reports the same refusal rather than claiming recovery.
+
 `csv export` and `csv import --key` remain format conversion and keyed upsert.
 For a spreadsheet edit session, use the separate checkout/apply protocol:
 
@@ -14,7 +26,10 @@ pm csv apply planning.csv
 
 For a selection, pass `--ids item-a,item-b` to checkout. The default is a certified
 complete tracker read. A checkout accepts up to 1000 distinct canonical item IDs;
-split larger selections. These examples use illustrative IDs; use IDs from your
+split larger selections. Checkout and apply validate all IDs with the SDK prefix
+before reading targets: bare, case or whitespace aliases and normalized duplicates
+refuse as `csv_session_invalid`. Saved identities are never silently rewritten.
+These examples use illustrative IDs; use IDs from your
 tracker. Files are UTF-8 comma-separated CSV, with quoted multiline cells, and
 can be saved with CRLF or a BOM. Newline-only LF/CRLF conversions in editable
 cells count as unchanged and retain the exact baseline value, including when a
@@ -23,7 +38,7 @@ normal conflict checks. Keep column names/order and digest cells intact.
 Rows may be reordered or omitted. Omission never deletes an item. Blank optional
 scalar cells unset that metadata; blank body clears it. Priority must be 0..4,
 and title must be nonblank. Scalar edits must be trimmed. Body uses the host's
-canonical trailing-whitespace normalization. Checkout prefixes editable values
+canonical document normalization, which removes leading blank body lines and trailing whitespace. Checkout prefixes editable values
 that start with `=`, `+`, `-`, `@`, tab, carriage return or an apostrophe
 with an apostrophe. Apply removes one recognized display prefix before comparison
 and storage, preserving raw baseline values and digests. Keep these prefixes when

@@ -87,6 +87,21 @@ pm csv import items.csv --dry-run
 pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
 ```
 
+**Column ownership on keyed updates:** an absent header means “do not touch”.
+Empty cells also leave existing values alone. A nonempty cell sets a supported
+field; `none` or `null` (case-insensitive) explicitly clears a supported nullable scope
+field: `parent`, `assignee`, `sprint`, `release` or `blocked_by`. Tags are additive;
+`blocked_by` adds a blocker without deleting other dependency edges. Custom fields
+are export-only and remain unchanged on import. Thus a title-only `--key title`
+reimport preserves status, assignment, planning fields, body, links and custom data.
+New items explicitly suppress implicit focus parents and planning defaults.
+Spreadsheet edit sessions have their own documented explicit-clear contract.
+Replay compares command values through SDK field normalization: local parents such
+as `abcd`, `#ABCD` and `pm-abcd` resolve using the tracker prefix; provider locators
+retain their native spelling. Assignment/planning whitespace and clear aliases
+follow native command semantics. Stored edit-session values instead use SDK document
+canonicalization, preserving literal strings such as `none`.
+
 **Flags**
 
 | Flag | Type | Default | Description |
@@ -533,3 +548,50 @@ keys make unchanged retries idempotent. The compact TOON/JSON receipt reports
 counts; artifacts include SHA-256 checksums. See the [protocol and worked
 example](docs/row-lineage.md) for the typed SDK, mapping revisions, refusals,
 privacy policy and recovery behavior.
+
+## Cross-table reference joins
+
+Resolve explicit external-key parent and dependency columns across selected tables
+in one preview, then apply the reviewed source digests through SDK transactions.
+
+```sh
+pm csv join preview joins.json --output reviewed.json --json
+pm csv join apply reviewed.json --json
+```
+
+Duplicate or unresolved keys include cell coordinates and block import. See the
+[three-table example, typed SDK API, bounds and recovery contract](docs/join-plans.md).
+These create-only plans work without git. Retain the reviewed artifact for crash
+recovery. Ordinary failures compensate unchanged owned creates and retain native
+delete history; interrupted cleanup revalidates every target before continuing.
+After compensation, preview fresh identities. Configured type/field lookups never
+accept inherited object properties, while prototype-looking external keys remain
+literal data. Foreign records and peer edits are preserved.
+
+Saved join and checkout IDs must use distinct canonical native spellings under
+the reviewed SDK prefix. All IDs validate before target leases or writes;
+`abcd` and `review-abcd` cannot identify two rows with prefix `review`, even in
+a correctly rehashed artifact. Preview a fresh plan after `csv_join_invalid`.
+
+Join journal identity covers the full reviewed plan, independent of current
+foreign-row eligibility. Retry resumes pending compensation under its recorded
+key and step list before new work. Historical subset journals remain recoverable;
+convergent spreadsheet values cannot bypass their cleanup. Atomic CSV retry with
+changed filters or mappings refuses when it would shrink or change an existing
+journal's row domain: resume using the original options to finish recovery first.
+
+Join planning captures one settings/schema snapshot. Create type and status
+defaults are resolved from that snapshot before writes; every mutation batch
+rechecks its digest inside SDK writer coordination. A settings change between
+rows returns `csv_join_settings_changed` and compensates unchanged owned creates.
+Recovery uses one separately guarded current-policy snapshot for cleanup. Peer
+edits or further policy changes can require journal reconciliation. Inputs and
+the tracker root are captured before asynchronous SDK reads, so caller edits or
+working-directory changes cannot redirect an in-flight plan.
+
+CSV mutations use explicit source-owned scope: missing or empty create parents
+are unset through the SDK, so session focus cannot add links. Empty supported
+scope cells preserve legacy keyed-import state; spreadsheet patches preserve
+unselected fields. Join replay refuses unreviewed stored scope. Public join
+failures consistently use `JoinRefusal`, with lower-level `sourceCode` and remedy
+retained. See [scope and refusal contracts](docs/join-plans.md#explicit-scope-and-refusal-boundaries).
