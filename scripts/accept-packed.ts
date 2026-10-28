@@ -34,6 +34,7 @@ interface AcceptanceReceipt {
   readonly atomic_compensation: true;
   readonly settings_snapshot_checked: true;
   readonly native_identity_checked: true;
+  readonly journal_recovery_checked: true;
   readonly custom_columns_exported: number;
   readonly custom_fields_sdk_roundtrip: true;
   readonly created_fixture_present: true;
@@ -68,6 +69,7 @@ const cleanEnvironment: NodeJS.ProcessEnv = {
 // A linked test may select its own tracker. Every scenario owns a fresh one.
 delete cleanEnvironment.PM_PATH;
 for (const key of Object.keys(cleanEnvironment)) {
+  if (/TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) || key === "NPM_MEDIA_SERVER") delete cleanEnvironment[key];
   if (key.toLowerCase() === "npm_config_allow_scripts") delete cleanEnvironment[key];
 }
 
@@ -285,6 +287,28 @@ try {
       const refused = runPm(scenario, scenarioRoot, ["csv", "join", "apply", identityPlan, ...format], 2);
       if (!(refused.stdout + refused.stderr).includes("csv_join_invalid")) throw new Error(`${scenario.name} accepted an aliased native identity plan`);
     }
+    const recoveryPlan = join(scenarioRoot, "recovery-plan.json"), recoveryProof = join(scenarioRoot, "recovery-proof.json");
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { writeFileSync, readFileSync } from "node:fs"; import { previewJoins, applyJoins, JoinRefusal } from "pm-csv"; '
+      + 'import { create, getHistoryPath, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk"; const [root, output, proof] = process.argv.slice(1); '
+      + 'const input = { version: 1, tables: [{ name: "tasks", key: "key", csv: "key,title\\na,Recovery A\\nb,Recovery B\\n", fields: { title: "title" }, references: [] }] }; '
+      + 'const before = new Set((await runWorkspaceTransactionGc(root, { dryRun: true, retentionDays: Infinity })).entries.map(e => e.file)); const { plan } = await previewJoins(root, input); '
+      + 'await assert.rejects(applyJoins(root, plan, { author: "packed-acceptance", onBoundary: (phase, id) => { if (phase === "before_create" && id === plan.ids[1]) throw new Error("Forward refusal"); if (phase === "compensating") throw new Error("Interrupted cleanup"); } }), error => error instanceof JoinRefusal); '
+      + 'const added = (await runWorkspaceTransactionGc(root, { dryRun: true, retentionDays: Infinity })).entries.filter(e => !before.has(e.file)); assert.equal(added.length, 1); assert.equal(added[0].status, "compensating"); '
+      + 'await create({ id: plan.ids[1], title: "Foreign recovery B", unset: ["parent"] }, { pmRoot: root }); writeFileSync(output, JSON.stringify(plan)); '
+      + 'writeFileSync(proof, JSON.stringify({ file: added[0].file, count: before.size + 1, history: readFileSync(getHistoryPath(root, plan.ids[1]), "utf8") }));',
+      join(scenarioRoot, ".agents/pm"), recoveryPlan, recoveryProof], scenarioRoot);
+    for (const format of [["--json"], []]) {
+      const refused = runPm(scenario, scenarioRoot, ["csv", "join", "apply", recoveryPlan, ...format], 2);
+      if (!(refused.stdout + refused.stderr).includes("csv_join_reconcile")) throw new Error(`${scenario.name} bypassed pending compensation`);
+    }
+    run(process.execPath, ["--input-type=module", "-e",
+      'import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; import { get, getHistoryPath, locateItem, runWorkspaceTransactionGc } from "@unbrained/pm-cli/sdk"; '
+      + 'const [root, input, saved] = process.argv.slice(1), plan = JSON.parse(readFileSync(input, "utf8")), proof = JSON.parse(readFileSync(saved, "utf8")); '
+      + 'assert.equal(await locateItem(root, plan.ids[0]), null); assert.equal((await get(plan.ids[1], {}, { pmRoot: root })).item.title, "Foreign recovery B"); '
+      + 'assert.equal(readFileSync(getHistoryPath(root, plan.ids[1]), "utf8"), proof.history); const journals = (await runWorkspaceTransactionGc(root, { dryRun: true, retentionDays: Infinity })).entries; '
+      + 'assert.equal(journals.length, proof.count); assert.equal(journals.find(e => e.file === proof.file).status, "compensated");',
+      join(scenarioRoot, ".agents/pm"), recoveryPlan, recoveryProof], scenarioRoot);
     const schemaOutput = join(scenarioRoot, "table.schema.json");
     const negotiatedTitle = `Negotiated; ${scenario.name}`;
     writeFileSync(schemaInput, `\uFEFFSummary;priority\r\n"${negotiatedTitle}";2\r\n`);
@@ -307,6 +331,7 @@ try {
       atomic_compensation: true,
       settings_snapshot_checked: true,
       native_identity_checked: true,
+      journal_recovery_checked: true,
       custom_columns_exported: CUSTOM_FIELDS.length,
       custom_fields_sdk_roundtrip: true,
       created_fixture_present: true,

@@ -6,6 +6,12 @@ existing SDK transaction compensation. Inputs are copied before asynchronous
 reads, and each mutation batch revalidates the settings digest inside writer
 coordination. Inspect pending cleanup before exporting a fresh session.
 
+A table whose cells already match the desired values still enters native journal
+recovery when an attempt is unfinished. Pending compensation restores the earlier
+state and returns `csv_edit_apply_failed`; it cannot be bypassed by an unchanged
+receipt. A compensated edit requires a fresh checkout. Dry-run preserves pending
+cleanup and reports the same refusal rather than claiming recovery.
+
 `csv export` and `csv import --key` remain format conversion and keyed upsert.
 For a spreadsheet edit session, use the separate checkout/apply protocol:
 

@@ -113,6 +113,19 @@ item locks and transaction writer locks own concurrency. As with existing CSV
 atomic import, host persistence fencing beyond item-lease expiry remains a
 host SDK requirement (tracked separately).
 
+The transaction key and recorded step domain cover the entire reviewed plan,
+including rows currently skipped as foreign. Peer-created items cannot produce
+a second transaction key on retry. Historical subset journals are identified by
+their plan-bound key and exact recorded steps; pending compensation takes priority
+over later receipts. Selection is revalidated inside SDK writer coordination
+before forward rows, including the SDK's monotonically increasing attempt generation.
+A compensation restart cannot be mistaken for the earlier applying snapshot.
+Recovery completes under the original journal, then refuses
+with `csv_join_reconcile` so the caller can preview fresh identities. It never
+reports owned live leftovers as unchanged while an older journal is compensating.
+Multiple historical forks require reconciliation; unrelated or malformed journal
+records are preserved and do not authorize ownership.
+
 Ordinary apply failures run reverse-order compensation through the SDK transaction
 coordinator. Unchanged creates from this transaction are removed, with native
 append-only delete events retained. The deterministic transaction ID uses

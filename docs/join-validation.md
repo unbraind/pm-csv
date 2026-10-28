@@ -220,3 +220,21 @@ rollback. Existing tombstone/history regressions remain unchanged.
 Installed npm, Bun and minimum-SDK consumers exercise colliding plans through
 both the SDK and real JSON/TOON CLI, and fail before/after each row's persistence.
 Reproduce with `node --test --test-concurrency=1 test/native-identities.test.ts`.
+
+## Stable recovery identity
+
+`test/plan-recovery.test.ts` interrupts every cleanup boundary, then changes each
+future target's eligibility and the all-foreign subset. The retry uses the same
+native transaction, completes compensation, preserves peer records/history and
+does not create a second committed journal or report owned leftovers unchanged.
+Both historical subset-key formats recover their recorded step lists. A seeded
+committed fork cannot supersede pending cleanup, and a receipt appearing between
+preflight and SDK writer coordination refuses before forward rows.
+
+Spreadsheet tests cover convergent cells over applying and compensating journals,
+dry-run and compensated retries. Atomic imports refuse empty, different and wider
+filter selections over the recorded row domain; recovery stops after rollback
+instead of adopting a cached pre-compensation item ID. Native audit history is
+retained throughout. Unrelated/malformed journal fixtures remain untouched.
+Installed npm, Bun and minimum-SDK acceptance repeats the join recovery scenario
+through real JSON/TOON CLI commands and verifies the same journal is compensated.

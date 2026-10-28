@@ -94,10 +94,44 @@ function joinRefusal(error: unknown, code: JoinRefusalCode, remedy: string): Joi
 function hash(value: unknown): string {
   return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 }
-/** Bind coordinator identity to reviewed bytes, native targets and their absent revisions. */
+/** Derive a recorded domain's compatible key; new attempts always supply the complete reviewed order. */
 export function joinTransactionId(plan: JoinPlan, selected: number[], derive: ((input: string) => string) | null = nativeSdk.deriveMutationTransactionId): string {
   const input = JSON.stringify(["csv-join-v2", plan.digest, plan.expected, selected.map(i => plan.ids[i])]);
   return `csv-join-${derive ? derive(input) : `mutate-${hash(input).slice(0, 24)}`}`;
+}
+
+/** A recorded plan keeps its original key and step domain across peer-state changes. */
+interface JoinJournal {
+  transactionId: string;
+  indices: number[];
+  status: string | null;
+  restarted: boolean;
+}
+
+/** Discover only cryptographically plan-bound journals, including historical subset keys. */
+export async function resolveJoinJournal(pmRoot: string, plan: JoinPlan, order: number[]): Promise<JoinJournal | undefined> {
+  const inventory = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
+  const matches: JoinJournal[] = [];
+  for (const entry of inventory.entries) {
+    if (!basename(entry.file).startsWith("csv-join-")) continue;
+    let value: unknown;
+    try { value = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8")); }
+    catch { continue; } // Foreign/unreadable records never authorize a new ownership claim.
+    if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "schemaVersion") || !("schemaVersion" in value) || value.schemaVersion !== 1
+        || !Object.hasOwn(value, "transactionId") || !("transactionId" in value) || typeof value.transactionId !== "string"
+        || !Object.hasOwn(value, "stepIds") || !("stepIds" in value) || !Array.isArray(value.stepIds) || !value.stepIds.length) continue;
+    const ids: unknown[] = value.stepIds;
+    const indices = order.filter(i => ids.includes(plan.ids[i]));
+    if (indices.length !== ids.length || indices.some((i, index) => plan.ids[i] !== ids[index])) continue;
+    const legacy = `csv-join-${hash([plan.digest, indices])}`;
+    if (basename(entry.file) !== `${value.transactionId}.json` || ![legacy, joinTransactionId(plan, indices)].includes(value.transactionId)) continue;
+    const restarted = Object.hasOwn(value, "attempt") && "attempt" in value && typeof value.attempt === "number" && value.attempt > 1;
+    matches.push({ transactionId: value.transactionId, indices, status: entry.status, restarted });
+  }
+  const recovering = matches.find(journal => journal.status === "compensating");
+  if (recovering) return recovering;
+  if (matches.length > 1) throw new JoinRefusal("csv_join_reconcile", "Multiple historical journals belong to this plan. Reconcile their recorded attempts before previewing fresh identities; no replacement journal was created.");
+  return matches[0];
 }
 
 /** Public SDK cache mutation shape, also portable to hosts predating derived indexes. */
@@ -367,6 +401,7 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
     "Use distinct canonical native IDs from an unchanged preview. Prefix, case or whitespace aliases cannot identify separate rows; preview a fresh plan."));
   const { rows, issues, order } = await compile(settings, plan.input);
   if (rows.length !== plan.ids.length || issues.length) invalid();
+  const journal = await resolveJoinJournal(pmRoot, plan, order);
   const marker = (i: number): string => `csv-join:${plan.digest}:${i}`;
   const states: JoinState[] = [];
   // A refusal must not leave sibling SDK inspections acquiring/releasing leases.
@@ -380,7 +415,8 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
       issues.push({ table: row.table, row: row.row, column: row.keyColumn, code });
     }
   }
-  const selected = order.filter(i => !skipped.has(i));
+  // Membership is reviewed/recorded state, never the currently eligible subset.
+  const selected = journal?.indices ?? order;
   /** Preserve foreign records and propagate skips at every inspected step boundary. */
   const skip = (i: number, code: "foreign" | "dependency_skipped"): "applied" => {
     if (!skipped.has(i)) {
@@ -438,11 +474,9 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
     },
   }));
   try {
-    if (steps.length) {
-      // Resume legacy journals under their existing key; never bypass pending compensation after upgrade.
-      const legacy = `csv-join-${hash([plan.digest, selected])}`;
-      const journals = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
-      const transactionId = journals.entries.some(entry => basename(entry.file) === `${legacy}.json`) ? legacy : joinTransactionId(plan, selected);
+    if ((journal?.status === "compensated" && skipped.size < rows.length) || (journal?.restarted && journal.status !== "compensating")) throw new JoinRefusal("csv_join_reconcile", "This plan was compensated or restarted. Reconcile its recorded attempt and preview fresh identities instead of restarting a frozen plan.");
+    if (steps.length && (skipped.size < rows.length || (journal && journal.status !== "committed" && journal.status !== "compensated"))) {
+      const transactionId = journal?.transactionId ?? joinTransactionId(plan, order);
       await commitWorkspaceTransaction({ pmRoot, transactionId, author: options.author, steps, onTransition: async context => {
         if (context.transition === "compensating") {
           compensating = true;
@@ -450,11 +484,18 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
         }
         if (context.transition === "prepared") compensating = false;
         await options.onTransition?.(context);
+        if (context.transition === "prepared") {
+          const current = await resolveJoinJournal(pmRoot, plan, order);
+          if (!current || current.transactionId !== context.transactionId || current.restarted) throw new JoinRefusal("csv_join_reconcile", "Recorded recovery identity or generation changed. No forward rows were applied; reconcile the retained journal before previewing new work.");
+        }
+        if (journal?.status === "compensating" && ["compensated", "prepared"].includes(context.transition)) {
+          throw new JoinRefusal("csv_join_reconcile", "Pending compensation was recovered under the original journal. Preview fresh identities; this retry does not restart forward work.");
+        }
         if (!compensating && context.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
       } });
     }
     // The SDK fast-paths committed journals without calling step inspectors. Never trust that frozen receipt.
-    for (const i of selected) if (await state(i) === "pending") {
+    for (const i of order) if (await state(i) === "pending") {
       throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing after coordination. Read current SDK state, reconcile the journal and preview a fresh plan.");
     }
   } catch (error) {

@@ -22,6 +22,7 @@ import type {
   WorkspaceTransactionCommitResult,
   WorkspaceTransactionStepInspection,
   WorkspaceTransactionJsonValue,
+  CommitWorkspaceTransactionOptions,
 } from "@unbrained/pm-cli/sdk";
 
 
@@ -1113,6 +1114,7 @@ interface CsvImportOptions {
     steps: readonly WorkspaceTransactionStep[];
     lockTtlSeconds?: number;
     lockWaitMs?: number;
+    onTransition?: CommitWorkspaceTransactionOptions["onTransition"];
   }) => Promise<WorkspaceTransactionCommitResult>;
   /** Author attributed to the atomic transaction journal (defaults to `pm-csv`). */
   atomicAuthor?: string;
@@ -1595,12 +1597,14 @@ function atomicStepId(rowIndex: number, existingId: string | undefined): string 
  * The public read-only inventory supplies the path, including after SDK layout
  * changes. Infinite retention and dry-run prevent recovery receipts being pruned.
  */
-async function loadAtomicBindings(pmRoot: string, transactionId: string): Promise<Map<number, string | undefined>> {
+export async function loadAtomicBindings(pmRoot: string, transactionId: string): Promise<{ bindings: Map<number, string | undefined>; status?: string | null }> {
   const bindings = new Map<number, string | undefined>();
   const inventory = await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity });
   const entry = inventory.entries.find(candidate => basename(candidate.file) === `${transactionId}.json`);
-  if (!entry) return bindings;
-  const journal: unknown = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8"));
+  if (!entry) return { bindings };
+  let journal: unknown;
+  try { journal = JSON.parse(readFileSync(resolve(pmRoot, entry.file), "utf8")); }
+  catch { throw new CommandError("The recorded atomic journal cannot be read. Preserve its audit and reconcile the original attempt before retrying or previewing this import.", EXIT_CODE.USAGE); }
   if (journal === null || typeof journal !== "object" || Array.isArray(journal)
       || !Object.hasOwn(journal, "stepIds") || !("stepIds" in journal) || !Array.isArray(journal.stepIds)
       || !journal.stepIds.every((id: unknown) => typeof id === "string")) {
@@ -1616,7 +1620,7 @@ async function loadAtomicBindings(pmRoot: string, transactionId: string): Promis
     if (!match) throw new CommandError(`Workspace transaction ${transactionId} journal does not match the supplied plan: incompatible CSV step identity.`);
     bindings.set(Number(match[2]), match[1]);
   }
-  return bindings;
+  return { bindings, status: entry.status };
 }
 
 /**
@@ -1840,6 +1844,8 @@ async function importCSVAtomicInternal(
   // A dry-run atomic import just previews like the non-atomic path (no
   // transaction is committed, nothing is written).
   if (opts.dryRun) {
+    const existing = await loadAtomicBindings(pmRoot, deriveTransactionId(resolve(filePath), fingerprintContent(rawHeaders, dataRows)));
+    if (existing.status === "compensating") throw new CommandError("Pending atomic compensation must be recovered with the original import options before previewing new work; dry-run did not modify the journal.", EXIT_CODE.USAGE);
     processImportRows(pmRoot, dataRows, resolvedHeaders.headers, opts, result);
     return result;
   }
@@ -1868,7 +1874,7 @@ async function importCSVAtomicInternal(
 
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
-  const bindings = await loadAtomicBindings(pmRoot, transactionId);
+  const { bindings, status: journalStatus } = await loadAtomicBindings(pmRoot, transactionId);
   const applied = loadAppliedByTransaction(pmRoot, transactionId);
   const keyIndex = opts.keyField ? loadKeyIndex(pmRoot) : new Map<string, string>();
   // In-batch duplicate-KEY guard: keys already claimed by an earlier planned
@@ -1928,6 +1934,9 @@ async function importCSVAtomicInternal(
   }
 
   // Recheck current scope before the SDK can reuse a committed journal receipt.
+  if (bindings.size && (planned.length !== bindings.size || planned.some(row => !bindings.has(row.rowIndex)))) {
+    throw new CommandError("An existing atomic CSV journal has a different recorded row domain. Resume with its original filters, mappings and key options to finish recovery; no new journal or successful empty receipt was produced.", EXIT_CODE.USAGE);
+  }
   // In particular, legacy creates may carry an unreviewed focus-inherited parent.
   const comparisonSettings = await readSettings(pmRoot);
   for (const row of planned) {
@@ -2016,7 +2025,11 @@ async function importCSVAtomicInternal(
 
   let committed: WorkspaceTransactionCommitResult;
   try {
-    committed = await commitTransaction({ transactionId, author, steps });
+    committed = await commitTransaction({ transactionId, author, steps, onTransition: event => {
+      if (journalStatus === "compensating" && ["compensated", "prepared"].includes(event.transition)) {
+        throw new CommandError("Pending atomic compensation was recovered. Inspect the retained audit and retry the original import; this attempt did not restart forward work.", EXIT_CODE.USAGE);
+      }
+    } });
   } catch (err: unknown) {
     rethrowSettingsChange(err, importSettingsChanged);
     const msg = errorMessage(err);

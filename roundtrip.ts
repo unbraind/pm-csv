@@ -1,9 +1,9 @@
 import { assertCanonicalMutationIds, explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import {
   acquireLock, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
-  readHistoryEntries, verifyHistoryEntries,
+  readHistoryEntries, verifyHistoryEntries, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep, PmSettings } from "@unbrained/pm-cli/sdk";
 import { captureSettings, inSettingsTransaction, readPinnedSettings as readSettings, rethrowSettingsChange, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
@@ -254,6 +254,8 @@ async function applyEditSessionInternal(
   assertCanonicalMutationIds(session.rows.map(row => row.id), settings.id_prefix, canonicalIdsRequired);
   const planned = plans(session, table, settings.schema);
   const transaction = `csv-edit-${digest([session.digest, table])}`;
+  const journal = (await runWorkspaceTransactionGc(pmRoot, { dryRun: true, retentionDays: Infinity })).entries
+    .find(entry => basename(entry.file) === `${transaction}.json`);
   const edited = planned.filter(plan => plan.fields.length > 0);
   const found: EditConflict[] = [];
   let concurrent = 0;
@@ -271,7 +273,8 @@ async function applyEditSessionInternal(
   }
   if (found.length) throw new EditRefusal("csv_edit_conflict", "Export a fresh session and reconcile the reported fields before applying; this preflight wrote zero items.", found);
   const receipt: EditReceipt = { rows: planned.length, changed: pending, unchanged: planned.length - pending, concurrent, applied: 0 };
-  if (options.dryRun || !pending) { await verifySettings(pmRoot); return receipt; }
+  if (journal?.status === "compensated" || (options.dryRun && journal?.status === "compensating")) throw new EditRefusal("csv_edit_apply_failed", "The prior edit attempt requires compensation recovery and a fresh session. Resume recovery without dry-run; do not replay a compensated edit.");
+  if (options.dryRun || (!pending && (!journal || journal.status === "committed"))) { await verifySettings(pmRoot); return receipt; }
   // Bind the journal to the exact selected rows and edits, independent of file path.
   let applied = 0;
   let compensating = false;
@@ -294,6 +297,9 @@ async function applyEditSessionInternal(
       if (event.transition === "compensating") { compensating = true; rollback = await captureSettings(pmRoot, settingsChanged); }
       if (event.transition === "prepared") compensating = false;
       await options.onTransition?.(event);
+      if (journal?.status === "compensating" && ["compensated", "prepared"].includes(event.transition)) {
+        throw new EditRefusal("csv_edit_apply_failed", "Pending edit compensation was recovered. Export a fresh session; no new forward edits were applied.");
+      }
       if (!compensating && event.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
     } });
   } catch (error) {

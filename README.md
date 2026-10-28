@@ -573,6 +573,13 @@ the reviewed SDK prefix. All IDs validate before target leases or writes;
 `abcd` and `review-abcd` cannot identify two rows with prefix `review`, even in
 a correctly rehashed artifact. Preview a fresh plan after `csv_join_invalid`.
 
+Join journal identity covers the full reviewed plan, independent of current
+foreign-row eligibility. Retry resumes pending compensation under its recorded
+key and step list before new work. Historical subset journals remain recoverable;
+convergent spreadsheet values cannot bypass their cleanup. Atomic CSV retry with
+changed filters or mappings refuses when it would shrink or change an existing
+journal's row domain: resume using the original options to finish recovery first.
+
 Join planning captures one settings/schema snapshot. Create type and status
 defaults are resolved from that snapshot before writes; every mutation batch
 rechecks its digest inside SDK writer coordination. A settings change between
