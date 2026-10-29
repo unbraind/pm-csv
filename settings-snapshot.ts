@@ -42,6 +42,11 @@ export function inSettingsTransaction<T>(pmRoot: string, run: () => Promise<T>):
 export async function readPinnedSettings(pmRoot: string): Promise<PmSettings> {
   return scope(pmRoot)?.snapshot.settings ?? readSettings(pmRoot);
 }
+/** Normalize a status using an active operation's native registry, without reading ambient defaults. */
+export function normalizePinnedStatus(value: string): string | undefined {
+  const current = scopes.getStore();
+  return current ? normalizeStatusInput(value, resolveRuntimeStatusRegistry(current.snapshot.settings.schema)) : undefined;
+}
 /** Revalidate live state solely as a guard; never use it to resolve forward values. */
 export async function verifySettings(pmRoot: string): Promise<void> {
   const current = scope(pmRoot);

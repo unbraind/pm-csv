@@ -44,6 +44,8 @@ interface AcceptanceReceipt {
   readonly schema_rows: 1;
   readonly schema_imported: 1;
   readonly schema_dry_run_imported: 0;
+  readonly admission_checked: true;
+  readonly admitted_application: "verified" | "upgrade_refused";
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -52,6 +54,7 @@ const packageJson = JSON.parse(
 ) as PackageContract;
 const cliPackage = "@unbrained/pm-cli";
 const developmentVersion = packageJson.devDependencies[cliPackage];
+const admissionHostVersion = "2026.10.28";
 const minimumVersion = packageJson.peerDependencies[cliPackage]?.replace(/^>=/, "");
 if (!developmentVersion || !minimumVersion) {
   throw new Error(`package.json must declare exact development and minimum peer versions for ${cliPackage}`);
@@ -69,7 +72,7 @@ const cleanEnvironment: NodeJS.ProcessEnv = {
 // A linked test may select its own tracker. Every scenario owns a fresh one.
 delete cleanEnvironment.PM_PATH;
 for (const key of Object.keys(cleanEnvironment)) {
-  if (/TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) || key === "NPM_MEDIA_SERVER") delete cleanEnvironment[key];
+  if (/TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|ACCESS_KEY|AUTHORIZATION/i.test(key) || key === "NPM_MEDIA_SERVER" || key === "SSH_AUTH_SOCK") delete cleanEnvironment[key];
   if (key.toLowerCase() === "npm_config_allow_scripts") delete cleanEnvironment[key];
 }
 
@@ -80,14 +83,14 @@ for (const key of Object.keys(cleanEnvironment)) {
  * @param cwd - Fresh scenario directory or the package root.
  * @returns Captured UTF-8 process output.
  */
-function run(command: string, args: string[], cwd: string, expectedStatus = 0): SpawnSyncReturns<string> {
+function run(command: string, args: string[], cwd: string, expectedStatus: number | readonly number[] = 0, environment = cleanEnvironment): SpawnSyncReturns<string> {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
-    env: cleanEnvironment,
+    env: environment,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== expectedStatus) {
+  if (!(typeof expectedStatus === "number" ? [expectedStatus] : expectedStatus).includes(result.status ?? -1)) {
     throw new Error(
       `${command} ${args.join(" ")} failed with status ${String(result.status)}: ${(result.stderr || result.error?.message || result.stdout).trim()}`,
     );
@@ -102,15 +105,37 @@ function run(command: string, args: string[], cwd: string, expectedStatus = 0): 
  * @param args - pm arguments after the executable name.
  * @returns Captured pm output.
  */
-function runPm(scenario: AcceptanceScenario, cwd: string, args: string[], expectedStatus = 0): SpawnSyncReturns<string> {
+function runPm(scenario: AcceptanceScenario, cwd: string, args: string[], expectedStatus: number | readonly number[] = 0): SpawnSyncReturns<string> {
   return scenario.manager === "npm"
     ? run(npxCommand, ["--no-install", "pm", ...args], cwd, expectedStatus)
     : run(bunxCommand, ["--no-install", "pm", ...args], cwd, expectedStatus);
 }
 
+/** Exercise the same packed admission/apply/replay path through each actual launcher. */
+function checkInstalledAdmission(invoke: (args: string[]) => SpawnSyncReturns<string>, scenarioRoot: string): { admission_rows: number; replay_imported: number } {
+  const source = join(scenarioRoot, "source.csv"); writeFileSync(source, "title,priority\nInstalled admission,2\n");
+  const receipt = JSON.parse(invoke(["csv", "admit", source, "--json"]).stdout) as { admitted: boolean; rows: { value: number } };
+  if (!receipt.admitted || receipt.rows.value !== 1) throw new Error("Installed host did not admit the packed source");
+  invoke(["csv", "import", source, "--atomic", "--admission", "--key", "title", "--json"]);
+  const replay = JSON.parse(invoke(["csv-import", "import", source, "--atomic", "--admission", "--key", "title", "--json"]).stdout) as { imported: number };
+  if (replay.imported !== 0) throw new Error("Installed packed replay did not revalidate native state");
+  writeFileSync(source, "title,body,assignee\nInstalled admission,First,none\nInstalled admission,Second,Person\n");
+  const repeated = JSON.parse(invoke(["csv-import", "import", source, "--atomic", "--admission", "--key", "title", "--json"]).stdout) as { updated: number };
+  const unchanged = decode(invoke(["csv", "import", source, "--atomic", "--admission", "--key", "title"]).stdout) as { updated: number };
+  const exported = JSON.parse(invoke(["csv", "export", "--columns", "title,body", "--json"]).stdout) as { csv: string };
+  if (repeated.updated !== 2 || unchanged.updated !== 0 || !parseCSV(exported.csv).some(row => row[0] === "Installed admission" && row[1] === "Second")) {
+    throw new Error("Installed repeated-target JSON/TOON apply, replay or SDK-backed export disagreed");
+  }
+  return { admission_rows: receipt.rows.value, replay_imported: replay.imported };
+}
+
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pm-csv-packed-acceptance-"));
 try {
   cleanEnvironment.GIT_CEILING_DIRECTORIES = temporaryRoot;
+  cleanEnvironment.PM_GLOBAL_PATH = join(temporaryRoot, "global-settings");
+  cleanEnvironment.PM_SENTRY_DISABLED = "1";
+  cleanEnvironment.PM_TELEMETRY_DISABLED = "1";
+  cleanEnvironment.PM_TELEMETRY_OTEL_DISABLED = "1";
   const packRoot = join(temporaryRoot, "pack");
   mkdirSync(packRoot);
   run(npmCommand, ["pack", "--silent", "--pack-destination", packRoot], repoRoot);
@@ -155,6 +180,8 @@ try {
     const importedTitle = `Packed CSV import ${scenario.name}`;
     const csvPath = join(scenarioRoot, "acceptance.csv");
     writeFileSync(csvPath, `title,status,type\n${importedTitle},open,Task\n`, "utf8");
+    const admission = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "admit", csvPath, "--json"]).stdout) as { admitted: boolean; rows: { value: number; kind: string } };
+    if (!admission.admitted || admission.rows.value !== 1 || admission.rows.kind !== "exact") throw new Error(`${scenario.name} packed admission failed`);
     runPm(scenario, scenarioRoot, ["csv", "import", csvPath, "--strict"]);
     const exported = runPm(scenario, scenarioRoot, [
       "--json",
@@ -319,6 +346,17 @@ try {
     if (schemaPreview.rows !== 1 || schemaDryRun.imported !== 0 || afterPreview.stdout.includes(negotiatedTitle)) throw new Error(`${scenario.name} schema preview mutated the tracker or returned incorrect counts`);
     const schemaImport = JSON.parse(runPm(scenario, scenarioRoot, ["csv", "schema", "import", schemaInput, "--schema", schemaOutput, "--json"]).stdout) as Record<string, unknown>;
     if (schemaImport.imported !== 1) throw new Error(`${scenario.name} negotiated import failed`);
+    const admittedSource = join(scenarioRoot, "admitted.csv");
+    writeFileSync(admittedSource, "title,priority\nAdmitted project fixture,2\n");
+    const application = runPm(scenario, scenarioRoot, ["csv", "import", admittedSource, "--atomic", "--admission", "--json"], [0, 2]);
+    if (application.status === 0) {
+      const replay = JSON.parse(runPm(scenario, scenarioRoot, ["csv-import", "import", admittedSource, "--atomic", "--admission", "--json"]).stdout) as { imported: number };
+      if (replay.imported !== 0) throw new Error(`${scenario.name} admitted project replay failed`);
+    } else {
+      if (!(application.stdout + application.stderr).includes("csv_admission_sdk")) throw new Error(`${scenario.name} older host did not return the typed upgrade remedy`);
+      const after = runPm(scenario, scenarioRoot, ["csv", "export", "--columns", "title", "--json"]);
+      if (after.stdout.includes("Admitted project fixture")) throw new Error(`${scenario.name} host refusal persisted a target`);
+    }
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -341,10 +379,43 @@ try {
       schema_rows: 1,
       schema_imported: 1,
       schema_dry_run_imported: 0,
+      admission_checked: true,
+      admitted_application: application.status === 0 ? "verified" : "upgrade_refused",
     });
   }
 
-  process.stdout.write(`${JSON.stringify({ ok: true, receipts })}\n`);
+  const globalReceipts: { manager: string; admission_rows: number; replay_imported: number }[] = [];
+  for (const manager of ["npm", "bun"] as const) {
+    const scenarioRoot = join(temporaryRoot, `${manager}-global`), prefix = join(scenarioRoot, "prefix");
+    mkdirSync(scenarioRoot);
+    const environment = { ...cleanEnvironment, BUN_INSTALL: prefix, BUN_INSTALL_GLOBAL_DIR: join(prefix, "global"), BUN_INSTALL_BIN: join(prefix, "bin") };
+    if (manager === "npm") run(npmCommand, ["install", "--global", "--prefix", prefix, "--ignore-scripts", `${cliPackage}@${admissionHostVersion}`, tarball], scenarioRoot, 0, environment);
+    else run(bunCommand, ["add", "--global", "--ignore-scripts", `${cliPackage}@${admissionHostVersion}`, tarball], scenarioRoot, 0, environment);
+    const executable = join(prefix, "bin", "pm");
+    run(executable, ["init", "--defaults", "--agent-guidance", "skip"], scenarioRoot, 0, environment);
+    run(executable, ["install", tarball, "--project"], scenarioRoot, 0, environment);
+    globalReceipts.push({ manager, ...checkInstalledAdmission(args => run(executable, args, scenarioRoot, 0, environment), scenarioRoot) });
+  }
+  const ephemeralReceipts: { manager: string; admission_rows: number }[] = [];
+  for (const manager of ["npm", "bun"] as const) {
+    const scenarioRoot = join(temporaryRoot, `${manager}-ephemeral`); mkdirSync(scenarioRoot);
+    const executable = manager === "npm" ? npxCommand : bunxCommand;
+    const prefixArgs = manager === "npm" ? ["--yes", `--package=${cliPackage}@${admissionHostVersion}`, "pm"] : ["--package", `${cliPackage}@${admissionHostVersion}`, "pm"];
+    run(executable, [...prefixArgs, "init", "--defaults", "--agent-guidance", "skip"], scenarioRoot);
+    run(executable, [...prefixArgs, "install", tarball, "--project"], scenarioRoot);
+    ephemeralReceipts.push({ manager, ...checkInstalledAdmission(args => run(executable, [...prefixArgs, ...args], scenarioRoot), scenarioRoot) });
+  }
+  const projectReceipts: { manager: string; admission_rows: number; replay_imported: number }[] = [];
+  for (const manager of ["npm", "bun"] as const) {
+    const scenarioRoot = join(temporaryRoot, `${manager}-admission-project`); mkdirSync(scenarioRoot);
+    writeFileSync(join(scenarioRoot, "package.json"), JSON.stringify({ private: true, type: "module" }));
+    run(manager === "npm" ? npmCommand : bunCommand, [manager === "npm" ? "install" : "add", "--ignore-scripts", `${cliPackage}@${admissionHostVersion}`, tarball], scenarioRoot);
+    const scenario: AcceptanceScenario = { name: `${manager}-admission-project`, manager, hostVersion: admissionHostVersion };
+    runPm(scenario, scenarioRoot, ["init", "--defaults", "--agent-guidance", "skip"]);
+    runPm(scenario, scenarioRoot, ["install", tarball, "--project"]);
+    projectReceipts.push({ manager, ...checkInstalledAdmission(args => runPm(scenario, scenarioRoot, args), scenarioRoot) });
+  }
+  process.stdout.write(`${JSON.stringify({ ok: true, admission_host_version: admissionHostVersion, receipts, projectReceipts, globalReceipts, ephemeralReceipts })}\n`);
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

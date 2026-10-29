@@ -123,12 +123,14 @@
       "docs/row-lineage.md",
       "docs/table-schema.md",
       "CHANGELOG.md",
-      "docs/join-plans.md"
+      "docs/join-plans.md",
+      "docs/import-admission.md"
     ],
     "examples": [
       "README.md",
       "docs/table-schema.md",
-      "docs/join-plans.md"
+      "docs/join-plans.md",
+      "docs/import-admission.md"
     ]
   },
   "publishConfig": {
