@@ -42,10 +42,31 @@ tracker without a Git repository. None of these commands requires Git.
 | `pm csv import <file>` | Import a required CSV file; `--dry-run` previews without writes. |
 | `pm csv-import import <file>` | Same required file, flags, implementation and results as `csv import`. |
 | `pm csv validate <file>` | Validate a CSV file without writes. |
+| `pm csv admit <file>` | Stream bounded initial/full validation, counts, widths and mutation upper bounds without writes. |
 | `pm csv export` / `pm csv-export export` | Export tracker items as CSV. |
 | `pm csv schema describe <file>` | Propose a reusable versioned table schema with `--output schema.json`. |
 | `pm csv schema preview <file> --schema schema.json` | Refuse changed dialect, columns, domains or target contracts without writes. |
 | `pm csv schema import <file> --schema schema.json` | Negotiate before importing through the existing mutation core; `--dry-run` is read-only. |
+
+### Bounded import admission
+
+```sh
+pm csv admit large.csv --initial-rows 1000 --json
+pm csv admit large.csv --json
+pm csv import reviewed.csv --atomic --admission --json
+```
+
+Full admission reports exact row counts, column widths, mutation upper bounds
+and explicit resource limits. Initial observations report prefix counts and never
+authorize apply. A million-row regression runs below a fixed 128 MiB heap cap;
+atomic application separately requires at most 1,000 rows and 8 MiB. The opt-in
+import guard finishes full validation and binds the captured source bytes before
+any mutation, so an invalid final row refuses the entire admitted import.
+
+The typed SDK, limit/refusal tables and an example are in
+[bounded import admission](docs/import-admission.md). All admission commands work
+without git. SDK transaction coordination does not isolate ordinary SDK/CLI
+writers; the remaining target read/write window is documented there.
 
 ### Versioned table schema negotiation
 
@@ -84,7 +105,7 @@ pm csv import legacy.csv --encoding latin1  # non-UTF-8 source
 pm csv import sprint12.csv --source 'jira-export-2026-06'
 pm csv import vendor.csv --strict       # fail before writing on bad row data
 pm csv import items.csv --dry-run
-pm csv import tasks.csv --atomic   # writer-locked, crash-recoverable import
+pm csv import tasks.csv --atomic   # SDK-coordinated, crash-recoverable import
 ```
 
 **Column ownership on keyed updates:** an absent header means “do not touch”.
@@ -117,7 +138,8 @@ canonicalization, preserving literal strings such as `none`.
 | `--priority <n>` | integer | — | Import **only** rows whose integer priority equals this value |
 | `--strict` | boolean | false | Abort before writing if validation finds missing titles, unknown statuses, invalid/out-of-range priorities, or duplicate mapped columns |
 | `--dry-run` | boolean | false | Preview what would be imported without writing any data |
-| `--atomic` | boolean | false | Use one writer-locked, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing updates restore captured prior values unless a conflict prevents safe compensation. Inspect and reconcile any marked orphan before retrying. Incompatible with `--stream` |
+| `--admission` | boolean | false | Finish bounded full validation and enforce atomic row/byte budgets before application; requires `--atomic` |
+| `--atomic` | boolean | false | Use one SDK-coordinated, crash-recoverable transaction. On failure, attempt best-effort create compensation; pre-existing updates restore captured prior values unless a conflict prevents safe compensation. Inspect and reconcile any marked orphan before retrying. Incompatible with `--stream` |
 
 #### Strict import gate
 

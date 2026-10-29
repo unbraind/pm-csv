@@ -13,6 +13,7 @@ import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { serializeCSV } from "../index.ts";
 import { readUpdateDocument } from "../atomic-update.ts";
 import type { JoinInput, JoinPlan } from "../join-plans.ts";
+import { admitCSV } from "../admission.ts";
 
 /** Initialize a genuine non-git tracker isolated from ancestor repositories. */
 function fixture(): string {
@@ -364,6 +365,12 @@ test("500 seeded model sequences compare SDK readback with native reference stat
         pool[slot] = model;
       }
       const { root, oracle, source, plan: p } = model;
+      // Admission observes producer output in every sequence and cannot alter native reference state.
+      const admissionFile = join(root, "admission.csv");
+      writeFileSync(admissionFile, source.tables[Math.floor(rng() * source.tables.length)].csv);
+      const admission = await admitCSV(root, admissionFile);
+      assert.equal(admission.ok, true); assert.equal(admission.rows.value, 1);
+      assert.equal(admission.mutationWork.kind, "upper_bound");
       await focus(model.ambient[Math.floor(rng() * model.ambient.length)], {}, { pmRoot: root });
       process.chdir(model.cwd[Math.floor(rng() * model.cwd.length)]);
       assert.equal((await previewJoins(root, source)).receipt.ok, true);
