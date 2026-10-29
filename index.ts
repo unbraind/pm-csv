@@ -1935,8 +1935,8 @@ async function importCSVAtomicInternal(
   const admissionPreview = opts.admission === undefined ? undefined : requireAdmissionCapability(nativeSdk.previewItemMutations);
   const transactionId = opts.admission === undefined ? deriveTransactionId(resolve(filePath), fingerprintContent(rawHeaders, dataRows))
     : `csv-import-${requireAdmissionCapability(nativeSdk.deriveMutationTransactionId)(JSON.stringify([
-      "admitted-v1", resolve(filePath), rawHeaders, dataRows, Object.entries(opts.fieldMap).sort(), opts.autoMap ?? false, opts.keyField ?? "",
-      [opts.filter?.status, opts.filter?.type, opts.filter?.priority], opts.skipHeaders ?? false, opts.source ?? "", settingsDigest(await readSettings(pmRoot)),
+      "admitted-v1", resolve(filePath), rawHeaders, dataRows, Object.entries(opts.fieldMap).sort(), opts.autoMap, opts.keyField ?? "",
+      [opts.filter?.status, opts.filter?.type, opts.filter?.priority], opts.skipHeaders, opts.source ?? "", settingsDigest(await readSettings(pmRoot)),
     ]))}`;
   const author = opts.atomicAuthor ?? "pm-csv";
   let rollback: Promise<SettingsSnapshot> | undefined;
