@@ -15,7 +15,7 @@ import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts
 import { buildMutationIntent, mutationScopeArguments, matchesMutationScope } from "./mutation-intent.ts";
 import { registerJoinCommands } from "./join-plans.ts";
 import { registerTableSchemaCommands } from "./table-schema.ts";
-import { admitCSV, AdmissionRefusal, admissionPreviewFailure, admissionSettingsChanged, admissionTargetRevision, assertCSVAdmission, findAdmissionFailure, normalizeAdmissionFilter, parseAdmissionOptions, readAdmittedSource, registerAdmissionCommand, requireAdmissionCapability } from "./admission.ts";
+import { admitCSV, AdmissionRefusal, admissionPreviewFailure, admissionSettingsChanged, admissionTargetRevision, admissionTargetSequence, assertCSVAdmission, findAdmissionFailure, normalizeAdmissionFilter, parseAdmissionOptions, readAdmittedSource, registerAdmissionCommand, requireAdmissionCapability } from "./admission.ts";
 import type { AdmissionOptions } from "./admission.ts";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
@@ -1948,6 +1948,9 @@ async function importCSVAtomicInternal(
   // Detect rows a prior interrupted run already applied (resumability) plus
   // the dedup index for --key upsert decisions, both from one fresh scan.
   const { bindings, status: journalStatus, revisions, creations } = bindingSnapshot ?? await loadAtomicBindings(pmRoot, transactionId);
+  if (opts.admission !== undefined && opts.dryRun && journalStatus === "compensating") {
+    throw new AdmissionRefusal("csv_admission_target_changed", "Recover the retained atomic compensation with the original options before previewing this import; dry-run did not modify the journal.");
+  }
   const admittedItems = opts.admission === undefined ? undefined : certifyCompleteListResult(await listAllComplete({}, { pmRoot })).items;
   const applied = admittedItems === undefined ? loadAppliedByTransaction(pmRoot, transactionId)
     : csvAppliedIndex(admittedItems, `${TX_ROW_TAG_PREFIX}${transactionId}${TX_ROW_TAG_SEPARATOR}`);
@@ -2031,12 +2034,28 @@ async function importCSVAtomicInternal(
   }
   // In particular, legacy creates may carry an unreviewed focus-inherited parent.
   const comparisonSettings = planningSettings;
+  const sequences = new Map<string, PlannedRow[]>();
+  for (const row of planned) if (row.revision !== undefined && row.isUpdate) {
+    const rows = sequences.get(row.existingId!) ?? [];
+    rows.push(row); sequences.set(row.existingId!, rows);
+  }
+  const sequenceHeads = new Map<string, string>();
+  /** Share ordered target progress between preview, durable step inspection and per-write revision guards. */
+  const admittedRowState = async (row: PlannedRow): Promise<{ revision: string; applied: boolean }> => {
+    const sequence = sequences.get(row.existingId!);
+    if (sequence) {
+      const state = await admissionTargetSequence(pmRoot, row.existingId!, row.revision!, sequence.map(entry => rowTagFor(entry.rowIndex)));
+      sequenceHeads.set(row.existingId!, state.revision);
+      return { revision: state.revision, applied: state.completed >= sequence.indexOf(row) };
+    }
+    const revision = await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, row.revision, rowTagFor(row.rowIndex));
+    return { revision, applied: revision !== row.revision };
+  };
   const admittedApplied = new Set<number>();
   for (const row of planned) {
     const owned = applied.byRowIndex.get(row.rowIndex);
     if (row.revision !== undefined) {
-      const current = await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, row.revision, rowTagFor(row.rowIndex));
-      if (current !== row.revision) admittedApplied.add(row.rowIndex);
+      if ((await admittedRowState(row)).applied) admittedApplied.add(row.rowIndex);
     }
     if (!owned || row.isUpdate) continue;
     const document = await readUpdateDocument(pmRoot, owned);
@@ -2096,8 +2115,7 @@ async function importCSVAtomicInternal(
     let appliedId: string | undefined;
     const inspect = async (): Promise<WorkspaceTransactionStepInspection> => {
       if (row.revision !== undefined) {
-        const current = await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, row.revision, rowTag);
-        return current !== row.revision ? { state: "applied", result: row.existingId ?? row.creation! } : { state: "pending" };
+        return (await admittedRowState(row)).applied ? { state: "applied", result: row.existingId ?? row.creation! } : { state: "pending" };
       }
       if (row.isUpdate) {
         return inspectUpdate(pmRoot, row.existingId!, rowTag, row.parsed.status === "closed" || row.parsed.status === "canceled");
@@ -2116,7 +2134,7 @@ async function importCSVAtomicInternal(
       if (row.revision !== undefined) {
         await opts.onAdmissionBoundary?.("before_write", row.existingId ?? row.creation!);
         await verifySettings(pmRoot);
-        await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, row.revision);
+        await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, sequenceHeads.get(row.existingId!) ?? row.revision);
         if (!row.isUpdate && opts.keyField && row.keyValue && csvKeyIndex(certifyCompleteListResult(await listAllComplete({}, { pmRoot })).items).has(normalizeKeyValue(row.keyValue))) {
           throw new AdmissionRefusal("csv_admission_target_changed", "A key appeared after admission planning. Re-read current SDK state and preview a fresh import before writing.");
         }
@@ -2125,6 +2143,7 @@ async function importCSVAtomicInternal(
         else await createNativeCsv({ ...options, id: row.creation, author, message: `${rowTag}:create` }, { pmRoot });
         appliedId = row.existingId ?? row.creation!;
         wrote.add(row.rowIndex);
+        if (sequences.has(row.existingId!)) await admittedRowState(row);
         return appliedId;
       }
       if (row.isUpdate) {

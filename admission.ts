@@ -164,21 +164,37 @@ export function readAdmittedSource(file: string, digest: string, maxBytes = ADMI
   return bytes;
 }
 /** Bind a mutation step to verified native state plus append-only history, preventing ABA replay. */
-export async function admissionTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
+async function readAdmissionTarget(pmRoot: string, id: string, expected?: string): Promise<{ revision: string; message?: string }> {
   const settings = await readPinnedSettings(pmRoot);
   const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, resolveItemTypeRegistry(settings).type_to_folder);
   const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
   if (!located) {
-    if (expected === "absent" && history.length === 0) return "absent";
+    if (expected === "absent" && history.length === 0) return { revision: "absent" };
     throw new AdmissionRefusal("csv_admission_target_changed", "A target is missing or has retained history; reconcile its SDK state before retrying the original plan.");
   }
   const document = (await readLocatedItem(located, { schema: settings.schema })).document;
   const revision = createHash("sha256").update(JSON.stringify([document, history])).digest("hex");
-  const owned = appliedMarker !== undefined && ["create", "apply", "close"].some(phase => mutationMessageBase(history.at(-1)?.message) === `${appliedMarker}:${phase}`);
-  if (!verifyHistoryEntries(history, document).ok || (expected !== undefined && revision !== expected && !owned)) {
-    throw new AdmissionRefusal("csv_admission_target_changed", "A target revision changed after planning or a prior import. Reconcile current SDK state and preview a fresh import; no frozen target plan was replayed.");
-  }
+  if (!verifyHistoryEntries(history, document).ok) throw admissionTargetChanged();
+  return { revision, message: mutationMessageBase(history.at(-1)?.message) };
+}
+/** Require current native state or the latest immutable success of exactly this row. */
+export async function admissionTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
+  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
+  const owned = appliedMarker !== undefined && ["create", "apply", "close"].some(phase => message === `${appliedMarker}:${phase}`);
+  if (expected !== undefined && revision !== expected && !owned) throw admissionTargetChanged();
   return revision;
+}
+/** Reconcile ordered writes to one native target; later rows prove the completed prefix, including reverse compensation. */
+export async function admissionTargetSequence(pmRoot: string, id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }> {
+  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
+  if (revision === expected) return { revision, completed: -1 };
+  const completed = markers.findIndex(marker => ["apply", "close", "restore", "compensate"].some(phase => message === `${marker}:${phase}`));
+  if (completed < 0) throw admissionTargetChanged();
+  return { revision, completed: message === `${markers[completed]}:compensate` ? completed - 1 : completed };
+}
+/** Keep foreign writes, ABA changes and unverifiable target histories in one refusal family. */
+function admissionTargetChanged(): AdmissionRefusal {
+  return new AdmissionRefusal("csv_admission_target_changed", "A target revision changed after planning or a prior import. Reconcile current SDK state and preview a fresh import; no frozen target plan was replayed.");
 }
 /** Check every emitted count and width before returning success, also useful to consumers validating receipts. */
 export function assertAdmissionNumbers(receipt: AdmissionReceipt): void {

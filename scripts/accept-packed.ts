@@ -116,9 +116,16 @@ function checkInstalledAdmission(invoke: (args: string[]) => SpawnSyncReturns<st
   const source = join(scenarioRoot, "source.csv"); writeFileSync(source, "title,priority\nInstalled admission,2\n");
   const receipt = JSON.parse(invoke(["csv", "admit", source, "--json"]).stdout) as { admitted: boolean; rows: { value: number } };
   if (!receipt.admitted || receipt.rows.value !== 1) throw new Error("Installed host did not admit the packed source");
-  invoke(["csv", "import", source, "--atomic", "--admission", "--json"]);
-  const replay = JSON.parse(invoke(["csv-import", "import", source, "--atomic", "--admission", "--json"]).stdout) as { imported: number };
+  invoke(["csv", "import", source, "--atomic", "--admission", "--key", "title", "--json"]);
+  const replay = JSON.parse(invoke(["csv-import", "import", source, "--atomic", "--admission", "--key", "title", "--json"]).stdout) as { imported: number };
   if (replay.imported !== 0) throw new Error("Installed packed replay did not revalidate native state");
+  writeFileSync(source, "title,body,assignee\nInstalled admission,First,none\nInstalled admission,Second,Person\n");
+  const repeated = JSON.parse(invoke(["csv-import", "import", source, "--atomic", "--admission", "--key", "title", "--json"]).stdout) as { updated: number };
+  const unchanged = decode(invoke(["csv", "import", source, "--atomic", "--admission", "--key", "title"]).stdout) as { updated: number };
+  const exported = JSON.parse(invoke(["csv", "export", "--columns", "title,body", "--json"]).stdout) as { csv: string };
+  if (repeated.updated !== 2 || unchanged.updated !== 0 || !parseCSV(exported.csv).some(row => row[0] === "Installed admission" && row[1] === "Second")) {
+    throw new Error("Installed repeated-target JSON/TOON apply, replay or SDK-backed export disagreed");
+  }
   return { admission_rows: receipt.rows.value, replay_imported: replay.imported };
 }
 

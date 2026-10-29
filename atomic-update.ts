@@ -1,4 +1,4 @@
-import { explicitDocumentMutation } from "./mutation-intent.ts";
+import { explicitDocumentMutation, mutationMessageBase } from "./mutation-intent.ts";
 import {
   acquireLock, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
   readLocatedItem, resolveItemTypeRegistry, verifyHistoryEntries,
@@ -37,11 +37,11 @@ export async function inspectUpdate(
 ): Promise<WorkspaceTransactionStepInspection> {
   const document = await readUpdateDocument(pmRoot, id);
   const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
-  const lastOwn = [...history].reverse().find(entry => entry.message === `${marker}:apply`
-    || entry.message === `${marker}:close` || entry.message === `${marker}:restore` || entry.message === `${marker}:compensate`);
-  if (lastOwn?.message === `${marker}:compensate`) return { state: "pending" };
+  const lastOwn = [...history].reverse().map(entry => mutationMessageBase(entry.message)).find(message => message === `${marker}:apply`
+    || message === `${marker}:close` || message === `${marker}:restore` || message === `${marker}:compensate`);
+  if (lastOwn === `${marker}:compensate`) return { state: "pending" };
   const applied = Boolean(lastOwn) || Boolean(document.metadata.tags?.includes(marker));
-  if (applied && terminal && lastOwn?.message === `${marker}:apply`
+  if (applied && terminal && lastOwn === `${marker}:apply`
       && document.metadata.status !== "closed" && document.metadata.status !== "canceled") {
     throw new Error(`Atomic update item ${id} has an incomplete terminal transition; compensation required.`);
   }
@@ -136,18 +136,18 @@ export async function compensateUpdate(
           || !verifyHistoryEntries(history.slice(0, historyLength), prior).ok) {
         throw new Error(`Atomic update item ${id} has changed history or state; refusing compensation.`);
       }
-      const subsequent = history.slice(historyLength);
-      if (subsequent.some(entry => entry.message === compensationMessage)) {
+      const subsequent = history.slice(historyLength).map(entry => mutationMessageBase(entry.message));
+      if (subsequent.some(message => message === compensationMessage)) {
         completed = true;
         return { changedFields: [] };
       }
       // Reverse-order restores of later rows in this same batch are safe. Any
       // other author's mutation remains a conflict, even if its value is equal.
-      if (subsequent.some(entry => !entry.message?.startsWith(batchPrefix)
-          || !/^\d+:(apply|close|restore|compensate)$/.test(entry.message.slice(batchPrefix.length)))) {
+      if (subsequent.some(message => !message?.startsWith(batchPrefix)
+          || !/^\d+:(apply|close|restore|compensate)$/.test(message.slice(batchPrefix.length)))) {
         throw new Error(`Atomic update item ${id} has a concurrent writer; refusing compensation.`);
       }
-      if (subsequent.some(entry => entry.message === restoreMessage)) return { changedFields: [] };
+      if (subsequent.some(message => message === restoreMessage)) return { changedFields: [] };
       const changedFields = [...new Set([...Object.keys(document.metadata), ...Object.keys(prior.metadata), "body"])];
       document.metadata = structuredClone(prior.metadata);
       document.body = prior.body;
@@ -166,7 +166,7 @@ export async function compensateUpdate(
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
     const contents = priorRepresentation(data.raw, data.format as "toon" | "json_markdown", current.document.metadata.updated_at);
     const represented = parseItemDocument(contents, { format: "toon", schema: settings.schema });
-    if (history.at(-1)?.message !== restoreMessage || !verifyHistoryEntries(history, current.document).ok
+    if (mutationMessageBase(history.at(-1)?.message) !== restoreMessage || !verifyHistoryEntries(history, current.document).ok
         || !verifyHistoryEntries(history, represented).ok) {
       throw new Error(`Atomic update item ${id} changed during representation restoration; refusing compensation.`);
     }

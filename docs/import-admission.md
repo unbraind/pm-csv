@@ -185,3 +185,15 @@ planning, the caller adopts the SDK-recorded bindings and revalidates targets.
 Receipts count writes performed by that invocation; a peer's successful commit
 is reported as zero new writes. This does not extend the coordinator's lease to
 ordinary SDK writers.
+
+Repeated rows resolving to one existing native item execute in source order,
+including distinct external-key aliases for that item. Preview, application and
+replay use the same ordered target group. Each own row advances its verified
+history checkpoint; the following row checks that checkpoint immediately before
+writing. A completed later row proves the applied prefix, so replay reports zero
+new updates. Reverse compensation restores each captured prior state and keeps
+the full audit. Foreign edits still refuse, including between repeated rows;
+SDK explicit-unset audit suffixes do not turn an own write into a foreign one.
+Single-target updates use the same verified retry checkpoints. Dry-run refuses
+a pending compensation journal instead of reporting restored rows as unchanged.
+The existing first-row-wins rule for duplicate *new* keys is unchanged.
