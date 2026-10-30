@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.10.30 - 2026-10-30
+
+### Added
+
+- Admit large CSV imports within declared memory and mutation budgets ([pm-csv-bounded-admission](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-bounded-admission.toon))
+- Resolve cross-table external references before CSV import ([pm-csv-join-plans](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-join-plans.toon))
+
 ## 2026.10.28 - 2026-10-28
 
 ### Fixed
@@ -11,6 +18,10 @@
 - Use the pm SDK for runtime CSV export fields ([pm-csv-sdk-adoption-1025](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-sdk-adoption-1025.toon))
 
 ## 2026.10.26 - 2026-10-26
+
+### Other
+
+- Point the npm homepage at the package catalog and link the author ([pm-csv-2ms0](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-2ms0.toon))
 
 ### Closed
 
