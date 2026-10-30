@@ -2,13 +2,19 @@ id: pm-csv-join-plans
 title: Resolve cross-table external references before CSV import
 description: "Plan joins across explicitly selected external tables. Existing CSV relational columns accept native IDs and table-schema.ts negotiates one table; provider adapters retain remote-key ownership. Core continues to own item identities, relationships and transactions."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-10-25T22:22:43.054Z"
-updated_at: "2026-10-28T19:08:51.537Z"
+updated_at: "2026-10-30T20:09:51.640Z"
+closed_at: "2026-10-30T20:09:47.477Z"
+completed_at: "2026-10-28T20:09:25.000Z"
 author: codex-agent
 acceptance_criteria: "A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives. Every mutation path uses shared explicit relationship/scope intent; random focus and cwd changes cannot add unreviewed relationships, and divergent old scope refuses replay. Public join APIs expose only JoinRefusal and preserve lower-level source codes and remedies for malformed CSV, encoding and SDK failures.; Keyed imports preserve absent columns and empty cells, accept title-only reimport, apply explicit supported edits exactly, and never invent ambient scope defaults; At least 500 seeded column-ownership sequences prove silence, unchanged round trips, explicit edits and older-input replay through SDK read-back across relationships and custom data; Native none/null clear aliases in every supported scope scalar and linked collection apply and replay consistently across SDK, CLI, JSON/TOON and packed consumers while snapshots stay literal and silent patches preserve existing state; Reviewed settings/schema are captured once, type/status defaults are pinned before mutations, and every mutation batch validates the digest inside SDK writer coordination; settings changes at every row boundary return typed settings_changed and compensate unchanged owned targets; API inputs and tracker roots are captured before asynchronous reads"
+release: 2026.10.30
+resolution: "Delivered by PR #198 (1c13ab7): Resolve CSV references across selected tables before import"
+expected_result: "A three-table fixture resolves all unique references in one preview; ambiguous keys produce zero mutations; apply uses reviewed source digests and SDK transaction primitives. Every mutation path uses shared explicit relationship/scope intent; random focus and cwd changes cannot add unreviewed relationships, and divergent old scope refuses replay. Public join APIs expose only JoinRefusal and preserve lower-level source codes and remedies for malformed CSV, encoding and SDK failures.; Keyed imports preserve absent columns and empty cells, accept title-only reimport, apply explicit supported edits exactly, and never invent ambient scope defaults; At least 500 seeded column-ownership sequences prove silence, unchanged round trips, explicit edits and older-input replay through SDK read-back across relationships and custom data; Native none/null clear aliases in every supported scope scalar and linked collection apply and replay consistently across SDK, CLI, JSON/TOON and packed consumers while snapshots stay literal and silent patches preserve existing state; Reviewed settings/schema are captured once, type/status defaults are pinned before mutations, and every mutation batch validates the digest inside SDK writer coordination; settings changes at every row boundary return typed settings_changed and compensate unchanged owned targets; API inputs and tracker roots are captured before asynchronous reads"
+actual_result: "PR #198 merged at 2026-10-28T20:09:25Z as 1c13ab7; required CI passed on the merged head."
 comments[57]{created_at,author,text}:
   "2026-10-25T22:22:45.644Z",codex-agent,"Overlap check: inspected core SDK contracts, CSV relational import/export and single-table schema contracts, plus Jira, Linear, ADO and Beads adapters. No cross-selected-table external-key join planner found. Provider key mapping remains adapter-owned; join declarations are explicit. Validation will cover non-git trackers, stale revisions, ambiguous/unresolved coordinates, replay, and SDK state readback. Host write-fencing limitation is already tracked by pm-csv-sdk-write-fence."
   "2026-10-25T22:24:03.715Z",codex-agent,"Implement bounded create-only cross-table plans. SDK-generated native IDs are persisted in reviewed plans; external keys never become native identities. Plans embed captured CSV sources with exact SHA-256 digests, explicit scalar mappings and parent/blocked_by declarations. Validate the whole selected graph before writes. Use the SDK create lifecycle and workspace transaction coordinator; inspect exact owned history and current documents on every retry, skip foreign collisions and their dependents, and refuse edited owned targets. No additional shared cache/outbox/lease files. Append-only compensation closes only unchanged owned creates, never deletes tracker records."
@@ -219,4 +225,5 @@ docs[4]{path,scope}:
   docs/join-validation.md,project
   docs/spreadsheet-roundtrip.md,project
   README.md,project
+close_reason: "Delivered by PR #198 (1c13ab7): Resolve CSV references across selected tables before import"
 body: ""
