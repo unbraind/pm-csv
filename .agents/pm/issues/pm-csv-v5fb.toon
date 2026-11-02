@@ -2,11 +2,13 @@ id: pm-csv-v5fb
 title: Disambiguate duplicate GitHub #197 import ownership without losing either PM record
 description: "Tracks gh:unbraind/pm-csv#210 (filed 2026-10-28, missed by the blind issue watch). The scheduled gated sync still fails the ownership preflight ('GitHub issue #197 has multiple existing owners; import plan is not idempotent'); latest failing run 41292860172 (2026-11-01T09:22Z). Both canonical records still carry the identity tag for issue #197: the imported issue item (open) and the delivery chore pm-csv-2ms0 (implementation notes and test provenance; PR #200 fixed the source issue). Reconcile exactly one import owner using supported PM operations while preserving both records' knowledge, provenance and history — for example keep the imported issue as the sole identity owner and record the delivery chore's link as a dependency/relationship instead of a second identity tag. The fail-closed guard itself is correct and must stay."
 type: Issue
-status: in_progress
+status: closed
 priority: 2
 tags[3]: "gh:unbraind/pm-csv#210",provenance,sync
 created_at: "2026-11-02T09:16:37.994Z"
-updated_at: "2026-11-02T09:42:29.028Z"
+updated_at: "2026-11-02T15:47:58.254Z"
+closed_at: "2026-11-02T15:47:58.235Z"
+completed_at: "2026-11-02T15:47:58.235Z"
 author: pi-glm
 comments[2]{created_at,author,text}:
   "2026-11-02T09:39:16.958Z",pi-glm,"Duplicate #197 ownership reconciled. The imported record keeps the identity tag and github_url as the sole owner; the delivery chore's competing claim was removed with 'pm update --remove-tags gh:unbraind/pm-csv#197' and its delivery knowledge (body, comments, files, tests, docs and history) is untouched. A related dependency now links the chore to the imported record, and its status stays closed. Measurement — before: scheduled gated sync failed the ownership preflight ('GitHub issue #197 has multiple existing owners; import plan is not idempotent'), failing run https://github.com/unbraind/pm-csv/actions/runs/41292860172 (2026-11-01T09:22Z). After: the same gated dry-run import the scheduled workflow runs ('pm github import unbraind/pm-csv --state all --atomic --gate --dry-run --with-comments --json', pm-github 2026.10.28 as pinned by the reusable workflow) now passes with no ownership refusal: plan import 2, update 8, skip 0, and issue #197 resolves uniquely to the imported record via provenance-tag. The command is linked as a passing test with receipts. GitHub API budget checked before measuring (core remaining above the 1500 floor). Guard unchanged; item stays open for orchestrator close after merge."
@@ -17,4 +19,5 @@ tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   pm github import unbraind/pm-csv --state all --atomic --gate --dry-run --with-comments --json,project,pi-glm,"2026-11-02T09:38:35.077Z",local_mutation,chore/triage-1102-issues
 docs[1]{path,scope,note}:
   .github/workflows/pm-github-sync.yml,project,scheduled gated sync caller (reusable pm-github workflow defines the dry-run command)
+close_reason: "Duplicate GitHub #197 ownership removed on this branch: the delivery chore pm-csv-2ms0 no longer carries the issue tag and links the imported record as related. Before: scheduled sync run 41292860172 refused with multiple existing owners. After: the same gated dry-run (pm-github 2026.10.28) passes against this tracker with import 2, update 8, skip 0, and #197 resolving to one record. The merged result is re-checked by dispatching the scheduled sync after merge."
 body: ""

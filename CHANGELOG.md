@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Disambiguate duplicate GitHub \#197 import ownership without losing either PM record ([pm-csv-v5fb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v5fb.toon))
+
 ## 2026.10.30 - 2026-10-30
 
 ### Added
