@@ -1,0 +1,11 @@
+id: pm-csv-v5fb
+title: Disambiguate duplicate GitHub #197 import ownership without losing either PM record
+description: "Tracks gh:unbraind/pm-csv#210 (filed 2026-10-28, missed by the blind issue watch). The scheduled gated sync still fails the ownership preflight ('GitHub issue #197 has multiple existing owners; import plan is not idempotent'); latest failing run 41292860172 (2026-11-01T09:22Z). Both canonical records still carry the identity tag for issue #197: the imported issue item (open) and the delivery chore pm-csv-2ms0 (implementation notes and test provenance; PR #200 fixed the source issue). Reconcile exactly one import owner using supported PM operations while preserving both records' knowledge, provenance and history — for example keep the imported issue as the sole identity owner and record the delivery chore's link as a dependency/relationship instead of a second identity tag. The fail-closed guard itself is correct and must stay."
+type: Issue
+status: open
+priority: 2
+tags[3]: "gh:unbraind/pm-csv#210",provenance,sync
+created_at: "2026-11-02T09:16:37.994Z"
+updated_at: "2026-11-02T09:16:37.994Z"
+author: pi-glm
+body: ""

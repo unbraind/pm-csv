@@ -1,0 +1,11 @@
+id: pm-csv-lewj
+title: Resource admission drops installed extension type/field registries from validation and revision lookup
+description: "Tracks gh:unbraind/pm-csv#214 (filed 2026-10-29, missed by the blind issue watch). admission.ts on current main still calls resolveItemTypeRegistry(settings) without the active workspace extension registrations in both scan() and the revision-lookup path (locateItem type_to_folder), so an installed extension-defined item type becomes a row_invalid admission rejection and revision reads use a narrower schema than the writer. Verified on main 2026-11-02: the one-argument resolver call remains. The bounded-admission feature that delivered PR #213 is closed, so this regression needs its own fix: activate the target workspace extensions (or pass the resolved registry) before scan and revision lookup, and add an admission regression with an extension-defined type and field."
+type: Issue
+status: open
+priority: 2
+tags[3]: admission,extensions,"gh:unbraind/pm-csv#214"
+created_at: "2026-11-02T09:16:36.592Z"
+updated_at: "2026-11-02T09:16:36.592Z"
+author: pi-glm
+body: ""
