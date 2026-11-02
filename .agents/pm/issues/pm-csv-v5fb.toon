@@ -6,12 +6,13 @@ status: in_progress
 priority: 2
 tags[3]: "gh:unbraind/pm-csv#210",provenance,sync
 created_at: "2026-11-02T09:16:37.994Z"
-updated_at: "2026-11-02T09:39:16.958Z"
+updated_at: "2026-11-02T09:42:02.372Z"
 assignee: pi-glm
 claim_principal: pi-glm
 author: pi-glm
-comments[1]{created_at,author,text}:
+comments[2]{created_at,author,text}:
   "2026-11-02T09:39:16.958Z",pi-glm,"Duplicate #197 ownership reconciled. The imported record keeps the identity tag and github_url as the sole owner; the delivery chore's competing claim was removed with 'pm update --remove-tags gh:unbraind/pm-csv#197' and its delivery knowledge (body, comments, files, tests, docs and history) is untouched. A related dependency now links the chore to the imported record, and its status stays closed. Measurement — before: scheduled gated sync failed the ownership preflight ('GitHub issue #197 has multiple existing owners; import plan is not idempotent'), failing run https://github.com/unbraind/pm-csv/actions/runs/41292860172 (2026-11-01T09:22Z). After: the same gated dry-run import the scheduled workflow runs ('pm github import unbraind/pm-csv --state all --atomic --gate --dry-run --with-comments --json', pm-github 2026.10.28 as pinned by the reusable workflow) now passes with no ownership refusal: plan import 2, update 8, skip 0, and issue #197 resolves uniquely to the imported record via provenance-tag. The command is linked as a passing test with receipts. GitHub API budget checked before measuring (core remaining above the 1500 floor). Guard unchanged; item stays open for orchestrator close after merge."
+  "2026-11-02T09:42:02.372Z",pi-glm,"Evidence note: the linked test's pm-test receipt runs the recorded command in pm's isolated seeded workspace, so it proves command and gate execution but not corpus reconciliation. The authoritative after-measurement is the direct gated dry-run against this branch's tracker described above (fetched 10, planned 10, import 2, update 8, skip 0, provenance-indexed 10; issue #197 resolves uniquely to the imported record via provenance-tag)."
 files[1]{path,scope,note}:
   .agents/pm/chores/pm-csv-2ms0.toon,project,"de-owned duplicate GH197 claim (tag removed, related dependency to the imported record added)"
 tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
