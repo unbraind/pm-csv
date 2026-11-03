@@ -110,7 +110,8 @@ test("focus changes do not alter reviewed empty parents; previously inherited sc
     assert.equal((await applyJoins(root, aliasPlan, { author: "scope-test" })).unchanged, 1);
     const { plan: old } = await previewJoins(root, input()); assert.ok(old);
     // Reproduce the previous package behavior with its exact ownership message and no explicit unset.
-    await create({ id: old.ids[0], title: "Selected", message: `csv-join:${old.digest}:0` }, { pmRoot: root });
+    // SDK create ignores saved focus unless inheritFocus is set (pm-cli GH-1577), so opt in explicitly.
+    await create({ id: old.ids[0], title: "Selected", inheritFocus: true, message: `csv-join:${old.digest}:0` }, { pmRoot: root });
     assert.equal((await readUpdateDocument(root, old.ids[0])).metadata.parent, parents[2]);
     await assert.rejects(applyJoins(root, old, { author: "scope-test" }), error => { joinRefused(error); assert.ok(error instanceof JoinRefusal); return error.code === "csv_join_target_changed"; });
   } finally { process.chdir(originalCwd); rmSync(root, { recursive: true, force: true }); }

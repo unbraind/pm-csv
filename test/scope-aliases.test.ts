@@ -17,6 +17,14 @@ import { readUpdateDocument } from "../atomic-update.ts";
 const SCALARS = [["parent", "parent"], ["assignee", "assignee"], ["sprint", "sprint"], ["release", "release"],
   ["blockedBy", "blocked_by"], ["reviewer", "reviewer"], ["goal", "goal"], ["objective", "objective"]] as const;
 const ALIASES = ["none", " NONE ", "null", "\tNuLl\r\n"];
+/** Typed SDK writes keep CLI clear sentinels literal, so native oracle writes use the explicit unset and link clear flags. */
+const NATIVE_CLEAR_LINKS = { dep: "clearDeps", file: "clearFiles", doc: "clearDocs", test: "clearTests" } as const;
+/** Build the native explicit form of a scalar clear alias: drop the option and unset the metadata field. */
+function nativeScalarOptions(options: Record<string, unknown>, option: string, field: string): Record<string, unknown> {
+  const native = { ...options };
+  delete native[option];
+  return { ...native, unset: [field] };
+}
 
 /** Initialize a real non-git tracker and a pinned CLI launcher with no git executable. */
 function fixture() {
@@ -51,12 +59,12 @@ test("every scope scalar and linked collection follows native none/null semantic
       for (const [index, [option]] of SCALARS.entries()) {
         const options = { ...concrete, title: `Scope ${index}`, [option]: alias };
         const actual = await create(buildMutationIntent(options), { pmRoot: f.root });
-        const expected = await create(options, { pmRoot: f.oracle });
+        const expected = await create(nativeScalarOptions(options, option, SCALARS[index][1]), { pmRoot: f.oracle });
         const document = await readUpdateDocument(f.root, actual.item.id);
         assert.deepEqual(scope(document), scope(await readUpdateDocument(f.oracle, expected.item.id)), `${option}=${JSON.stringify(alias)} create`);
         assert.equal(matchesMutationScope(document, options, await readSettings(f.root), document.metadata.dependencies), true, `${option} create comparison`);
         await update(actual.item.id, buildMutationIntent({ [option]: alias }, "patch"), { pmRoot: f.root });
-        await update(expected.item.id, { [option]: alias }, { pmRoot: f.oracle });
+        await update(expected.item.id, { unset: [SCALARS[index][1]] }, { pmRoot: f.oracle });
         assert.deepEqual(scope(await readUpdateDocument(f.root, actual.item.id)), scope(await readUpdateDocument(f.oracle, expected.item.id)), `${option} patch`);
         assert.equal(buildMutationIntent({ [option]: alias }, "snapshot")[option], alias, `${option} snapshot`);
         assert.deepEqual(mutationScopeArguments({ [option]: alias }, "patch"), ["--unset", SCALARS[index][1]]);
@@ -64,14 +72,18 @@ test("every scope scalar and linked collection follows native none/null semantic
       for (const option of ["dep", "file", "doc", "test"] as const) {
         const options = { title: "Collection clear", [option]: [alias], unset: ["parent"] };
         const actual = await create(buildMutationIntent(options), { pmRoot: f.root });
-        const expected = await create(options, { pmRoot: f.oracle });
+        const expected = await create({ title: options.title, unset: ["parent"], [NATIVE_CLEAR_LINKS[option]]: true }, { pmRoot: f.oracle });
         assert.deepEqual(scope(await readUpdateDocument(f.root, actual.item.id)), scope(await readUpdateDocument(f.oracle, expected.item.id)), option);
       }
     }
     for (const option of ["dep", "file", "doc", "test"] as const) {
       const options = { [option]: ["none", "path=concrete"] };
-      assert.deepEqual(buildMutationIntent(options, "patch")[option], options[option], "mixed aliases remain native validation errors");
-      await assert.rejects(create(buildMutationIntent({ ...options, title: "Invalid mixed collection" }), { pmRoot: f.root }), /Cannot mix legacy clear token/);
+      assert.deepEqual(buildMutationIntent(options, "patch")[option], options[option], "mixed aliases stay native validation");
+      // The typed SDK parses collection entries literally, so a mixed clear alias is refused only where the
+      // concrete entry itself is invalid for the option; file and doc entries are stored as-is instead.
+      if (option === "dep") await assert.rejects(create(buildMutationIntent({ ...options, title: "Invalid mixed collection" }), { pmRoot: f.root }), /--dep does not recognize key/);
+      if (option === "test") await assert.rejects(create(buildMutationIntent({ ...options, title: "Invalid mixed collection" }), { pmRoot: f.root }), /--test requires command/);
+      if (option === "file" || option === "doc") await assert.doesNotReject(create(buildMutationIntent({ ...options, title: "Mixed literal collection" }), { pmRoot: f.root }));
       assert.deepEqual(buildMutationIntent({ [option]: ["none"] }, "snapshot")[option], ["none"]);
     }
     assert.deepEqual(mutationScopeArguments({}, "patch"), []);
@@ -96,8 +108,8 @@ test("clear aliases apply and replay through join, lineage and keyed CSV APIs wi
     const columns = ["title", "assignee", "sprint", "release"] as const;
     const table = [[...columns], ...ALIASES.map((alias, i) => [`Lineage ${i}`, alias, alias, alias])];
     const interrupted = await previewJoins(f.root, input); assert.ok(interrupted.plan);
-    await create({ id: interrupted.plan.ids[0], title: "Alias 0", assignee: "none", sprint: "null", release: "NONE",
-      unset: ["parent"], message: `csv-join:${interrupted.plan.digest}:0` }, { pmRoot: f.root });
+    await create({ id: interrupted.plan.ids[0], title: "Alias 0",
+      unset: ["parent", "assignee", "sprint", "release"], message: `csv-join:${interrupted.plan.digest}:0` }, { pmRoot: f.root });
     const recovered = await applyJoins(f.root, interrupted.plan, { author: "alias-test" });
     assert.equal(recovered.unchanged, 1, "a previously persisted native-cleared row is recovered as peer success");
     assert.equal(recovered.applied, ALIASES.length - 1);

@@ -41,8 +41,11 @@ test("native reference forms compare like SDK writes, including bare/prefixed/ha
     const parent = (await create({ id: "abcd", title: "Parent", unset: ["parent"] }, { pmRoot: f.root })).item.id;
     for (const value of ["abcd", "#ABCD", ` ${parent.toUpperCase()} `, "github:Owner/Repo#12", "https://Example.COM/A", "none", " NuLl "]) {
       const options = { title: "Native reference", parent: value, assignee: "\tCafé 😀 ", sprint: " Sprint ", release: " Release " };
-      // The oracle is the SDK write itself, independent of our comparison adapter.
-      const saved = await create(options, { pmRoot: f.root });
+      // The oracle is the SDK write itself, independent of our comparison adapter; the typed SDK
+      // keeps CLI clear sentinels literal, so the native form of a parent clear alias is the explicit unset.
+      const saved = await create(["none", "null"].includes(value.trim().toLowerCase())
+        ? { title: options.title, assignee: options.assignee, sprint: options.sprint, release: options.release, unset: ["parent"] }
+        : options, { pmRoot: f.root });
       const document = await readUpdateDocument(f.root, saved.item.id);
       assert.equal(matchesMutationScope(document, options, settings), true, value);
       assert.equal(matchesMutationScope(document, { ...options, parent: "https://Other.COM/A" }, settings), false);
@@ -131,6 +134,7 @@ test("edit-session replay canonicalizes every stored field with the SDK, includi
   try {
     const created = await create(buildMutationIntent({ title: "Original" }), { pmRoot: f.root });
     const checkout = await exportEditSession(f.root, [created.item.id]);
+    // These cells really mean the literal sentinel strings: stored snapshots must not interpret command sentinels.
     for (const [field, value] of Object.entries({ title: "Café 😀", body: "\n\nEdited body 😀  \n", priority: "0", assignee: "none", sprint: "null", release: "MiXeD" })) {
       checkout.table[1][checkout.table[0].indexOf(field)] = value;
     }
