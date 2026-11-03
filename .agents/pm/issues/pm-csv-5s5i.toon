@@ -6,7 +6,7 @@ status: open
 priority: 2
 tags[4]: dependencies,migration,sdk,toolchain
 created_at: "2026-11-03T07:53:04.838Z"
-updated_at: "2026-11-03T12:12:36.016Z"
+updated_at: "2026-11-03T12:14:02.964Z"
 author: pi-fleet-sdk-sentinel-1103
 comments[2]{created_at,author,text}:
   "2026-11-03T07:53:09.845Z",pi-fleet-sdk-sentinel-1103,"The reviewed-empty-parents replay test seeds an item with a plain SDK create (no explicit parent) and asserts it inherited the active focus parent, so the following join replay must refuse. The pinned toolchain made SDK focus inheritance opt-in (inheritFocus; CLI default on, SDK default off), so the plain create no longer inherits and the refusal premise breaks. Expected fix: pass inheritFocus on that seed create (mirroring the toolchain's own new contract) and re-verify the refusal path. This failure is not the sentinel change and is out of the sentinel migration's scope here."

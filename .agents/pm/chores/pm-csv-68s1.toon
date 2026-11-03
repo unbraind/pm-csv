@@ -2,13 +2,11 @@ id: pm-csv-68s1
 title: Migrate native-oracle test fixtures off CLI clear sentinels
 description: ""
 type: Chore
-status: in_progress
+status: open
 priority: 2
 tags[4]: dependencies,"gh:unbraind/pm-csv#215",migration,sdk
 created_at: "2026-11-03T07:52:52.275Z"
-updated_at: "2026-11-03T12:12:32.055Z"
-assignee: pi-fleet-sdk-sentinel-1103
-claim_principal: pi-fleet-sdk-sentinel-1103
+updated_at: "2026-11-03T12:13:59.974Z"
 author: pi-fleet-sdk-sentinel-1103
 comments[2]{created_at,author,text}:
   "2026-11-03T07:52:59.866Z",pi-fleet-sdk-sentinel-1103,"The pinned toolchain keeps CLI clear sentinels literal in typed SDK writes, so every test that drives the native SDK oracle with 'none'/'null' aliases broke. Migrated the oracle writes to the explicit forms: scalar clear aliases become unset (create and patch), collection clear tokens become clearDeps/clearFiles/clearDocs/clearTests, the interrupted native-cleared row seed uses one explicit unset list, and modelEdit/reference transitions translate clear aliases to unset. The edit-session literal-sentinel test is intentional and untouched: it asserts stored snapshots keep the literal strings. Production code needed no change: the mutation-intent layer already maps aliases to explicit unsets. One remaining failure is not the sentinel change: the focus-inheritance test relies on SDK create implicitly inheriting focus, which the toolchain made opt-in (a separate behavior change), and is reported rather than widened here."
