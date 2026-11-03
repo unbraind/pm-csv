@@ -67,7 +67,9 @@ test("ordered existing-target writes match SDK reference transitions across admi
       assert.equal(result.updated, rows.length); assert.equal(result.skipped, 0);
       for (const [key, title, body, priority, assignee] of rows) {
         const id = key === " C " ? ids[1] : ids[0];
-        await update(id, { title, body, priority, assignee }, { pmRoot: oracle });
+        // The typed SDK keeps CLI clear sentinels literal, so the native oracle uses the explicit unset.
+        await update(id, ["none", "null"].includes(assignee.trim().toLowerCase())
+          ? { title, body, priority, unset: ["assignee"] } : { title, body, priority, assignee }, { pmRoot: oracle });
       }
       for (const id of ids) assert.deepEqual(await state(root, id), await state(oracle, id), `sequence=${sequence}`);
       if (selected.atomic) assert.equal((await importCSV(root, file, selected)).updated, 0);
@@ -128,7 +130,8 @@ test("repeated native lifecycle roles and stale replay use current SDK target pr
     assert.equal((await importCSV(root, file, options(root))).updated, 4);
     assert.equal((await importCSV(root, file, options(root))).updated, 0);
     assert.equal((await listAllComplete({}, { pmRoot: root })).items.find(item => item.id === id)!.status, statuses[3]);
-    await update(id, { body: "Peer", assignee: "none" }, { pmRoot: root });
+    // The typed SDK keeps CLI clear sentinels literal, so the peer write clears the assignee explicitly.
+    await update(id, { body: "Peer", unset: ["assignee"] }, { pmRoot: root });
     await assert.rejects(importCSV(root, file, options(root)), error => error instanceof AdmissionRefusal && error.code === "csv_admission_target_changed");
     assert.equal((await readUpdateDocument(root, id)).body, "Peer");
     const shared = join(root, "shared.csv"); writeFileSync(shared, "external,title,body\na,Existing,First\nb,Existing,Second\n");

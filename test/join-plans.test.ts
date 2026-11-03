@@ -356,7 +356,8 @@ test("500 seeded model sequences compare SDK readback with native reference stat
         await applyJoins(root, p, { author: "model-test" });
         // Reference transition: create once at absent native identities. Canonical values come only from SDK readback.
         for (const [i, options] of expected.entries()) {
-          const absent = ["assignee", "sprint", "release"].filter(field => options![field as "assignee" | "sprint" | "release"] === "");
+          // The typed SDK keeps CLI clear sentinels literal, so the reference create unsets them explicitly.
+          const absent = ["assignee", "sprint", "release"].filter(field => ["", "none", "null"].includes((options![field as "assignee" | "sprint" | "release"] ?? "").trim().toLowerCase()));
           await create({ ...Object.fromEntries(Object.entries(options!).filter(([field]) => !absent.includes(field))), id: p.ids[i], author: "model-test",
             unset: [...(i === 1 ? [] : ["parent"]), ...absent],
             ...(i === 1 ? { parent: p.ids[0] } : {}), ...(i === 2 ? { dep: [`kind=blocked_by,id=${p.ids[1]}`] } : {}) }, { pmRoot: oracle });

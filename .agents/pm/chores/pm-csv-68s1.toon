@@ -1,0 +1,17 @@
+id: pm-csv-68s1
+title: Migrate native-oracle test fixtures off CLI clear sentinels
+description: ""
+type: Chore
+status: open
+priority: 2
+tags[4]: dependencies,"gh:unbraind/pm-csv#215",migration,sdk
+created_at: "2026-11-03T07:52:52.275Z"
+updated_at: "2026-11-03T12:13:59.974Z"
+author: pi-fleet-sdk-sentinel-1103
+comments[2]{created_at,author,text}:
+  "2026-11-03T07:52:59.866Z",pi-fleet-sdk-sentinel-1103,"The pinned toolchain keeps CLI clear sentinels literal in typed SDK writes, so every test that drives the native SDK oracle with 'none'/'null' aliases broke. Migrated the oracle writes to the explicit forms: scalar clear aliases become unset (create and patch), collection clear tokens become clearDeps/clearFiles/clearDocs/clearTests, the interrupted native-cleared row seed uses one explicit unset list, and modelEdit/reference transitions translate clear aliases to unset. The edit-session literal-sentinel test is intentional and untouched: it asserts stored snapshots keep the literal strings. Production code needed no change: the mutation-intent layer already maps aliases to explicit unsets. One remaining failure is not the sentinel change: the focus-inheritance test relies on SDK create implicitly inheriting focus, which the toolchain made opt-in (a separate behavior change), and is reported rather than widened here."
+  "2026-11-03T12:12:22.736Z",pi-toolchain-glm-1103,"Landed the sentinel migration on top of the current Dependabot head (rebased from the earlier uncommitted edits after the branch moved to the newer merge base; the only inter-base change was the minimatch override and version fields). Verified locally on the pinned toolchain: test/mutation-intent.test.ts, test/scope-aliases.test.ts, test/native-replay.test.ts pass (18 tests including both 500-sequence join-replay runs), test/repeated-targets.test.ts passes 7/7 when run alone. The remaining two 500-sequence files (column-ownership, join-plans) time out on this heavily loaded host (a solo column-ownership run reached 360/500 sequences in its 40-minute budget; the machine load stayed above 20 from parallel fleet test runs), so they are left to CI: the migrations there are the same explicit-unset oracle translations already verified in the smaller files."
+tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npm test,project,pi-fleet-sdk-sentinel-1103,"2026-11-03T07:53:10.777Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-83955e8a70
+  node --test test/mutation-intent.test.ts test/scope-aliases.test.ts test/native-replay.test.ts test/repeated-targets.test.ts,project,pi-toolchain-glm-1103,"2026-11-03T12:12:31.919Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-83955e8a70
+body: ""

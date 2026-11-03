@@ -51,14 +51,19 @@ const KEYS = [...FIELDS, "id", "external_key", "custom_code"];
 /** Build a simple source-owned patch independently of package mutation builders. */
 async function modelEdit(root: string, id: string, row: Record<string, string>, selected: string[], transaction?: string, index = 0): Promise<void> {
   const options: Parameters<typeof update>[1] & Record<string, unknown> = {};
+  // The typed SDK keeps CLI clear sentinels literal, so scalar clear aliases use the explicit unset.
+  const unset: string[] = [];
   for (const field of selected) {
     const value = row[field];
     if (!value || !FIELDS.includes(field)) continue;
+    const clearAlias = ["none", "null"].includes(value.trim().toLowerCase());
     if (field === "tags") options.addTags = value.split(",");
     else if (field === "blocked_by") options.blockedBy = value;
     else if (field === "priority") options.priority = Number(value);
+    else if (clearAlias && field !== "blocked_by") unset.push(field);
     else options[field] = value;
   }
+  if (unset.length) options.unset = unset;
   if (transaction) options.addTags = [...(options.addTags ?? []), `csv-tx:${transaction}`, `csv-txrow:${transaction}#${index}`];
   await update(id, options, { pmRoot: root });
 }
