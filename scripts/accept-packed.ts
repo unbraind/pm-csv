@@ -54,11 +54,11 @@ const packageJson = JSON.parse(
 ) as PackageContract;
 const cliPackage = "@unbrained/pm-cli";
 const developmentVersion = packageJson.devDependencies[cliPackage];
-const admissionHostVersion = "2026.10.28";
 const minimumVersion = packageJson.peerDependencies[cliPackage]?.replace(/^>=/, "");
 if (!developmentVersion || !minimumVersion) {
   throw new Error(`package.json must declare exact development and minimum peer versions for ${cliPackage}`);
 }
+const admissionHostVersion = minimumVersion;
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
@@ -169,7 +169,7 @@ try {
       "--create-mode",
       "progressive",
     ]);
-    runPm(scenario, scenarioRoot, ["install", tarball, "--project"]);
+    runPm(scenario, scenarioRoot, ["package", "install", tarball, "--project"]);
     // Copy this SDK-only fixture module beside the scenario's installed host;
     // its static SDK import must resolve that host, not the development checkout.
     writeFileSync(join(scenarioRoot, "packed-custom-fields.mts"), readFileSync(join(repoRoot, "scripts/packed-custom-fields.ts")));
@@ -393,7 +393,7 @@ try {
     else run(bunCommand, ["add", "--global", "--ignore-scripts", `${cliPackage}@${admissionHostVersion}`, tarball], scenarioRoot, 0, environment);
     const executable = join(prefix, "bin", "pm");
     run(executable, ["init", "--defaults", "--agent-guidance", "skip"], scenarioRoot, 0, environment);
-    run(executable, ["install", tarball, "--project"], scenarioRoot, 0, environment);
+    run(executable, ["package", "install", tarball, "--project"], scenarioRoot, 0, environment);
     globalReceipts.push({ manager, ...checkInstalledAdmission(args => run(executable, args, scenarioRoot, 0, environment), scenarioRoot) });
   }
   const ephemeralReceipts: { manager: string; admission_rows: number }[] = [];
@@ -402,7 +402,7 @@ try {
     const executable = manager === "npm" ? npxCommand : bunxCommand;
     const prefixArgs = manager === "npm" ? ["--yes", `--package=${cliPackage}@${admissionHostVersion}`, "pm"] : ["--package", `${cliPackage}@${admissionHostVersion}`, "pm"];
     run(executable, [...prefixArgs, "init", "--defaults", "--agent-guidance", "skip"], scenarioRoot);
-    run(executable, [...prefixArgs, "install", tarball, "--project"], scenarioRoot);
+    run(executable, [...prefixArgs, "package", "install", tarball, "--project"], scenarioRoot);
     ephemeralReceipts.push({ manager, ...checkInstalledAdmission(args => run(executable, [...prefixArgs, ...args], scenarioRoot), scenarioRoot) });
   }
   const projectReceipts: { manager: string; admission_rows: number; replay_imported: number }[] = [];
@@ -412,7 +412,7 @@ try {
     run(manager === "npm" ? npmCommand : bunCommand, [manager === "npm" ? "install" : "add", "--ignore-scripts", `${cliPackage}@${admissionHostVersion}`, tarball], scenarioRoot);
     const scenario: AcceptanceScenario = { name: `${manager}-admission-project`, manager, hostVersion: admissionHostVersion };
     runPm(scenario, scenarioRoot, ["init", "--defaults", "--agent-guidance", "skip"]);
-    runPm(scenario, scenarioRoot, ["install", tarball, "--project"]);
+    runPm(scenario, scenarioRoot, ["package", "install", tarball, "--project"]);
     projectReceipts.push({ manager, ...checkInstalledAdmission(args => runPm(scenario, scenarioRoot, args), scenarioRoot) });
   }
   process.stdout.write(`${JSON.stringify({ ok: true, admission_host_version: admissionHostVersion, receipts, projectReceipts, globalReceipts, ephemeralReceipts })}\n`);
