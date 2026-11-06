@@ -3,7 +3,9 @@ import "./repros/sdk-lease-overrun.ts";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { registerLeaseObserver } from "./support/lease-observer.ts";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -33,14 +35,23 @@ async function fixture() {
   return { root, id: item.id, settings, ...checkout };
 }
 
-/** Install real SDK observation hooks without replacing any SDK operation. */
-async function observe(read: OnReadHook, write: OnWriteHook = () => {}) {
-  const harness = await createExtensionTestHarness({ activate(api: ExtensionApi) {
-    api.hooks.onRead(read);
-    api.hooks.onWrite(write);
-  } }, { name: "lease-observer", capabilities: ["hooks"] });
+/** Install observations through both the real workspace lifecycle and direct SDK primitives. */
+async function observeExtension(root: string, activate: (api: ExtensionApi) => void) {
+  const unregister = registerLeaseObserver(root, activate);
+  const installed = join(root, "extensions/lease-observer");
+  mkdirSync(installed, { recursive: true });
+  writeFileSync(join(installed, "manifest.json"), JSON.stringify({ name: "lease-observer", version: "1.0.0", entry: "./index.ts", capabilities: ["hooks"] }));
+  const module = pathToFileURL(join(process.cwd(), "test/support/lease-observer.ts")).href;
+  writeFileSync(join(installed, "index.ts"), `import { activateLeaseObserver } from ${JSON.stringify(module)};
+    export default { activate(api: Parameters<typeof activateLeaseObserver>[1]) { activateLeaseObserver(${JSON.stringify(root)}, api); } };`);
+  const harness = await createExtensionTestHarness({ activate }, { name: "lease-observer", capabilities: ["hooks"] });
   setActiveExtensionHooks(harness.activation.hooks);
-  return async () => { setActiveExtensionHooks(null); await harness.deactivate(); };
+  return async () => { setActiveExtensionHooks(null); await harness.deactivate(); unregister(); };
+}
+
+/** Register genuine SDK read/write hooks without replacing storage or lease operations. */
+async function observe(root: string, read: OnReadHook, write: OnWriteHook = () => {}) {
+  return observeExtension(root, api => { api.hooks.onRead(read); api.hooks.onWrite(write); });
 }
 
 /** Read exact content and history; equality asserts content preservation only. */
@@ -80,7 +91,7 @@ async function newerWriter(f: Awaited<ReturnType<typeof fixture>>) {
 for (const operation of ["checkout", "capture"] as const) test(`${operation} refuses an expired snapshot lease`, async () => {
   const f = await fixture();
   let injected = false;
-  const stop = await observe(async ({ path }) => {
+  const stop = await observe(f.root, async ({ path }) => {
     if (!injected && path === getHistoryPath(f.root, f.id)) { injected = true; await newerWriter(f); }
   });
   try {
@@ -100,7 +111,7 @@ test("applyPlan refuses its expired callback and retains the newer native value"
   let leases = 0;
   let injected = false;
   let newer: Awaited<ReturnType<typeof evidence>> | undefined;
-  const stop = await observe(async ({ path }) => {
+  const stop = await observe(f.root, async ({ path }) => {
     if (leases === 3 && !injected && path === getHistoryPath(f.root, f.id)) {
       injected = true;
       newer = await newerWriter(f);
@@ -131,7 +142,7 @@ for (const phase of ["callback", "representation"] as const) test(`compensation 
   let armed = phase === "callback";
   let injected = false;
   let newer: Awaited<ReturnType<typeof evidence>> | undefined;
-  const stop = await observe(async ({ path }) => {
+  const stop = await observe(f.root, async ({ path }) => {
     if (armed && !injected && path === getHistoryPath(f.root, f.id)) {
       injected = true;
       newer = await newerWriter(f);
@@ -150,7 +161,7 @@ for (const phase of ["callback", "representation"] as const) test(`compensation 
 for (const operation of ["checkout", "capture", "apply"] as const) test(`${operation} allows a slow owner whose lease generation has not changed`, async () => {
   const f = await fixture();
   let delayed = false, leases = 0;
-  const stop = await observe(async ({ path }) => {
+  const stop = await observe(f.root, async ({ path }) => {
     if (!delayed && path === getHistoryPath(f.root, f.id) && (operation !== "apply" || leases === 3)) { delayed = true; await setTimeout(1100); }
   }, ({ path, op }) => {
     if (op === "lock:create" && path === join(f.root, "locks", `${f.id}.lock`)) leases++;
@@ -172,7 +183,7 @@ test("host delay after the mutation callback cannot publish stale bytes or histo
   let newer: Awaited<ReturnType<typeof evidence>> | undefined;
   let delayed = false;
   const itemPath = (await readUpdateSnapshot(f.root, f.id)).located.itemPath;
-  const harness = await createExtensionTestHarness({ activate(api: ExtensionApi) {
+  const stop = await observeExtension(f.root, api => {
     api.hooks.beforeMutation(({ operation }) => {
       if (operation !== "update" || delayed) return;
       delayed = true;
@@ -181,13 +192,12 @@ test("host delay after the mutation callback cannot publish stale bytes or histo
       assert.equal(result.status, 0, result.stderr);
       newer = { raw: readFileSync(itemPath, "utf8"), history: readFileSync(getHistoryPath(f.root, f.id), "utf8") };
     });
-  } }, { name: "post-callback-delay", capabilities: ["hooks"] });
-  setActiveExtensionHooks(harness.activation.hooks);
+  });
   try {
     await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test" }), hasLeaseRefusal);
     assert.ok(newer);
     assert.deepEqual(await evidence(f.root, f.id), newer);
-  } finally { setActiveExtensionHooks(null); await harness.deactivate(); rmSync(f.root, { recursive: true, force: true }); }
+  } finally { await stop(); rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test("one SDK fence excludes OS-process takeover between representation and completion history", async () => {

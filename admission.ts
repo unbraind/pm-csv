@@ -178,19 +178,39 @@ async function readAdmissionTarget(pmRoot: string, id: string, expected?: string
   return { revision, message: mutationMessageBase(history.at(-1)?.message) };
 }
 /** Require current native state or the latest immutable success of exactly this row. */
-export async function admissionTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
-  const { revision, message } = await runWithActiveExtensions({ path: pmRoot }, () => readAdmissionTarget(pmRoot, id, expected));
+async function scopedTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
+  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
   const owned = appliedMarker !== undefined && ["create", "apply", "close"].some(phase => message === `${appliedMarker}:${phase}`);
   if (expected !== undefined && revision !== expected && !owned) throw admissionTargetChanged();
   return revision;
 }
 /** Reconcile ordered writes to one native target; later rows prove the completed prefix, including reverse compensation. */
-export async function admissionTargetSequence(pmRoot: string, id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }> {
-  const { revision, message } = await runWithActiveExtensions({ path: pmRoot }, () => readAdmissionTarget(pmRoot, id, expected));
+async function scopedTargetSequence(pmRoot: string, id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }> {
+  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
   if (revision === expected) return { revision, completed: -1 };
   const completed = markers.findIndex(marker => ["apply", "close", "restore", "compensate"].some(phase => message === `${marker}:${phase}`));
   if (completed < 0) throw admissionTargetChanged();
   return { revision, completed: message === `${markers[completed]}:compensate` ? completed - 1 : completed };
+}
+/** Target checks bound to one explicitly activated workspace for an atomic import. */
+export interface AdmissionTargetChecks {
+  revision(id: string, expected?: string, appliedMarker?: string): Promise<string>;
+  sequence(id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }>;
+}
+/** Activate once and lend target checks to the import without reactivating for each row. */
+export function withAdmissionTargetChecks<T>(pmRoot: string, run: (checks: AdmissionTargetChecks) => Promise<T>): Promise<T> {
+  return runWithActiveExtensions({ path: pmRoot }, () => run({
+    revision: (id, expected, marker) => scopedTargetRevision(pmRoot, id, expected, marker),
+    sequence: (id, expected, markers) => scopedTargetSequence(pmRoot, id, expected, markers),
+  }));
+}
+/** Read a standalone target revision using the selected workspace's installed registries. */
+export function admissionTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
+  return withAdmissionTargetChecks(pmRoot, checks => checks.revision(id, expected, appliedMarker));
+}
+/** Reconcile a standalone target sequence using the selected workspace's installed registries. */
+export function admissionTargetSequence(pmRoot: string, id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }> {
+  return withAdmissionTargetChecks(pmRoot, checks => checks.sequence(id, expected, markers));
 }
 /** Keep foreign writes, ABA changes and unverifiable target histories in one refusal family. */
 function admissionTargetChanged(): AdmissionRefusal {

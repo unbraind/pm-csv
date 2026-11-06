@@ -2,7 +2,7 @@ import { assertCanonicalMutationIds, explicitDocumentMutation } from "./mutation
 import { createHash, randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import {
-  PmCliError, acquireLockLease, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
+  PmCliError, runWithActiveExtensions, getActiveExtensionRegistrations, collectRegisteredItemFieldNames, resolveItemTypeRegistry, acquireLockLease, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
   readHistoryEntries, verifyHistoryEntries, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep, PmSettings } from "@unbrained/pm-cli/sdk";
@@ -125,7 +125,7 @@ async function exportEditSessionInternal(pmRoot: string, ids: readonly string[])
 export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
   pmRoot = resolve(pmRoot);
   const captured = [...ids];
-  return withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured));
+  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured)));
 }
 
 /** Validate an untrusted sidecar structurally as well as by its content digest. */
@@ -202,6 +202,8 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
   const settings = await readSettings(pmRoot);
   const result = await withSettingsFence(pmRoot, () => mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
+    typeToFolder: resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder,
+    extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()),
     mutate: explicitDocumentMutation(async document => {
       const current = await documentRow(pmRoot, plan.base.id, document);
       const divergent = conflicts(plan, current);
@@ -324,7 +326,7 @@ export async function applyEditSession(
     throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
   }
   const session = parseEditSession(input), captured = table.map(row => [...row]), configuration = { ...options };
-  return withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration));
+  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration)));
 }
 
 /** Preserve the edit API refusal taxonomy for changing schema/settings. */

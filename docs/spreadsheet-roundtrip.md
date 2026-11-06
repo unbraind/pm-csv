@@ -153,3 +153,8 @@ with `pm init`, including with no `git` executable on PATH. This protocol neithe
 invokes Git nor needs branches. It uses the SDK's existing tracker storage,
 ownership checks, item locks, immutable history and transaction journal. Tests
 use real non-git trackers; hosted backend acceptance is separate evidence.
+
+Direct `exportEditSession` and `applyEditSession` calls activate the selected
+workspace's installed extensions. Snapshot reads and native mutations receive
+its complete type/folder and field registries, preserving opaque fields under
+strict unknown-field policy. The editable spreadsheet columns remain unchanged.

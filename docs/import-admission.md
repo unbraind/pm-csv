@@ -207,3 +207,9 @@ and host-injected command calls use the same path. Installed schema fields are
 preserved during built-in CSV updates, including strict unknown-field policy;
 this does not expand the CSV column vocabulary. Unregistered types still refuse
 before any row is applied.
+
+Atomic imports lend target-check callbacks from one SDK extension activation to
+all planning, inspection and write boundaries. Target checks reread native state
+and history every time, without reloading extensions for every row. Standalone
+revision and sequence APIs still activate their explicitly selected workspace.
+This also covers direct atomic imports without the admission option.

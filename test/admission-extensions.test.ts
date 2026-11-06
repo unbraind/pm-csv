@@ -1,7 +1,7 @@
 import "./support/isolated-environment.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,8 @@ import { commitWorkspaceTransaction, create, get, getHistoryPath, readHistoryEnt
   collectRegisteredItemFieldNames, getActiveExtensionRegistrations, mutateItem, locateItem, readLocatedItem, resolveItemTypeRegistry, emptyImportedDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { importCSV } from "../index.ts";
-import { admitCSV, admissionTargetRevision } from "../admission.ts";
+import { admitCSV, admissionTargetRevision, admissionTargetSequence, withAdmissionTargetChecks } from "../admission.ts";
+import { exportEditSession, applyEditSession } from "../roundtrip.ts";
 import { applyJoins, previewJoins, JoinRefusal } from "../join-plans.ts";
 import type { JoinInput } from "../join-plans.ts";
 import { readUpdateSnapshot, captureUpdateCompensation, compensateUpdate } from "../atomic-update.ts";
@@ -29,7 +30,9 @@ async function fixture(format: "toon" | "json_markdown", name: string) {
   const installed = join(root, "extensions/fixture-schema");
   mkdirSync(installed, { recursive: true });
   writeFileSync(join(installed, "manifest.json"), JSON.stringify({ name: "fixture-schema", version: "1.0.0", entry: "./index.ts", capabilities: ["schema"] }));
-  writeFileSync(join(installed, "index.ts"), `export default { activate(api: { registerItemTypes: (value: unknown[]) => void; registerItemFields: (value: unknown[]) => void }) {
+  writeFileSync(join(installed, "index.ts"), `import { appendFileSync } from "node:fs";
+  export default { activate(api: { registerItemTypes: (value: unknown[]) => void; registerItemFields: (value: unknown[]) => void }) {
+    appendFileSync(new URL("../../activations.log", import.meta.url), "activate\\n");
     api.registerItemTypes([{ name: "${name}", folder: "fixture-bridges" }]);
     api.registerItemFields([{ name: "opaque_text", type: "string", default: "Extension default" }, { name: "opaque_object", type: "object", default: { nested: [false, 0, "default"] } }]);
   } };\n`);
@@ -49,7 +52,7 @@ async function fixture(format: "toon" | "json_markdown", name: string) {
     }
     assert.equal((await locateItem(root, item.item.id, settings.id_prefix, format, { [name]: "fixture-bridges" }))?.item_format, format);
   });
-  return { root, id: item.item.id, file: join(root, "input.csv") };
+  return { root, id: item.item.id, file: join(root, "input.csv"), activations: join(root, "activations.log") };
 }
 
 for (const format of ["toon", "json_markdown"] as const) for (const injected of [false, true]) {
@@ -203,5 +206,59 @@ test("installed extension join compensation preserves a separate-process foreign
     assert.deepEqual(history.map(entry => entry.op), ["create", "update"]);
     await assert.rejects(applyJoins(f.root, planned.plan, { author: "csv-test" }), /csv_join_target_changed/);
     assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, ids[0]), ids[0]), history);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+test("target checks share one activation while standalone revision and sequence activate their workspace", async () => {
+  const f = await fixture("toon", "FixtureBridge");
+  try {
+    writeFileSync(f.activations, "");
+    const revision = await admissionTargetRevision(f.root, f.id);
+    assert.deepEqual(await admissionTargetSequence(f.root, f.id, revision, []), { revision, completed: -1 });
+    assert.equal(readFileSync(f.activations, "utf8").trim().split("\n").length, 2);
+    writeFileSync(f.activations, "");
+    await withAdmissionTargetChecks(f.root, async checks => {
+      for (let i = 0; i < 8; i++) {
+        assert.equal(await checks.revision(f.id, revision), revision);
+        assert.deepEqual(await checks.sequence(f.id, revision, []), { revision, completed: -1 });
+      }
+    });
+    assert.equal(readFileSync(f.activations, "utf8"), "activate\n");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+for (const format of ["toon", "json_markdown"] as const) test(`direct spreadsheet APIs activate installed types and preserve opaque fields (${format})`, async () => {
+  const f = await fixture(format, "FixtureBridge");
+  try {
+    const before = await get(f.id, { full: true }, { pmRoot: f.root });
+    const exported = await exportEditSession(f.root, [f.id]);
+    exported.table[1][exported.table[0].indexOf("title")] = "Direct spreadsheet edit";
+    assert.equal((await applyEditSession(f.root, exported.session, exported.table, { author: "csv-test", dryRun: true })).changed, 1);
+    assert.equal((await applyEditSession(f.root, exported.session, exported.table, { author: "csv-test" })).applied, 1);
+    assert.equal((await applyEditSession(f.root, exported.session, exported.table, { author: "csv-test" })).applied, 0);
+    const after = await get(f.id, { full: true }, { pmRoot: f.root });
+    assert.equal(after.item.title, "Direct spreadsheet edit");
+    for (const field of ["opaque_text", "opaque_object"]) assert.deepEqual(after.item[field], before.item[field]);
+    assert.match(await admissionTargetRevision(f.root, f.id), /^[a-f0-9]{64}$/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+for (const admitted of [false, true]) test(`direct atomic import preserves installed fields (${admitted ? "admitted checks reuse activation" : "legacy"})`, async () => {
+  const f = await fixture("toon", "FixtureBridge");
+  try {
+    const before = await get(f.id, { full: true }, { pmRoot: f.root });
+    writeFileSync(f.file, "title,type,key\n" + Array.from({ length: 8 }, (_, i) => `Direct ${i},FixtureBridge,existing`).join("\n") + "\n");
+    writeFileSync(f.activations, "");
+    const result = await importCSV(f.root, f.file, { delimiter: ",", fieldMap: {}, dryRun: false, atomic: true,
+      ...(admitted ? { admission: {} } : {}), keyField: "key",
+      commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) });
+    assert.equal(result.updated, 8);
+    const activations = readFileSync(f.activations, "utf8").trim().split("\n").length;
+    if (admitted) assert.ok(activations <= 3, `Target checks must not reactivate per row: ${activations}`);
+    const after = await get(f.id, { full: true }, { pmRoot: f.root });
+    assert.equal(after.item.title, "Direct 7");
+    for (const field of ["opaque_text", "opaque_object"]) assert.deepEqual(after.item[field], before.item[field]);
+    assert.match(await admissionTargetRevision(f.root, f.id), /^[a-f0-9]{64}$/);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
