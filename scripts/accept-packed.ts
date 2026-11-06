@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseCSV } from "../index.ts";
+import { packedScenarios } from "./packed-scenarios.ts";
+import type { AcceptanceScenario } from "./packed-scenarios.ts";
 import { decode } from "@toon-format/toon";
 import { assertCustomFieldExport, CUSTOM_FIELDS } from "./packed-custom-fields.ts";
 
@@ -12,13 +14,6 @@ interface PackageContract {
   readonly version: string;
   readonly devDependencies: Readonly<Record<string, string>>;
   readonly peerDependencies: Readonly<Record<string, string>>;
-}
-
-/** One package-manager and host-version combination exercised in isolation. */
-interface AcceptanceScenario {
-  readonly name: string;
-  readonly manager: "npm" | "bun";
-  readonly hostVersion: string;
 }
 
 /** Machine-readable proof emitted for one successful installed extension. */
@@ -140,11 +135,7 @@ try {
   mkdirSync(packRoot);
   run(npmCommand, ["pack", "--silent", "--pack-destination", packRoot], repoRoot);
   const tarball = join(packRoot, `${packageJson.name}-${packageJson.version}.tgz`);
-  const scenarios: AcceptanceScenario[] = [
-    { name: "npm-current", manager: "npm", hostVersion: developmentVersion },
-    { name: "bun-current", manager: "bun", hostVersion: developmentVersion },
-    { name: "npm-minimum", manager: "npm", hostVersion: minimumVersion },
-  ];
+  const scenarios = packedScenarios(developmentVersion, minimumVersion);
   const receipts: AcceptanceReceipt[] = [];
 
   for (const scenario of scenarios) {

@@ -114,12 +114,19 @@ Successful command results are compact TOON by default or JSON with `--json`:
 Counts are per row. `changed` is the preflight plan and `applied` counts actual
 mutations in this attempt; convergence after preflight can reduce `applied`.
 `concurrent` includes unedited and convergent concurrent
-changes. An applied batch also returns its transaction ID. Refusals have stable
+changes. An applied batch also returns its transaction ID. CSV refusals have stable
 codes (`csv_session_invalid`, `csv_edit_invalid`, `csv_edit_conflict`,
-`csv_edit_apply_failed`, native `lock_lost`/`stale_revision`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
-`conflicts` and `conflictCount`. Transaction refusals retain nested conflict keys
-and expose the original error as `cause`, including lease expiration, interruption
-and compensation failures. Checkout/apply IO and snapshot read refusals also retain their causes.
+`csv_edit_apply_failed`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
+`conflicts` and `conflictCount`.
+
+Snapshot lease loss can escape as a top-level native `PmCliError` with
+`code: "lock_lost"` during export or apply preflight. Inside an apply transaction,
+native `lock_lost` or `stale_revision` errors can instead be nested under the
+outer `csv_edit_apply_failed` refusal. Callers must inspect `cause` and any
+`AggregateError.errors` recursively as well as the top-level `error.code`;
+checking only the outer code misses these native outcomes. Transaction refusals
+retain nested conflict keys and causes for interruption and compensation
+failures. Checkout/apply IO and snapshot read refusals retain their causes too.
 Diagnostics show at most twenty item/field keys,
 with the total count, and never include cell values. Command error messages carry
 the same code, remedy and bounded conflicts; the host controls error rendering.

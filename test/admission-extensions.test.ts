@@ -11,6 +11,7 @@ import { commitWorkspaceTransaction, create, get, getHistoryPath, readHistoryEnt
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { importCSV } from "../index.ts";
 import { admitCSV, admissionTargetRevision, admissionTargetSequence, withAdmissionTargetChecks } from "../admission.ts";
+import { importLineage } from "../lineage.ts";
 import { exportEditSession, applyEditSession } from "../roundtrip.ts";
 import { applyJoins, previewJoins, JoinRefusal } from "../join-plans.ts";
 import type { JoinInput } from "../join-plans.ts";
@@ -260,5 +261,27 @@ for (const admitted of [false, true]) test(`direct atomic import preserves insta
     assert.equal(after.item.title, "Direct 7");
     for (const field of ["opaque_text", "opaque_object"]) assert.deepEqual(after.item[field], before.item[field]);
     assert.match(await admissionTargetRevision(f.root, f.id), /^[a-f0-9]{64}$/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+for (const format of ["toon", "json_markdown"] as const) test(`direct lineage import and replay preserve installed types and fields (${format})`, async () => {
+  const f = await fixture(format, "FixtureBridge");
+  try {
+    const input = [["title", "type"], ["Lineage extension", "FixtureBridge"]];
+    const first = await importLineage(f.root, input, { columns: ["title", "type"], author: "csv-test" });
+    assert.equal(first.receipt.imported, 1); assert.equal(first.receipt.rejected, 0);
+    const id = first.manifest.rows[0].item; assert.ok(id);
+    assert.equal(first.manifest.rows[0].cells.length, 2);
+    const saved = await get(id, { full: true }, { pmRoot: f.root });
+    assert.equal(saved.item.type, "FixtureBridge");
+    assert.equal(saved.item.opaque_text, "Extension default");
+    assert.deepEqual(saved.item.opaque_object, { nested: [false, 0, "default"] });
+    const history = await readHistoryEntries(getHistoryPath(f.root, id), id);
+    const replay = await importLineage(f.root, input, { columns: ["title", "type"], author: "csv-test" });
+    assert.equal(replay.receipt.imported, 0); assert.equal(replay.receipt.replayed, 1);
+    assert.equal(replay.manifest.rows[0].item, id);
+    assert.deepEqual(replay.manifest.rows[0].cells, first.manifest.rows[0].cells);
+    assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, id), id), history);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });

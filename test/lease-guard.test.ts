@@ -200,6 +200,16 @@ test("host delay after the mutation callback cannot publish stale bytes or histo
   } finally { await stop(); rmSync(f.root, { recursive: true, force: true }); }
 });
 
+/** Require a completed native lock refusal, rather than a pre-call readiness marker. */
+async function waitForBlockedPeer(writer: ReturnType<typeof spawn>): Promise<void> {
+  const abort = new AbortController();
+  const timer = globalThis.setTimeout(() => abort.abort(), 15_000);
+  try {
+    const data = await once(writer.stdout!, "data", { signal: abort.signal });
+    assert.equal(String(data[0]), "blocked\n", "the peer must complete an actual SDK lock attempt");
+  } finally { globalThis.clearTimeout(timer); }
+}
+
 test("one SDK fence excludes OS-process takeover between representation and completion history", async () => {
   const f = await fixture(), marker = "csv-txrow:fenced-representation#0";
   const prior = await captureUpdateCompensation(f.root, f.id, marker, "csv-test");
@@ -213,13 +223,13 @@ test("one SDK fence excludes OS-process takeover between representation and comp
     await compensateUpdate(f.root, f.id, marker, "csv-test", prior, async phase => {
       if (phase !== "representation_written") return;
       await setTimeout(1100);
-      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id], { stdio: ["ignore", "pipe", "pipe"] });
+      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id, "probe-item"], { stdio: ["pipe", "pipe", "pipe"] });
       finished = once(writer, "exit").then(([code]) => { exited = true; assert.equal(code, 0); });
-      await once(writer.stdout!, "data");
-      await Promise.race([finished, setTimeout(500)]);
+      await waitForBlockedPeer(writer);
       assert.equal(exited, false, "a peer must wait until representation AND its receipt are durable");
     });
     assert.ok(finished);
+    writer!.stdin!.end("retry\n");
     await finished;
     const history = await readHistoryEntries(getHistoryPath(f.root, f.id), f.id);
     assert.equal(history.at(-2)?.message, `${marker}:compensate`);
@@ -242,13 +252,12 @@ test("settings fence excludes an expired-lease takeover by an SDK writer in anot
   try {
     await withSettingsFence(f.root, async () => {
       await setTimeout(1100);
-      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id, "settings"], { stdio: ["ignore", "pipe", "pipe"] });
+      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id, "probe-settings"], { stdio: ["pipe", "pipe", "pipe"] });
       finished = once(writer, "exit").then(([code]) => { exited = true; assert.equal(code, 0); });
-      await once(writer.stdout!, "data");
-      await Promise.race([finished, setTimeout(500)]);
+      await waitForBlockedPeer(writer);
       assert.equal(exited, false, "the settings writer cannot enter the protected callback");
     });
-    assert.ok(finished); await finished;
+    assert.ok(finished); writer!.stdin!.end("retry\n"); await finished;
     assert.deepEqual((await readSettingsSection(f.root, "csv_fence_fixture")).value, { newer: true });
   } finally {
     if (writer && !exited) writer.kill();
