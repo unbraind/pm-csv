@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { create, locateItem, normalizeItemId, PmCliError } from "@unbrained/pm-cli/sdk";
+import { create, locateItem, normalizeItemId, PmCliError, runWithActiveExtensions, resolveItemTypeRegistry, getActiveExtensionRegistrations } from "@unbrained/pm-cli/sdk";
 import { pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import { buildMutationIntent, matchesMutationScope } from "./mutation-intent.ts";
 import { serializeCSV } from "./index.ts";
@@ -89,9 +89,10 @@ function planMapping(table: readonly string[][], options: LineageOptions): Linea
 }
 /** Recover a committed native create by its stable key, including a crash before artifact export. */
 async function existingRow(pmRoot: string, id: string, marker: string, intent: Parameters<typeof create>[0]): Promise<"replayed" | "identity_conflict" | undefined> {
-  if (!await locateItem(pmRoot, id)) return undefined;
+  const settings = await readSettings(pmRoot);
+  if (!await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder)) return undefined;
   const document = await readUpdateDocument(pmRoot, id);
-  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!, await readSettings(pmRoot)) ? "replayed" : "identity_conflict";
+  return document.metadata.tags?.includes(marker) && matchesMutationScope(document, intent!, settings) ? "replayed" : "identity_conflict";
 }
 /** Import bounded rows with native SDK validation/history/locking and stable explicit IDs.
  * Rejected artifacts contain only allowed columns plus a stable retry key. Replaying
@@ -169,7 +170,7 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
   const capturedTable = table.map(row => [...row]);
   const capturedOptions = { ...options, columns: [...options.columns], fieldMap: options.fieldMap === undefined ? undefined : { ...options.fieldMap } };
   const mapping = planMapping(capturedTable, capturedOptions);
-  return withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping));
+  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping)));
 }
 
 /** Keep lineage configuration drift within its documented refusal family. */

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:f
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult, listAllComplete, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc, create as createNativeCsv, update as updateNativeCsv, resolveRuntimeStatusRegistry, isTerminalStatus } from "@unbrained/pm-cli/sdk";
+import { runWithActiveExtensions, certifyCompleteListResult, inspectCompleteListResult, listAllComplete, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc, create as createNativeCsv, update as updateNativeCsv, resolveRuntimeStatusRegistry, isTerminalStatus } from "@unbrained/pm-cli/sdk";
 import { captureSettings, inSettingsTransaction, normalizePinnedStatus, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import type { SettingsSnapshot } from "./settings-snapshot.ts";
 
@@ -15,8 +15,8 @@ import { applyEditSession, exportEditSession, EditRefusal } from "./roundtrip.ts
 import { buildMutationIntent, mutationScopeArguments, matchesMutationScope } from "./mutation-intent.ts";
 import { registerJoinCommands } from "./join-plans.ts";
 import { registerTableSchemaCommands } from "./table-schema.ts";
-import { admitCSV, AdmissionRefusal, admissionPreviewFailure, admissionSettingsChanged, admissionTargetRevision, admissionTargetSequence, assertCSVAdmission, findAdmissionFailure, normalizeAdmissionFilter, parseAdmissionOptions, readAdmittedSource, registerAdmissionCommand, requireAdmissionCapability } from "./admission.ts";
-import type { AdmissionOptions } from "./admission.ts";
+import { admitCSV, AdmissionRefusal, admissionPreviewFailure, admissionSettingsChanged, withAdmissionTargetChecks, assertCSVAdmission, findAdmissionFailure, normalizeAdmissionFilter, parseAdmissionOptions, readAdmittedSource, registerAdmissionCommand, requireAdmissionCapability } from "./admission.ts";
+import type { AdmissionOptions, AdmissionTargetChecks } from "./admission.ts";
 
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument, UPDATE_COMPENSATION_VERSION } from "./atomic-update.ts";
 
@@ -1537,12 +1537,12 @@ async function importCSV(pmRoot: string, filePath: string, opts: CsvImportOption
       fieldMap: opts.fieldMap, autoMap: opts.autoMap ?? false, encoding: opts.encoding ?? "utf-8", skipHeaders: opts.skipHeaders ?? false, filter: opts.filter });
     const captured: CsvImportOptions = { ...opts, delimiter: admission.delimiter, fieldMap: admission.fieldMap, encoding: admission.encoding,
       autoMap: admission.autoMap, skipHeaders: admission.skipHeaders, filter: admission.filter, admission };
-    return withSettings(pmRoot, admissionSettingsChanged, async () => {
+    return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, admissionSettingsChanged, async () => {
       captured.filter = normalizeAdmissionFilter(admission.filter, await readSettings(pmRoot));
       const receipt = await admitCSV(pmRoot, filePath, admission);
       assertCSVAdmission(receipt);
       return importCSVAtomic(pmRoot, filePath, captured, receipt.digest);
-    });
+    }));
   }
   if (opts.atomic && opts.stream) {
     return Promise.reject(
@@ -1905,6 +1905,7 @@ async function importCSVAtomicInternal(
   filePath: string,
   opts: CsvImportOptions,
   prepared: ReturnType<typeof prepareInMemoryImport>,
+  targets: AdmissionTargetChecks,
   bindingSnapshot?: Awaited<ReturnType<typeof loadAtomicBindings>>,
 ): Promise<ImportResult> {
   const { rawHeaders, dataRows, result, resolvedHeaders } = prepared;
@@ -2013,7 +2014,7 @@ async function importCSVAtomicInternal(
       : normalizedKey ? keyIndex.get(normalizedKey) : undefined;
     if (normalizedKey && !existingId) claimedKeys.set(normalizedKey, rowIndex);
     const revision = opts.admission === undefined ? undefined : revisions?.get(rowIndex) ??
-      (existingId ? await admissionTargetRevision(pmRoot, existingId) : "absent");
+      (existingId ? await targets.revision(existingId) : "absent");
     const creation = revision === undefined || existingId ? undefined : nativeSdk.normalizeItemId(
       requireAdmissionCapability(nativeSdk.deriveMutationTransactionId)(`${transactionId}:${rowIndex}`), (await readSettings(pmRoot)).id_prefix);
     if (creations?.has(rowIndex) && creations.get(rowIndex) !== creation) throw new AdmissionRefusal("csv_admission_target_changed", "A recorded creation identity differs from this admitted source domain. Reconcile the retained journal before applying.");
@@ -2024,7 +2025,7 @@ async function importCSVAtomicInternal(
     await opts.onAdmissionBoundary?.("targets_read");
     if (bindings.size === 0) {
       const latest = await loadAtomicBindings(pmRoot, transactionId);
-      if (latest.bindings.size > 0) return importCSVAtomicInternal(pmRoot, filePath, opts, { ...prepared, result: createImportResult() }, latest);
+      if (latest.bindings.size > 0) return importCSVAtomicInternal(pmRoot, filePath, opts, { ...prepared, result: createImportResult() }, targets, latest);
     }
   }
 
@@ -2044,11 +2045,11 @@ async function importCSVAtomicInternal(
   const admittedRowState = async (row: PlannedRow): Promise<{ revision: string; applied: boolean }> => {
     const sequence = sequences.get(row.existingId!);
     if (sequence) {
-      const state = await admissionTargetSequence(pmRoot, row.existingId!, row.revision!, sequence.map(entry => rowTagFor(entry.rowIndex)));
+      const state = await targets.sequence(row.existingId!, row.revision!, sequence.map(entry => rowTagFor(entry.rowIndex)));
       sequenceHeads.set(row.existingId!, state.revision);
       return { revision: state.revision, applied: state.completed >= sequence.indexOf(row) };
     }
-    const revision = await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, row.revision, rowTagFor(row.rowIndex));
+    const revision = await targets.revision(row.existingId ?? row.creation!, row.revision, rowTagFor(row.rowIndex));
     return { revision, applied: revision !== row.revision };
   };
   const admittedApplied = new Set<number>();
@@ -2134,7 +2135,7 @@ async function importCSVAtomicInternal(
       if (row.revision !== undefined) {
         await opts.onAdmissionBoundary?.("before_write", row.existingId ?? row.creation!);
         await verifySettings(pmRoot);
-        await admissionTargetRevision(pmRoot, row.existingId ?? row.creation!, sequenceHeads.get(row.existingId!) ?? row.revision);
+        await targets.revision(row.existingId ?? row.creation!, sequenceHeads.get(row.existingId!) ?? row.revision);
         if (!row.isUpdate && opts.keyField && row.keyValue && csvKeyIndex(certifyCompleteListResult(await listAllComplete({}, { pmRoot })).items).has(normalizeKeyValue(row.keyValue))) {
           throw new AdmissionRefusal("csv_admission_target_changed", "A key appeared after admission planning. Re-read current SDK state and preview a fresh import before writing.");
         }
@@ -2185,7 +2186,7 @@ async function importCSVAtomicInternal(
           const options = { ...buildMutationIntent({ parent: current.metadata.parent, assignee: current.metadata.assignee,
             sprint: current.metadata.sprint, release: current.metadata.release, blockedBy: current.metadata.blocked_by,
             status, closeReason: "Atomic CSV import rolled back", author, message: `${rowTag}:compensate` }, "patch"), removeTags: [rowTag, ownershipTag] };
-          await admissionTargetRevision(pmRoot, id, "owned", rowTag);
+          await targets.revision(id, "owned", rowTag);
           await updateNativeCsv(id, options, { pmRoot });
         } else compensateCreate(pmRoot, id, [rowTag, ownershipTag]);
       }
@@ -2239,8 +2240,10 @@ async function importCSVAtomic(pmRoot: string, filePath: string, opts: CsvImport
   pmRoot = resolve(pmRoot); filePath = resolve(filePath);
   const captured = { ...opts, fieldMap: { ...opts.fieldMap }, filter: opts.filter ? { ...opts.filter } : undefined };
   const prepared = prepareInMemoryImport(filePath, captured, admittedDigest);
-  if (captured.dryRun || !captured.commitTransaction) return importCSVAtomicInternal(pmRoot, filePath, captured, prepared);
-  return withSettings(pmRoot, captured.admission === undefined ? importSettingsChanged : admissionSettingsChanged, () => importCSVAtomicInternal(pmRoot, filePath, captured, prepared));
+  return withAdmissionTargetChecks(pmRoot, targets => {
+    if (captured.dryRun || !captured.commitTransaction) return importCSVAtomicInternal(pmRoot, filePath, captured, prepared, targets);
+    return withSettings(pmRoot, captured.admission === undefined ? importSettingsChanged : admissionSettingsChanged, () => importCSVAtomicInternal(pmRoot, filePath, captured, prepared, targets));
+  });
 }
 
 /** Keep settings drift within the existing command error family. */

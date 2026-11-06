@@ -2,10 +2,29 @@ id: pm-csv-lewj
 title: Resource admission drops installed extension type/field registries from validation and revision lookup
 description: "Tracks gh:unbraind/pm-csv#214 (filed 2026-10-29, missed by the blind issue watch). admission.ts on current main still calls resolveItemTypeRegistry(settings) without the active workspace extension registrations in both scan() and the revision-lookup path (locateItem type_to_folder), so an installed extension-defined item type becomes a row_invalid admission rejection and revision reads use a narrower schema than the writer. Verified on main 2026-11-02: the one-argument resolver call remains. The bounded-admission feature that delivered PR #213 is closed, so this regression needs its own fix: activate the target workspace extensions (or pass the resolved registry) before scan and revision lookup, and add an admission regression with an extension-defined type and field."
 type: Issue
-status: open
+status: in_progress
 priority: 2
 tags[3]: admission,extensions,"gh:unbraind/pm-csv#214"
 created_at: "2026-11-02T09:16:36.592Z"
-updated_at: "2026-11-02T09:16:36.592Z"
+updated_at: "2026-11-06T21:35:27.805Z"
 author: pi-glm
+comments[5]{created_at,author,text}:
+  "2026-11-06T12:10:38.120Z",codex-sol,"Reusing this issue owner for gh:unbraind/pm-csv#214 in the G2 adoption PR, linked to pm-csv-sdk-write-fence and companion pm-cli-website-sumw. Activate the explicit target workspace and use its public active type/field registrations in admission, revision reads and compensation; cover real installed schema extensions and cross-workspace isolation."
+  "2026-11-06T12:33:57.172Z",codex-sol,"Validation: six real installed-extension tests pass, covering TOON and JSON Markdown source documents, strict unknown-field policy, direct and host-injected admission, cross-workspace isolation, separate-CLI revision conflicts and interrupted representation replay with opaque string/object fields. Disposable admission registry-only revert fails all five admission/isolation tests; omitting registered fields only from representation parsing fails the recovery test. Restored implementation passes 6/6. Existing resource-bound, late-invalid-row, source/settings and revision scenarios remain covered."
+  "2026-11-06T16:50:57.780Z",codex-sol,Review round 2 extends the installed-registry fix to direct spreadsheet export/apply and atomic imports without admission. Admitted imports now pass target-check callbacks through one public SDK extension scope instead of reactivating on every revision/sequence read; standalone checks still activate explicitly. Real extension fixtures count lifecycle activations and preserve opaque string/object fields under strict schema policy. Initial new tests exposed a legacy transport assertion that incorrectly counted its CLI subprocess activations; restrict that bound to admitted in-process checks and retain legacy field-preservation assertions.
+  "2026-11-06T17:00:15.093Z",codex-sol,"Round 2 final linked validation passes 14/14 installed-extension tests, including direct spreadsheet export/apply in TOON and JSON Markdown, non-admitted atomic field preservation, repeated admitted target checks, standalone revision/sequence activation, existing replay/recovery and workspace isolation. New regressions use real SDK trackers and installed schema extensions. All five isolated behavioral reverts fail; restored new cases pass 5/5. Review threads PRRT_kwDOSYpI8s60lXG2 and PRRT_kwDOSYpI8s60lXHD will be answered after the fix push. Fresh current-head CI and full review remain required."
+  "2026-11-06T21:35:23.416Z",codex-sol,"Round 3 lineage fix validation: linked installed-extension suite passes 16/16; existing lineage suite passes 4/4 including concurrent native creation and replay. Exact pre-fix importLineage reversion fails both registered-type cases (0/2) after native creation; exact pre-fix existingRow reversion fails both replay cases (0/2). Fixed SDK activation remains live through receipt construction, and native folder lookup uses active SDK registrations. Real strict-schema fixtures preserve opaque native defaults and item/history identity in TOON and JSON Markdown trackers. Restored targeted cases pass 5/5. Main reconciliation changes only toolchain dependencies, retaining audited SDK 2026.11.5 and taking main pm-ops 2026.11.2; no PM histories were merged or rewritten."
+files[6]{path,scope}:
+  admission.ts,project
+  atomic-update.ts,project
+  index.ts,project
+  lineage.ts,project
+  roundtrip.ts,project
+  test/admission-extensions.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/admission-extensions.test.ts,project,codex-sol,"2026-11-06T12:28:14.066Z",local_mutation,csv-lease-fencing-and-registry-admission
+docs[3]{path,scope}:
+  docs/import-admission.md,project
+  docs/row-lineage.md,project
+  docs/spreadsheet-roundtrip.md,project
 body: ""

@@ -322,6 +322,10 @@ test("command paths exercise rich create/update, headerless streaming, strict su
       pmRoot: root,
     });
     assert.equal(created.handled, true);
+    // The supported SDK refuses starting work with an open blocker. Complete
+    // the fixture blocker before exercising the valid active-state update.
+    const completed = spawnSync("pm", ["--path", root, "close", blockerId, "--reason", "Fixture blocker complete"], { encoding: "utf8" });
+    assert.equal(completed.status, 0, completed.stderr || completed.stdout);
 
     writeFileSync(
       rich,
