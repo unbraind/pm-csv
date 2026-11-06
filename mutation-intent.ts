@@ -131,7 +131,7 @@ export function matchesMutationScope(document: ItemDocument, options: MutationOp
   const intent = normalizeMutationInput(options, settings, mode);
   const expected = canonicalDocument({ metadata: { ...document.metadata,
     ...Object.fromEntries(SCALARS.map(([option, field]) => [field, mode === "patch" && !Object.hasOwn(options, option) ? document.metadata[field] : intent[option]])),
-  }, body: document.body }, { schema: settings.schema });
+  }, body: document.body }, { schema: settings.schema, extensionFieldNames: nativeSdk.collectRegisteredItemFieldNames(nativeSdk.getActiveExtensionRegistrations()) });
   if (SCALARS.some(([, field]) => document.metadata[field] !== expected.metadata[field])) return false;
   if ((intent.clearFiles && document.metadata.files?.length) || (intent.clearDocs && document.metadata.docs?.length) ||
       (intent.clearTests && document.metadata.tests?.length)) return false;

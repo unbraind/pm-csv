@@ -4,7 +4,7 @@ import * as nativeSdk from "@unbrained/pm-cli/sdk";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import {
   acquireLockLease, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
-  PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry,
+  PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry, getActiveExtensionRegistrations, collectRegisteredItemFieldNames,
   resolveRuntimeStatusRegistry, verifyHistoryEntries,
   appendHistoryEntry, createHistoryEntry, emptyImportedDocument, removeFileIfExists, nowIso,
   PmClient, runWithActiveExtensions, runActiveOnWriteHooks, runWorkspaceTransactionGc,
@@ -150,7 +150,7 @@ export async function mutateJoinIndex(mutation: JoinIndexMutation, run: () => Pr
     finally {
       if (capabilities.refreshItemMetadataDerivedIndex) {
         const located = await locateItem(mutation.pmRoot, mutation.id, mutation.idPrefix, mutation.preferredFormat, mutation.typeToFolder);
-        const document = located ? (await readLocatedItem(located, { schema: mutation.schema })).document : null;
+        const document = located ? (await readLocatedItem(located, { schema: mutation.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) })).document : null;
         await capabilities.refreshItemMetadataDerivedIndex({ ...mutation, document });
       }
     }
@@ -224,7 +224,7 @@ interface Row {
 /** Compile and validate all tables before generating a plan or invoking mutation primitives. */
 async function compile(settings: PmSettings, input: JoinInput): Promise<{ rows: Row[]; issues: JoinIssue[]; order: number[] }> {
   const statuses = resolveRuntimeStatusRegistry(settings.schema);
-  const types = new Map(Object.entries(resolveItemTypeRegistry(settings).type_to_folder));
+  const types = new Map(Object.entries(resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder));
   const issues: JoinIssue[] = [], rows: Row[] = [];
   const tables = input.tables.map(t => ({ ...t, data: readTable(t.csv, ",").table, keys: new Map<string, number[]>() }));
   for (const t of tables) {
@@ -310,7 +310,7 @@ type JoinState = "pending" | "applied" | "foreign" | "compensated" | "rollback_p
 
 /** Revalidate exact ownership, complete history and scope while the caller owns the item lease. */
 async function inspectLocked(pmRoot: string, id: string, marker: string, row: Row, ids: string[], settings: PmSettings): Promise<JoinState> {
-  const types = resolveItemTypeRegistry(settings);
+  const types = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
   const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
   const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
   if (!located && history.length === 0) return "pending";
@@ -325,7 +325,7 @@ async function inspectLocked(pmRoot: string, id: string, marker: string, row: Ro
     if (deleted) return "compensated";
     return changed();
   }
-  const { document } = await readLocatedItem(located, { schema: settings.schema });
+  const { document } = await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) });
   if (!verifyHistoryEntries(deleted ? history.slice(0, -1) : history, document).ok) changed();
   const parent = row.edges.find(edge => edge.kind === "parent");
   if (!matchesMutationScope(document, { ...row.options, parent: parent ? ids[parent.target] : undefined }, settings,
@@ -368,10 +368,10 @@ async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: 
         if (current === "foreign") return "foreign";
         if (current === "pending" || current === "compensated") return;
         await options.onBoundary?.("compensation_checked", id);
-        const types = resolveItemTypeRegistry(settings);
+        const types = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
         const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
         if (!located) throw new JoinRefusal("csv_join_target_changed", "Reconcile a missing compensation target before retrying.");
-        const { document } = await readLocatedItem(located, { schema: settings.schema });
+        const { document } = await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) });
         const empty = emptyImportedDocument(), historyPath = getHistoryPath(pmRoot, id);
         await lease.fence(() => mutateJoinIndex({ id, idPrefix: settings.id_prefix, pmRoot, preferredFormat: settings.item_format, typeToFolder: types.type_to_folder,
           schema: settings.schema, itemPath: located.itemPath, document: null }, async () => {
@@ -506,7 +506,7 @@ export async function previewJoins(pmRoot: string, value: unknown): Promise<{ re
   pmRoot = resolve(pmRoot);
   try {
     const input = boundary(value, false) as JoinInput;
-    return await withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input));
+    return await runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the selected sources and initialized tracker, then preview again."); }
 }
@@ -516,7 +516,7 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
   pmRoot = resolve(pmRoot);
   try {
     const plan = boundary(value, true) as JoinPlan, captured = { ...options };
-    return await withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured));
+    return await runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the reviewed plan and current SDK state before retrying."); }
 }

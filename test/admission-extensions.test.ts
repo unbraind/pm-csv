@@ -7,10 +7,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { commitWorkspaceTransaction, create, get, getHistoryPath, readHistoryEntries, readSettings, writeSettings, verifyHistoryEntries,
   runWithActiveExtensions, createExtensionCommandSdk, PmClient, getItemPath, serializeItemDocument,
-  collectRegisteredItemFieldNames, getActiveExtensionRegistrations, mutateItem, locateItem, readLocatedItem, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
+  collectRegisteredItemFieldNames, getActiveExtensionRegistrations, mutateItem, locateItem, readLocatedItem, resolveItemTypeRegistry, emptyImportedDocument } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { importCSV } from "../index.ts";
 import { admitCSV, admissionTargetRevision } from "../admission.ts";
+import { applyJoins, previewJoins, JoinRefusal } from "../join-plans.ts";
+import type { JoinInput } from "../join-plans.ts";
 import { readUpdateSnapshot, captureUpdateCompensation, compensateUpdate } from "../atomic-update.ts";
 
 /** Install a real schema extension in a plain tracker; schema files alone are insufficient. */
@@ -29,7 +31,7 @@ async function fixture(format: "toon" | "json_markdown", name: string) {
   writeFileSync(join(installed, "manifest.json"), JSON.stringify({ name: "fixture-schema", version: "1.0.0", entry: "./index.ts", capabilities: ["schema"] }));
   writeFileSync(join(installed, "index.ts"), `export default { activate(api: { registerItemTypes: (value: unknown[]) => void; registerItemFields: (value: unknown[]) => void }) {
     api.registerItemTypes([{ name: "${name}", folder: "fixture-bridges" }]);
-    api.registerItemFields([{ name: "opaque_text", type: "string" }, { name: "opaque_object", type: "object" }]);
+    api.registerItemFields([{ name: "opaque_text", type: "string", default: "Extension default" }, { name: "opaque_object", type: "object", default: { nested: [false, 0, "default"] } }]);
   } };\n`);
   const item = await create({ title: "Original", type: name, tags: "csv-key:existing",
     field: ['opaque_text=  Opaque text  ', 'opaque_object={"nested":[false,0,"x"]}'] }, { pmRoot: root });
@@ -71,6 +73,10 @@ for (const format of ["toon", "json_markdown"] as const) for (const injected of 
           commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) });
         assert.equal(result.updated, 1);
       }
+      const historyAfterApply = await readHistoryEntries(getHistoryPath(f.root, f.id), f.id);
+      assert.equal((await importCSV(f.root, f.file, { delimiter: ",", fieldMap: {}, dryRun: false, atomic: true, admission: {}, keyField: "key",
+        commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) })).updated, 0);
+      assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, f.id), f.id), historyAfterApply);
       const after = await get(f.id, { full: true }, { pmRoot: f.root });
       assert.equal(after.item.title, "Changed");
       for (const field of ["opaque_text", "opaque_object"]) assert.deepEqual(after.item[field], before.item[field]);
@@ -131,5 +137,71 @@ test("installed fields survive interrupted representation compensation and appen
       await compensateUpdate(f.root, f.id, marker, "csv-test", data);
       assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, f.id), f.id), history);
     });
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+/** Two extension-owned rows exercise complete scope reads and joined rollback. */
+function joinInput(explicit: boolean): JoinInput {
+  return { version: 1, tables: [{ name: "bridges", key: "key",
+    csv: "key,title,type,parent\na,Join first,FixtureBridge,\nb,Join second,FixtureBridge,a\n",
+    fields: { title: "title", ...(explicit ? { type: "type" } : {}) },
+    references: [{ column: "parent", table: "bridges", kind: "parent" }] }] };
+}
+
+for (const explicit of [false, true]) test(`installed extension joins apply, replay and resume compensation (${explicit ? "explicit" : "default"} type)`, async () => {
+  const f = await fixture("toon", "FixtureBridge");
+  try {
+    const settings = await readSettings(f.root);
+    settings.governance.create_default_type = "FixtureBridge";
+    await writeSettings(f.root, settings);
+    const planned = await previewJoins(f.root, joinInput(explicit));
+    assert.equal(planned.receipt.ok, true); assert.ok(planned.plan);
+    assert.equal((await applyJoins(f.root, planned.plan, { author: "csv-test" })).applied, 2);
+    for (const id of planned.plan.ids) {
+      const saved = await get(id, { full: true }, { pmRoot: f.root });
+      assert.equal(saved.item.type, "FixtureBridge");
+      assert.equal(saved.item.opaque_text, "Extension default");
+      assert.deepEqual(saved.item.opaque_object, { nested: [false, 0, "default"] });
+    }
+    assert.equal((await applyJoins(f.root, planned.plan, { author: "csv-test" })).unchanged, 2);
+    for (const id of planned.plan.ids) assert.equal((await readHistoryEntries(getHistoryPath(f.root, id), id)).length, 1);
+
+    const failed = await previewJoins(f.root, joinInput(explicit)); assert.ok(failed.plan);
+    const ids = failed.plan.ids;
+    let interrupted = false;
+    await assert.rejects(applyJoins(f.root, failed.plan, { author: "csv-test", onBoundary(phase, id) {
+      if (phase === "before_create" && id === ids[1]) throw new Error("Fail second joined row");
+      if (phase === "compensation_recorded" && !interrupted) { interrupted = true; throw new Error("Interrupt joined tombstone"); }
+    } }), error => error instanceof JoinRefusal && error.code === "csv_join_apply_failed");
+    assert.equal(interrupted, true);
+    await assert.rejects(applyJoins(f.root, failed.plan, { author: "csv-test" }), error => error instanceof JoinRefusal && error.code === "csv_join_reconcile");
+    await assert.rejects(get(ids[0], {}, { pmRoot: f.root }), /was deleted.*history is retained/i);
+    const history = await readHistoryEntries(getHistoryPath(f.root, ids[0]), ids[0]);
+    assert.deepEqual(history.map(entry => entry.op), ["create", "delete"]);
+    assert.equal(verifyHistoryEntries(history, emptyImportedDocument()).ok, true);
+    assert.match(JSON.stringify(history[0]), /opaque_object/);
+    assert.equal((await readHistoryEntries(getHistoryPath(f.root, ids[1]), ids[1])).length, 0);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("installed extension join compensation preserves a separate-process foreign writer", async () => {
+  const f = await fixture("toon", "FixtureBridge");
+  try {
+    const planned = await previewJoins(f.root, joinInput(true)); assert.ok(planned.plan);
+    const ids = planned.plan.ids;
+    let changed = false;
+    await assert.rejects(applyJoins(f.root, planned.plan, { author: "csv-test", onBoundary(phase, id) {
+      if (phase !== "before_create" || id !== ids[1]) return;
+      const peer = spawnSync(process.execPath, ["node_modules/@unbrained/pm-cli/dist/cli.js", "--pm-path", f.root,
+        "update", ids[0], "--field", "opaque_text=Foreign retained", "--author", "peer-test"], { encoding: "utf8" });
+      assert.equal(peer.status, 0, peer.stderr); changed = true;
+      throw new Error("Fail after foreign update");
+    } }), error => error instanceof JoinRefusal && error.code === "csv_join_apply_failed");
+    assert.equal(changed, true);
+    assert.equal((await get(ids[0], { full: true }, { pmRoot: f.root })).item.opaque_text, "Foreign retained");
+    const history = await readHistoryEntries(getHistoryPath(f.root, ids[0]), ids[0]);
+    assert.deepEqual(history.map(entry => entry.op), ["create", "update"]);
+    await assert.rejects(applyJoins(f.root, planned.plan, { author: "csv-test" }), /csv_join_target_changed/);
+    assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, ids[0]), ids[0]), history);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });

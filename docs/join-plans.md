@@ -199,3 +199,11 @@ quoting, ragged records and inconsistent line endings are wrapped from the table
 parser, retaining its `sourceCode`, actionable `remedy` and original `cause`.
 The CLI does the same for invalid UTF-8/JSON and file errors. Expected lower-level
 failures are not leaked as another API's refusal family.
+
+Joined preview, apply, replay and compensation activate the selected workspace's
+extensions. Native type registries supply installed types, folders and defaults;
+authoritative reads and scope normalization include registered extension fields,
+including under strict unknown-field policy. SDK field defaults remain intact.
+The existing CSV field vocabulary and history-based ownership rules still apply:
+an independent edit to any field refuses compensation rather than deleting the
+peer's item.
