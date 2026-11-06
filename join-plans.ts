@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import * as nativeSdk from "@unbrained/pm-cli/sdk";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import {
-  acquireLock, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
+  acquireLockLease, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
   PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry,
   resolveRuntimeStatusRegistry, verifyHistoryEntries,
   appendHistoryEntry, createHistoryEntry, emptyImportedDocument, removeFileIfExists, nowIso,
@@ -11,7 +11,6 @@ import {
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
-import { assertEditLease } from "./lease-guard.ts";
 import { assertCanonicalMutationIds, buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
 import { captureSettings, inSettingsTransaction, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsChangedIn, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
@@ -337,13 +336,12 @@ async function inspectLocked(pmRoot: string, id: string, marker: string, row: Ro
 /** Inspect current SDK state under its item lease, never a frozen journal receipt. */
 async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids: string[]): Promise<JoinState> {
   const settings = await readSettings(pmRoot);
-  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
-  const started = performance.now();
+  const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
   try {
     const result = await inspectLocked(pmRoot, id, marker, row, ids, settings);
-    assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
+    await lease.fence(async () => {});
     return result;
-  } finally { await release(); }
+  } finally { await lease.release(); }
 }
 
 /**
@@ -361,34 +359,31 @@ async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: 
     if (prior === "applied") await withSettingsFence(pmRoot, () => PmClient.forActiveExtensionHost({ pmRoot, author: options.author }).delete(id, { dryRun: true, force: true }));
     await options.onBoundary?.("compensation_validated", id);
     return withSettingsFence(pmRoot, async () => {
-    const settings = await readSettings(pmRoot);
-    const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, options.author, false, false, settings.locks.wait_ms);
-    const started = performance.now();
-    try {
-      await options.onBoundary?.("compensation_locked", id);
-      await verifySettings(pmRoot);
-      const current = await inspectLocked(pmRoot, id, marker, row, plan.ids, settings);
-      if (current === "foreign") return "foreign";
-      if (current === "pending" || current === "compensated") return;
-      await options.onBoundary?.("compensation_checked", id);
-      const types = resolveItemTypeRegistry(settings);
-      const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
-      if (!located) throw new JoinRefusal("csv_join_target_changed", "Reconcile a missing compensation target before retrying.");
-      const { document } = await readLocatedItem(located, { schema: settings.schema });
-      const empty = emptyImportedDocument(), historyPath = getHistoryPath(pmRoot, id);
-      await mutateJoinIndex({ id, idPrefix: settings.id_prefix, pmRoot, preferredFormat: settings.item_format, typeToFolder: types.type_to_folder,
-        schema: settings.schema, itemPath: located.itemPath, document: null }, async () => {
-        assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
-        if (current === "applied") await appendHistoryEntry(historyPath, createHistoryEntry({ nowIso: nowIso(), author: options.author,
-          op: "delete", before: document, after: empty, message: `${marker}:compensate` }));
-        await options.onBoundary?.("compensation_recorded", id);
-        assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
-        await removeFileIfExists(located.itemPath);
-        await options.onBoundary?.("compensation_removed", id);
-      });
-      for (const [path, op] of [[located.itemPath, "delete"], [historyPath, "delete:history"]]) await runActiveOnWriteHooks({ path, scope: "project", op,
-        item_id: id, item_type: document.metadata.type, before: document, after: empty, changed_fields: ["deleted"] });
-    } finally { await release(); }
+      const settings = await readSettings(pmRoot);
+      const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, options.author, false, false, settings.locks.wait_ms);
+      try {
+        await options.onBoundary?.("compensation_locked", id);
+        await verifySettings(pmRoot);
+        const current = await inspectLocked(pmRoot, id, marker, row, plan.ids, settings);
+        if (current === "foreign") return "foreign";
+        if (current === "pending" || current === "compensated") return;
+        await options.onBoundary?.("compensation_checked", id);
+        const types = resolveItemTypeRegistry(settings);
+        const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
+        if (!located) throw new JoinRefusal("csv_join_target_changed", "Reconcile a missing compensation target before retrying.");
+        const { document } = await readLocatedItem(located, { schema: settings.schema });
+        const empty = emptyImportedDocument(), historyPath = getHistoryPath(pmRoot, id);
+        await lease.fence(() => mutateJoinIndex({ id, idPrefix: settings.id_prefix, pmRoot, preferredFormat: settings.item_format, typeToFolder: types.type_to_folder,
+          schema: settings.schema, itemPath: located.itemPath, document: null }, async () => {
+          if (current === "applied") await appendHistoryEntry(historyPath, createHistoryEntry({ nowIso: nowIso(), author: options.author,
+            op: "delete", before: document, after: empty, message: `${marker}:compensate` }));
+          await options.onBoundary?.("compensation_recorded", id);
+          await removeFileIfExists(located.itemPath);
+          await options.onBoundary?.("compensation_removed", id);
+        }));
+        for (const [path, op] of [[located.itemPath, "delete"], [historyPath, "delete:history"]]) await runActiveOnWriteHooks({ path, scope: "project", op,
+          item_id: id, item_type: document.metadata.type, before: document, after: empty, changed_fields: ["deleted"] });
+      } finally { await lease.release(); }
     });
   });
 }

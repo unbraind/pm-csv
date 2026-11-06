@@ -1,9 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { acquireLock, readSettings, normalizeStatusInput, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, PmCliError } from "@unbrained/pm-cli/sdk";
+import { acquireLockLease, readSettings, normalizeStatusInput, resolveItemTypeRegistry, getActiveExtensionRegistrations, resolveRuntimeStatusRegistry, PmCliError } from "@unbrained/pm-cli/sdk";
 import type { PmSettings, create } from "@unbrained/pm-cli/sdk";
-import { assertEditLease } from "./lease-guard.ts";
 
 /** One operation's schema/defaults, independent of subsequent SDK settings reads. */
 export interface SettingsSnapshot {
@@ -94,22 +93,20 @@ export async function withSettingsFence<T>(pmRoot: string, run: () => Promise<T>
   }
   if (current.locked) { await verifySettings(pmRoot); return run(); }
   const settings = current.snapshot.settings;
-  const release = await acquireLock(pmRoot, "workspace-history", settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
-  const started = performance.now();
+  const lease = await acquireLockLease(pmRoot, "workspace-history", settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
   try {
-    return await scopes.run({ ...current, locked: true, parent: scopes.getStore() }, async () => {
+    return await lease.fence(() => scopes.run({ ...current, locked: true, parent: scopes.getStore() }, async () => {
       await verifySettings(pmRoot);
       const result = await run();
-      assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
       await verifySettings(pmRoot);
       return result;
-    });
-  } finally { await release(); }
+    }));
+  } finally { await lease.release(); }
 }
 
 /** Resolve create type/status defaults using only the snapshot's native registries. */
 export function pinCreateDefaults(options: NonNullable<Parameters<typeof create>[0]>, settings: PmSettings): NonNullable<Parameters<typeof create>[0]> {
-  const registry = resolveItemTypeRegistry(settings);
+  const registry = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
   const aliases = new Map(Object.entries(registry.alias_to_type));
   const types = new Map(Object.entries(registry.by_type));
   const configured = settings.governance.create_default_type;

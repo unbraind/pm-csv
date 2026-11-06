@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, createReadStream, mkdirSync } from "node:f
 import { basename, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { certifyCompleteListResult, inspectCompleteListResult, listAllComplete, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc, create as createNativeCsv, update as updateNativeCsv, resolveRuntimeStatusRegistry, isTerminalStatus } from "@unbrained/pm-cli/sdk";
+import { runWithActiveExtensions, certifyCompleteListResult, inspectCompleteListResult, listAllComplete, readSettingsWithMetadata, resolveRuntimeFieldRegistry, runWorkspaceTransactionGc, create as createNativeCsv, update as updateNativeCsv, resolveRuntimeStatusRegistry, isTerminalStatus } from "@unbrained/pm-cli/sdk";
 import { captureSettings, inSettingsTransaction, normalizePinnedStatus, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import type { SettingsSnapshot } from "./settings-snapshot.ts";
 
@@ -1537,12 +1537,12 @@ async function importCSV(pmRoot: string, filePath: string, opts: CsvImportOption
       fieldMap: opts.fieldMap, autoMap: opts.autoMap ?? false, encoding: opts.encoding ?? "utf-8", skipHeaders: opts.skipHeaders ?? false, filter: opts.filter });
     const captured: CsvImportOptions = { ...opts, delimiter: admission.delimiter, fieldMap: admission.fieldMap, encoding: admission.encoding,
       autoMap: admission.autoMap, skipHeaders: admission.skipHeaders, filter: admission.filter, admission };
-    return withSettings(pmRoot, admissionSettingsChanged, async () => {
+    return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, admissionSettingsChanged, async () => {
       captured.filter = normalizeAdmissionFilter(admission.filter, await readSettings(pmRoot));
       const receipt = await admitCSV(pmRoot, filePath, admission);
       assertCSVAdmission(receipt);
       return importCSVAtomic(pmRoot, filePath, captured, receipt.digest);
-    });
+    }));
   }
   if (opts.atomic && opts.stream) {
     return Promise.reject(

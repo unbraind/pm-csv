@@ -2,10 +2,22 @@ id: pm-csv-lewj
 title: Resource admission drops installed extension type/field registries from validation and revision lookup
 description: "Tracks gh:unbraind/pm-csv#214 (filed 2026-10-29, missed by the blind issue watch). admission.ts on current main still calls resolveItemTypeRegistry(settings) without the active workspace extension registrations in both scan() and the revision-lookup path (locateItem type_to_folder), so an installed extension-defined item type becomes a row_invalid admission rejection and revision reads use a narrower schema than the writer. Verified on main 2026-11-02: the one-argument resolver call remains. The bounded-admission feature that delivered PR #213 is closed, so this regression needs its own fix: activate the target workspace extensions (or pass the resolved registry) before scan and revision lookup, and add an admission regression with an extension-defined type and field."
 type: Issue
-status: open
+status: in_progress
 priority: 2
 tags[3]: admission,extensions,"gh:unbraind/pm-csv#214"
 created_at: "2026-11-02T09:16:36.592Z"
-updated_at: "2026-11-02T09:16:36.592Z"
+updated_at: "2026-11-06T12:34:27.602Z"
 author: pi-glm
+comments[2]{created_at,author,text}:
+  "2026-11-06T12:10:38.120Z",codex-sol,"Reusing this issue owner for gh:unbraind/pm-csv#214 in the G2 adoption PR, linked to pm-csv-sdk-write-fence and companion pm-cli-website-sumw. Activate the explicit target workspace and use its public active type/field registrations in admission, revision reads and compensation; cover real installed schema extensions and cross-workspace isolation."
+  "2026-11-06T12:33:57.172Z",codex-sol,"Validation: six real installed-extension tests pass, covering TOON and JSON Markdown source documents, strict unknown-field policy, direct and host-injected admission, cross-workspace isolation, separate-CLI revision conflicts and interrupted representation replay with opaque string/object fields. Disposable admission registry-only revert fails all five admission/isolation tests; omitting registered fields only from representation parsing fails the recovery test. Restored implementation passes 6/6. Existing resource-bound, late-invalid-row, source/settings and revision scenarios remain covered."
+files[4]{path,scope}:
+  admission.ts,project
+  atomic-update.ts,project
+  index.ts,project
+  test/admission-extensions.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/admission-extensions.test.ts,project,codex-sol,"2026-11-06T12:28:14.066Z",local_mutation,csv-lease-fencing-and-registry-admission
+docs[1]{path,scope}:
+  docs/import-admission.md,project
 body: ""

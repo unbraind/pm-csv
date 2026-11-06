@@ -43,7 +43,7 @@ export function buildMutationIntent(options: MutationOptions, mode: "create" | "
   for (const [option, field] of SCALARS) {
     if (mode !== "create" && !Object.hasOwn(options, option)) continue;
     const value = Object.hasOwn(options, option) ? options[option] : undefined;
-    const present = mode === "snapshot" ? value !== undefined : Boolean(value?.trim()) &&
+    const present = mode === "snapshot" ? value !== undefined && value !== null : Boolean(value?.trim()) &&
       !isScopeClearAlias(value!);
     if (present) unset.delete(field);
     else { delete result[option]; unset.add(field); }
@@ -80,7 +80,7 @@ export function explicitDocumentMutation(mutate: Parameters<typeof mutateItem>[0
     const intent = buildMutationIntent(Object.fromEntries(SCALARS.map(([option, field]) => [option, document.metadata[field]])), "snapshot");
     for (const [option, field] of SCALARS) {
       if (intent[option] === undefined) delete document.metadata[field];
-      else document.metadata[field] = intent[option];
+      else document.metadata[field] = intent[option]!;
     }
     return result;
   };
@@ -119,9 +119,9 @@ export function normalizeMutationParent(reference: string, prefix: string, norma
  */
 export function normalizeMutationInput(options: MutationOptions, settings: Awaited<ReturnType<typeof readSettings>>, mode: "create" | "patch" = "create"): MutationOptions {
   const intent = buildMutationIntent(options, mode);
-  if (intent.parent !== undefined) intent.parent = normalizeMutationParent(intent.parent, settings.id_prefix);
+  if (typeof intent.parent === "string") intent.parent = normalizeMutationParent(intent.parent, settings.id_prefix);
   for (const field of ["sprint", "release"] as const) {
-    if (intent[field] !== undefined) intent[field] = validateSprintOrReleaseValue(field, intent[field], settings.validation.sprint_release_format).value;
+    if (typeof intent[field] === "string") intent[field] = validateSprintOrReleaseValue(field, intent[field], settings.validation.sprint_release_format).value;
   }
   return intent;
 }

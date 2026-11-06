@@ -33,9 +33,17 @@ and appends a `:restore` event; then an item-locked write restores original
 physical values with the same canonical hash and appends a `:compensate`
 completion receipt. Only that final receipt marks the step compensated. A crash
 between either write and its receipt resumes with the original prior data.
-The raw write uses the SDK atomic file and history primitives, preserves the
+The raw write uses the SDK atomic file and history primitives inside one
+`acquireLockLease().fence()` spanning both writes. The fence prevents takeover
+between representation and receipt, including after the TTL. It preserves the
 SDK's canonical derived-index values, and refuses an intervening writer before
-changing the representation. JSON Markdown snapshots migrate to the SDK's
+changing the representation. The SDK's `mutateItem` options have no raw
+representation override; this second phase retains empty scalar/collection
+values that native canonicalization omits. Item bytes and history remain two
+separate durable writes: process termination can interrupt them, and the
+existing history-prefix-verified replay completes the receipt. The fence is
+concurrency protection, not a multi-file crash-atomic commit. Extension lock
+providers own fencing of overrides under the SDK contract. JSON Markdown snapshots migrate to the SDK's
 normal TOON output while preserving field values. A completed compensation is
 a no-op on replay, including when another writer edits the item afterwards.
 

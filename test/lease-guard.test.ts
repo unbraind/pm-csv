@@ -1,20 +1,21 @@
 import "./support/isolated-environment.ts";
 import "./repros/sdk-lease-overrun.ts";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import test from "node:test";
-import { create, getHistoryPath, mutateItem, readSettings, setActiveExtensionHooks, writeSettings } from "@unbrained/pm-cli/sdk";
+import { create, getHistoryPath, mutateItem, readSettings, setActiveExtensionHooks, writeSettings, PmCliError, readHistoryEntries, verifyHistoryEntries, readSettingsSection } from "@unbrained/pm-cli/sdk";
 import type { OnReadHook, OnWriteHook } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import { captureUpdateCompensation, compensateUpdate, readUpdateSnapshot } from "../atomic-update.ts";
 import { EditRefusal } from "../edit-refusal.ts";
-import { assertEditLease } from "../lease-guard.ts";
 import { applyEditSession, exportEditSession } from "../roundtrip.ts";
+import { withSettingsFence } from "../settings-snapshot.ts";
 
 /** Build a real non-git tracker and persist its effective one-second lease. */
 async function fixture() {
@@ -49,10 +50,8 @@ async function evidence(root: string, id: string) {
 
 /** Require a typed lease refusal with the operator's retry/reconcile remedy. */
 function leaseRefusal(error: unknown): boolean {
-  assert.ok(error instanceof EditRefusal);
-  assert.equal(error.code, "csv_lease_expired");
-  assert.equal(error.context.code, "csv_lease_expired");
-  assert.match(error.remedy, /Re-run apply; another writer may have changed the item/);
+  assert.ok(error instanceof PmCliError);
+  assert.equal(error.code, "lock_lost");
   return true;
 }
 
@@ -63,7 +62,7 @@ function hasLeaseRefusal(error: unknown): boolean {
   for (const current of pending) {
     if (!(current instanceof Error) || seen.has(current)) continue;
     seen.add(current);
-    if (current instanceof EditRefusal && current.code === "csv_lease_expired") return true;
+    if (current instanceof PmCliError && current.code === "lock_lost") return true;
     pending.push(current.cause);
     if (current instanceof AggregateError) pending.push(...current.errors);
   }
@@ -73,25 +72,16 @@ function hasLeaseRefusal(error: unknown): boolean {
 /** A newer native writer takes over the expired lease and records its receipt. */
 async function newerWriter(f: Awaited<ReturnType<typeof fixture>>) {
   await setTimeout(1100);
-  await mutateItem({ pmRoot: f.root, settings: f.settings, id: f.id, op: "update", author: "newer-writer",
-    mutate(document) { document.metadata.title = "Newer protected value"; return { changedFields: ["title"] }; },
-  });
+  const result = spawnSync(process.execPath, ["test/support/lease-writer.ts", f.root, f.id], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
   return evidence(f.root, f.id);
 }
-
-test("lease safety margin is inclusive, capped and refuses invalid TTLs", () => {
-  assert.doesNotThrow(() => assertEditLease(899, 1));
-  assert.doesNotThrow(() => assertEditLease(98999, 100));
-  for (const [elapsed, ttl] of [[900, 1], [1000, 1], [99000, 100], [0, 0], [0, -1], [0, NaN], [0, Infinity]]) {
-    assert.throws(() => assertEditLease(elapsed, ttl), leaseRefusal);
-  }
-});
 
 for (const operation of ["checkout", "capture"] as const) test(`${operation} refuses an expired snapshot lease`, async () => {
   const f = await fixture();
   let injected = false;
   const stop = await observe(async ({ path }) => {
-    if (!injected && path === getHistoryPath(f.root, f.id)) { injected = true; await setTimeout(1100); }
+    if (!injected && path === getHistoryPath(f.root, f.id)) { injected = true; await newerWriter(f); }
   });
   try {
     const before = await evidence(f.root, f.id);
@@ -99,7 +89,8 @@ for (const operation of ["checkout", "capture"] as const) test(`${operation} ref
     await assert.rejects(operation === "checkout" ? exportEditSession(f.root, [f.id])
       : captureUpdateCompensation(f.root, f.id, "csv-txrow:lease#0", "csv-test"), leaseRefusal);
     assert.equal(injected, true);
-    assert.deepEqual(await evidence(f.root, f.id), before);
+    assert.notDeepEqual(await evidence(f.root, f.id), before);
+    assert.equal((await readUpdateSnapshot(f.root, f.id)).document.metadata.title, "Newer protected value");
   } finally { await stop(); rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -154,4 +145,104 @@ for (const phase of ["callback", "representation"] as const) test(`compensation 
     assert.ok(newer);
     assert.deepEqual(await evidence(f.root, f.id), newer);
   } finally { await stop(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+for (const operation of ["checkout", "capture", "apply"] as const) test(`${operation} allows a slow owner whose lease generation has not changed`, async () => {
+  const f = await fixture();
+  let delayed = false, leases = 0;
+  const stop = await observe(async ({ path }) => {
+    if (!delayed && path === getHistoryPath(f.root, f.id) && (operation !== "apply" || leases === 3)) { delayed = true; await setTimeout(1100); }
+  }, ({ path, op }) => {
+    if (op === "lock:create" && path === join(f.root, "locks", `${f.id}.lock`)) leases++;
+  });
+  try {
+    if (operation === "checkout") assert.equal((await exportEditSession(f.root, [f.id])).session.rows.length, 1);
+    else if (operation === "capture") assert.ok(await captureUpdateCompensation(f.root, f.id, "csv-txrow:slow#0", "csv-test"));
+    else {
+      f.table[1][f.table[0].indexOf("title")] = "Slow protected edit";
+      assert.equal((await applyEditSession(f.root, f.session, f.table, { author: "csv-test" })).applied, 1);
+    }
+    assert.equal(delayed, true);
+  } finally { await stop(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("host delay after the mutation callback cannot publish stale bytes or history", async () => {
+  const f = await fixture();
+  f.table[1][f.table[0].indexOf("title")] = "Stale spreadsheet edit";
+  let newer: Awaited<ReturnType<typeof evidence>> | undefined;
+  let delayed = false;
+  const itemPath = (await readUpdateSnapshot(f.root, f.id)).located.itemPath;
+  const harness = await createExtensionTestHarness({ activate(api: ExtensionApi) {
+    api.hooks.beforeMutation(({ operation }) => {
+      if (operation !== "update" || delayed) return;
+      delayed = true;
+      // A synchronous host pause blocks its timer too; the peer's real clock advances.
+      const result = spawnSync(process.execPath, ["test/support/lease-writer.ts", f.root, f.id, "delayed"], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      newer = { raw: readFileSync(itemPath, "utf8"), history: readFileSync(getHistoryPath(f.root, f.id), "utf8") };
+    });
+  } }, { name: "post-callback-delay", capabilities: ["hooks"] });
+  setActiveExtensionHooks(harness.activation.hooks);
+  try {
+    await assert.rejects(applyEditSession(f.root, f.session, f.table, { author: "csv-test" }), hasLeaseRefusal);
+    assert.ok(newer);
+    assert.deepEqual(await evidence(f.root, f.id), newer);
+  } finally { setActiveExtensionHooks(null); await harness.deactivate(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("one SDK fence excludes OS-process takeover between representation and completion history", async () => {
+  const f = await fixture(), marker = "csv-txrow:fenced-representation#0";
+  const prior = await captureUpdateCompensation(f.root, f.id, marker, "csv-test");
+  await mutateItem({ pmRoot: f.root, settings: f.settings, id: f.id, op: "update", author: "csv-test", message: `${marker}:apply`,
+    mutate(document) { document.metadata.title = "Spreadsheet edit"; return { changedFields: ["title"] }; },
+  });
+  let writer: ReturnType<typeof spawn> | undefined;
+  let finished: Promise<unknown> | undefined;
+  let exited = false;
+  try {
+    await compensateUpdate(f.root, f.id, marker, "csv-test", prior, async phase => {
+      if (phase !== "representation_written") return;
+      await setTimeout(1100);
+      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id], { stdio: ["ignore", "pipe", "pipe"] });
+      finished = once(writer, "exit").then(([code]) => { exited = true; assert.equal(code, 0); });
+      await once(writer.stdout!, "data");
+      await Promise.race([finished, setTimeout(500)]);
+      assert.equal(exited, false, "a peer must wait until representation AND its receipt are durable");
+    });
+    assert.ok(finished);
+    await finished;
+    const history = await readHistoryEntries(getHistoryPath(f.root, f.id), f.id);
+    assert.equal(history.at(-2)?.message, `${marker}:compensate`);
+    assert.equal(history.at(-1)?.author, "newer-writer");
+    assert.equal(verifyHistoryEntries(history, (await readUpdateSnapshot(f.root, f.id)).document).ok, true);
+    const beforeReplay = await evidence(f.root, f.id);
+    await compensateUpdate(f.root, f.id, marker, "csv-test", prior);
+    assert.deepEqual(await evidence(f.root, f.id), beforeReplay);
+  } finally {
+    if (writer && !exited) writer.kill();
+    await finished?.catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("settings fence excludes an expired-lease takeover by an SDK writer in another OS process", async () => {
+  const f = await fixture();
+  let writer: ReturnType<typeof spawn> | undefined, finished: Promise<unknown> | undefined;
+  let exited = false;
+  try {
+    await withSettingsFence(f.root, async () => {
+      await setTimeout(1100);
+      writer = spawn(process.execPath, ["test/support/lease-writer.ts", f.root, f.id, "settings"], { stdio: ["ignore", "pipe", "pipe"] });
+      finished = once(writer, "exit").then(([code]) => { exited = true; assert.equal(code, 0); });
+      await once(writer.stdout!, "data");
+      await Promise.race([finished, setTimeout(500)]);
+      assert.equal(exited, false, "the settings writer cannot enter the protected callback");
+    });
+    assert.ok(finished); await finished;
+    assert.deepEqual((await readSettingsSection(f.root, "csv_fence_fixture")).value, { newer: true });
+  } finally {
+    if (writer && !exited) writer.kill();
+    await finished?.catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
 });

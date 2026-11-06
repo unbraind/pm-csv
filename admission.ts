@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { openSync, closeSync, readSync, fstatSync, constants } from "node:fs";
-import { resolveItemTypeRegistry, resolveRuntimeStatusRegistry, normalizeStatusInput, getHistoryPath, readHistoryEntries, verifyHistoryEntries, locateItem, readLocatedItem, PmCliError } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, runWithActiveExtensions, collectRegisteredItemFieldNames, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, normalizeStatusInput, getHistoryPath, readHistoryEntries, verifyHistoryEntries, locateItem, readLocatedItem, PmCliError } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import type { PmSettings } from "@unbrained/pm-cli/sdk";
 import type { ImportRowFilter } from "./index.ts";
@@ -166,27 +166,27 @@ export function readAdmittedSource(file: string, digest: string, maxBytes = ADMI
 /** Bind a mutation step to verified native state plus append-only history, preventing ABA replay. */
 async function readAdmissionTarget(pmRoot: string, id: string, expected?: string): Promise<{ revision: string; message?: string }> {
   const settings = await readPinnedSettings(pmRoot);
-  const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, resolveItemTypeRegistry(settings).type_to_folder);
+  const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder);
   const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
   if (!located) {
     if (expected === "absent" && history.length === 0) return { revision: "absent" };
     throw new AdmissionRefusal("csv_admission_target_changed", "A target is missing or has retained history; reconcile its SDK state before retrying the original plan.");
   }
-  const document = (await readLocatedItem(located, { schema: settings.schema })).document;
+  const document = (await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) })).document;
   const revision = createHash("sha256").update(JSON.stringify([document, history])).digest("hex");
   if (!verifyHistoryEntries(history, document).ok) throw admissionTargetChanged();
   return { revision, message: mutationMessageBase(history.at(-1)?.message) };
 }
 /** Require current native state or the latest immutable success of exactly this row. */
 export async function admissionTargetRevision(pmRoot: string, id: string, expected?: string, appliedMarker?: string): Promise<string> {
-  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
+  const { revision, message } = await runWithActiveExtensions({ path: pmRoot }, () => readAdmissionTarget(pmRoot, id, expected));
   const owned = appliedMarker !== undefined && ["create", "apply", "close"].some(phase => message === `${appliedMarker}:${phase}`);
   if (expected !== undefined && revision !== expected && !owned) throw admissionTargetChanged();
   return revision;
 }
 /** Reconcile ordered writes to one native target; later rows prove the completed prefix, including reverse compensation. */
 export async function admissionTargetSequence(pmRoot: string, id: string, expected: string, markers: readonly string[]): Promise<{ revision: string; completed: number }> {
-  const { revision, message } = await readAdmissionTarget(pmRoot, id, expected);
+  const { revision, message } = await runWithActiveExtensions({ path: pmRoot }, () => readAdmissionTarget(pmRoot, id, expected));
   if (revision === expected) return { revision, completed: -1 };
   const completed = markers.findIndex(marker => ["apply", "close", "restore", "compensate"].some(phase => message === `${marker}:${phase}`));
   if (completed < 0) throw admissionTargetChanged();
@@ -212,7 +212,7 @@ export function assertAdmissionNumbers(receipt: AdmissionReceipt): void {
 async function scan(pmRoot: string, file: string, opts: Required<AdmissionOptions>, diagnostics: AdmissionDiagnostics): Promise<AdmissionReceipt> {
   const settings = await readPinnedSettings(pmRoot);
   normalizeAdmissionFilter(opts.filter, settings);
-  const statuses = resolveRuntimeStatusRegistry(settings.schema), types = resolveItemTypeRegistry(settings);
+  const statuses = resolveRuntimeStatusRegistry(settings.schema), types = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
   const knownStatus = (status: string): boolean => normalizeStatusInput(status, statuses) !== undefined;
   let headers: string[] | undefined, rows = 0, invalidRows = 0, record = 0;
   const widths: number[] = [], issues: AdmissionReceipt["issues"] = [];
@@ -300,7 +300,7 @@ async function scan(pmRoot: string, file: string, opts: Required<AdmissionOption
 /** Read-only admission against one SDK settings revision. Source size never determines retained row count. */
 export async function admitCSV(pmRoot: string, file: string, options: AdmissionOptions = {}, diagnostics: AdmissionDiagnostics = {}): Promise<AdmissionReceipt> {
   const opts = parseAdmissionOptions(options);
-  return withSettings(pmRoot, admissionSettingsChanged, () => scan(pmRoot, file, opts, diagnostics));
+  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, admissionSettingsChanged, () => scan(pmRoot, file, opts, diagnostics)));
 }
 /** Trusted observer for deterministic concurrency diagnostics, outside the untrusted options schema. */
 export interface AdmissionDiagnostics {
