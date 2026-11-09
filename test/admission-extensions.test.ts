@@ -11,6 +11,7 @@ import { commitWorkspaceTransaction, create, get, getHistoryPath, readHistoryEnt
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { importCSV } from "../index.ts";
 import { admitCSV, admissionTargetRevision, admissionTargetSequence, withAdmissionTargetChecks } from "../admission.ts";
+import { withWorkspaceExtensions } from "../extension-scope.ts";
 import { importLineage } from "../lineage.ts";
 import { exportEditSession, applyEditSession } from "../roundtrip.ts";
 import { applyJoins, previewJoins, JoinRefusal } from "../join-plans.ts";
@@ -256,7 +257,7 @@ for (const admitted of [false, true]) test(`direct atomic import preserves insta
       commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) });
     assert.equal(result.updated, 8);
     const activations = readFileSync(f.activations, "utf8").trim().split("\n").length;
-    if (admitted) assert.ok(activations <= 3, `Target checks must not reactivate per row: ${activations}`);
+    if (admitted) assert.equal(activations, 1, `Admission scan and target checks must reuse one activation: ${activations}`);
     const after = await get(f.id, { full: true }, { pmRoot: f.root });
     assert.equal(after.item.title, "Direct 7");
     for (const field of ["opaque_text", "opaque_object"]) assert.deepEqual(after.item[field], before.item[field]);
@@ -284,4 +285,22 @@ for (const format of ["toon", "json_markdown"] as const) test(`direct lineage im
     assert.deepEqual(replay.manifest.rows[0].cells, first.manifest.rows[0].cells);
     assert.deepEqual(await readHistoryEntries(getHistoryPath(f.root, id), id), history);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+
+test("nested explicit workspaces restore their own activation without borrowing another schema", async () => {
+  const a = await fixture("toon", "BridgeAlpha"), b = await fixture("toon", "BridgeBeta");
+  try {
+    writeFileSync(a.activations, ""); writeFileSync(b.activations, "");
+    await withWorkspaceExtensions(a.root, async () => {
+      await admissionTargetRevision(a.root, a.id);
+      await withWorkspaceExtensions(b.root, async () => {
+        await admissionTargetRevision(b.root, b.id);
+        await assert.rejects(admissionTargetRevision(b.root, a.id));
+      });
+      await admissionTargetRevision(a.root, a.id);
+    });
+    assert.equal(readFileSync(a.activations, "utf8"), "activate\n");
+    assert.equal(readFileSync(b.activations, "utf8"), "activate\n");
+  } finally { rmSync(a.root, { recursive: true, force: true }); rmSync(b.root, { recursive: true, force: true }); }
 });

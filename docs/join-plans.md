@@ -71,6 +71,14 @@ cell; use multiple declared dependency columns for multiple edges. Coordinates
 are one-based logical CSV records and columns, with the header as record 1;
 embedded newlines do not add logical records.
 
+Dependency item leases remain fenced from the final dependency revision check
+through native child creation. A dependency edited before those leases are held
+refuses the child write; a competing native writer cannot enter during creation.
+The coordinator checks every target again at its `committing` transition, so a
+precommit conflict runs reverse compensation instead of committing a journal
+whose targets already fail validation. Compensation preserves foreign edits and
+retains tombstone history; a blocked cleanup remains explicit in the journal.
+
 Plans bind exact SHA-256 source-byte digests, tracker settings, generated native
 IDs and explicit `expected: "absent"` target revisions. Sources are captured inline, so
 apply never rereads external files. Any source or artifact edit invalidates the

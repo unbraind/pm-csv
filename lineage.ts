@@ -1,7 +1,8 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { create, locateItem, normalizeItemId, PmCliError, runWithActiveExtensions, resolveItemTypeRegistry, getActiveExtensionRegistrations } from "@unbrained/pm-cli/sdk";
+import { create, locateItem, normalizeItemId, PmCliError, resolveItemTypeRegistry, getActiveExtensionRegistrations } from "@unbrained/pm-cli/sdk";
 import { pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
 import { buildMutationIntent, matchesMutationScope } from "./mutation-intent.ts";
 import { serializeCSV } from "./index.ts";
@@ -170,7 +171,7 @@ export async function importLineage(pmRoot: string, table: string[][], options: 
   const capturedTable = table.map(row => [...row]);
   const capturedOptions = { ...options, columns: [...options.columns], fieldMap: options.fieldMap === undefined ? undefined : { ...options.fieldMap } };
   const mapping = planMapping(capturedTable, capturedOptions);
-  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping)));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, lineageSettingsChanged, () => importLineageInternal(pmRoot, capturedTable, capturedOptions, mapping)));
 }
 
 /** Keep lineage configuration drift within its documented refusal family. */

@@ -1,3 +1,4 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import * as nativeSdk from "@unbrained/pm-cli/sdk";
@@ -7,9 +8,9 @@ import {
   PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry, getActiveExtensionRegistrations, collectRegisteredItemFieldNames,
   resolveRuntimeStatusRegistry, verifyHistoryEntries,
   appendHistoryEntry, createHistoryEntry, emptyImportedDocument, removeFileIfExists, nowIso,
-  PmClient, runWithActiveExtensions, runActiveOnWriteHooks, runWorkspaceTransactionGc,
+  PmClient, runActiveOnWriteHooks, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
-import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings } from "@unbrained/pm-cli/sdk";
+import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings, LockLease } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { assertCanonicalMutationIds, buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
@@ -344,6 +345,24 @@ async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids
   } finally { await lease.release(); }
 }
 
+/** Hold each dependency's native generation through validation and child persistence. */
+async function withJoinDependencies<T>(pmRoot: string, plan: JoinPlan, row: Row, rows: Row[], settings: PmSettings, author: string, run: () => Promise<T>): Promise<T> {
+  const dependencies = [...new Set(row.edges.map(edge => edge.target))].sort((a, b) => plan.ids[a].localeCompare(plan.ids[b]));
+  const leases: LockLease[] = [];
+  try {
+    for (const i of dependencies) leases.push(await acquireLockLease(pmRoot, plan.ids[i], settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms));
+    /** Fence the complete group before reading any decision data or creating a child. */
+    const fenced = async (index: number): Promise<T> => {
+      if (index < leases.length) return leases[index].fence(() => fenced(index + 1));
+      for (const i of dependencies) if (await inspectLocked(pmRoot, plan.ids[i], `csv-join:${plan.digest}:${i}`, rows[i], plan.ids, settings) !== "applied") {
+        throw new JoinRefusal("csv_join_target_changed", "A dependency changed before child creation. Reconcile current targets and preview a fresh plan.");
+      }
+      return run();
+    };
+    return await fenced(0);
+  } finally { for (const lease of leases.reverse()) await lease.release(); }
+}
+
 /**
  * Compensate only this plan's unchanged create. Native delete dry-run enforces
  * policies/hooks; the subsequent item lease revalidates the exact approved SDK
@@ -352,7 +371,7 @@ async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids
  */
 async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: Row, options: JoinApplyOptions): Promise<"foreign" | void> {
   const id = plan.ids[i], marker = `csv-join:${plan.digest}:${i}`;
-  return runWithActiveExtensions({ path: pmRoot }, async () => {
+  return withWorkspaceExtensions(pmRoot, async () => {
     const prior = await inspect(pmRoot, id, marker, row, plan.ids);
     if (prior === "foreign") return "foreign";
     if (prior === "pending" || prior === "compensated") return;
@@ -452,10 +471,11 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
       const parent = row.edges.find(e => e.kind === "parent");
       await options.onBoundary?.("before_create", plan.ids[i]);
       try {
-        await withSettingsFence(pmRoot, () => create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
-          ...(parent ? { parent: plan.ids[parent.target] } : {}),
-          dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
-        }), { pmRoot }));
+        await withJoinDependencies(pmRoot, plan, row, rows, settings, options.author, () =>
+          withSettingsFence(pmRoot, () => create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
+            ...(parent ? { parent: plan.ids[parent.target] } : {}),
+            dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
+          }), { pmRoot })));
         applied++;
       } catch (error) {
         if (settingsChangedIn(error)) throw error;
@@ -486,6 +506,9 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
         if (journal?.status === "compensating" && ["compensated", "prepared"].includes(context.transition)) {
           throw new JoinRefusal("csv_join_reconcile", "Pending compensation was recovered under the original journal. Preview fresh identities; this retry does not restart forward work.");
         }
+        if (context.transition === "committing") for (const i of order) if (await state(i) === "pending") {
+          throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing before commit. Reconcile the retained transaction before retrying.");
+        }
         if (!compensating && context.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
       } });
     }
@@ -506,7 +529,7 @@ export async function previewJoins(pmRoot: string, value: unknown): Promise<{ re
   pmRoot = resolve(pmRoot);
   try {
     const input = boundary(value, false) as JoinInput;
-    return await runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input)));
+    return await withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the selected sources and initialized tracker, then preview again."); }
 }
@@ -516,7 +539,7 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
   pmRoot = resolve(pmRoot);
   try {
     const plan = boundary(value, true) as JoinPlan, captured = { ...options };
-    return await runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured)));
+    return await withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the reviewed plan and current SDK state before retrying."); }
 }

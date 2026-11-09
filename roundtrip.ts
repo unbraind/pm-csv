@@ -1,8 +1,9 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { assertCanonicalMutationIds, explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import {
-  PmCliError, runWithActiveExtensions, getActiveExtensionRegistrations, collectRegisteredItemFieldNames, resolveItemTypeRegistry, acquireLockLease, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
+  PmCliError, getActiveExtensionRegistrations, collectRegisteredItemFieldNames, resolveItemTypeRegistry, acquireLockLease, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
   readHistoryEntries, verifyHistoryEntries, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep, PmSettings } from "@unbrained/pm-cli/sdk";
@@ -125,7 +126,7 @@ async function exportEditSessionInternal(pmRoot: string, ids: readonly string[])
 export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
   pmRoot = resolve(pmRoot);
   const captured = [...ids];
-  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured)));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured)));
 }
 
 /** Validate an untrusted sidecar structurally as well as by its content digest. */
@@ -326,7 +327,7 @@ export async function applyEditSession(
     throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
   }
   const session = parseEditSession(input), captured = table.map(row => [...row]), configuration = { ...options };
-  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration)));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration)));
 }
 
 /** Preserve the edit API refusal taxonomy for changing schema/settings. */

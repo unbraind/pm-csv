@@ -1,7 +1,8 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { openSync, closeSync, readSync, fstatSync, constants } from "node:fs";
-import { getActiveExtensionRegistrations, runWithActiveExtensions, collectRegisteredItemFieldNames, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, normalizeStatusInput, getHistoryPath, readHistoryEntries, verifyHistoryEntries, locateItem, readLocatedItem, PmCliError } from "@unbrained/pm-cli/sdk";
+import { getActiveExtensionRegistrations, collectRegisteredItemFieldNames, resolveItemTypeRegistry, resolveRuntimeStatusRegistry, normalizeStatusInput, getHistoryPath, readHistoryEntries, verifyHistoryEntries, locateItem, readLocatedItem, PmCliError } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import type { PmSettings } from "@unbrained/pm-cli/sdk";
 import type { ImportRowFilter } from "./index.ts";
@@ -199,7 +200,7 @@ export interface AdmissionTargetChecks {
 }
 /** Activate once and lend target checks to the import without reactivating for each row. */
 export function withAdmissionTargetChecks<T>(pmRoot: string, run: (checks: AdmissionTargetChecks) => Promise<T>): Promise<T> {
-  return runWithActiveExtensions({ path: pmRoot }, () => run({
+  return withWorkspaceExtensions(pmRoot, () => run({
     revision: (id, expected, marker) => scopedTargetRevision(pmRoot, id, expected, marker),
     sequence: (id, expected, markers) => scopedTargetSequence(pmRoot, id, expected, markers),
   }));
@@ -320,7 +321,7 @@ async function scan(pmRoot: string, file: string, opts: Required<AdmissionOption
 /** Read-only admission against one SDK settings revision. Source size never determines retained row count. */
 export async function admitCSV(pmRoot: string, file: string, options: AdmissionOptions = {}, diagnostics: AdmissionDiagnostics = {}): Promise<AdmissionReceipt> {
   const opts = parseAdmissionOptions(options);
-  return runWithActiveExtensions({ path: pmRoot }, () => withSettings(pmRoot, admissionSettingsChanged, () => scan(pmRoot, file, opts, diagnostics)));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, admissionSettingsChanged, () => scan(pmRoot, file, opts, diagnostics)));
 }
 /** Trusted observer for deterministic concurrency diagnostics, outside the untrusted options schema. */
 export interface AdmissionDiagnostics {
