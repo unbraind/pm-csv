@@ -71,6 +71,16 @@ cell; use multiple declared dependency columns for multiple edges. Coordinates
 are one-based logical CSV records and columns, with the header as record 1;
 embedded newlines do not add logical records.
 
+Dependency item leases remain fenced from the final dependency revision check
+through native child creation. Cleanup attempts every acquired dependency lease
+in reverse acquisition order, then reports the first release failure if any.
+A dependency edited before those leases are held
+refuses the child write; a competing native writer cannot enter during creation.
+The coordinator checks every target again at its `committing` transition, so a
+precommit conflict runs reverse compensation instead of committing a journal
+whose targets already fail validation. Compensation preserves foreign edits and
+retains tombstone history; a blocked cleanup remains explicit in the journal.
+
 Plans bind exact SHA-256 source-byte digests, tracker settings, generated native
 IDs and explicit `expected: "absent"` target revisions. Sources are captured inline, so
 apply never rereads external files. Any source or artifact edit invalidates the
@@ -199,3 +209,11 @@ quoting, ragged records and inconsistent line endings are wrapped from the table
 parser, retaining its `sourceCode`, actionable `remedy` and original `cause`.
 The CLI does the same for invalid UTF-8/JSON and file errors. Expected lower-level
 failures are not leaked as another API's refusal family.
+
+Joined preview, apply, replay and compensation activate the selected workspace's
+extensions. Native type registries supply installed types, folders and defaults;
+authoritative reads and scope normalization include registered extension fields,
+including under strict unknown-field policy. SDK field defaults remain intact.
+The existing CSV field vocabulary and history-based ownership rules still apply:
+an independent edit to any field refuses compensation rather than deleting the
+peer's item.

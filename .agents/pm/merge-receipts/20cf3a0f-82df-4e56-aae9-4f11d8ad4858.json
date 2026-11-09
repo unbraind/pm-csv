@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "id": "20cf3a0f-82df-4e56-aae9-4f11d8ad4858",
+  "item_path": ".agents/pm/issues/pm-csv-lewj.toon",
+  "item_id": "pm-csv-lewj",
+  "requested_preference": "ours",
+  "requested_preference_applied": false,
+  "conflict_resolution": "latest_document_update",
+  "fields_from_theirs": [
+    "created_at",
+    "description",
+    "github_close_reason",
+    "github_closed_at",
+    "github_created_at",
+    "github_link_only",
+    "github_number",
+    "github_release",
+    "github_state",
+    "github_state_reason",
+    "github_updated_at",
+    "github_url",
+    "title",
+    "body"
+  ],
+  "union_fields": [
+    "tags"
+  ],
+  "merged_field_hashes": {
+    "created_at": "ab081e50950a7804436e695a9a64b9f786998af152388b85f225140e763958f5",
+    "description": "6222a2ef97c709a77eba2ab4b0fa3f46cd0afbe75449b7525c5e7fc06303baa6",
+    "github_close_reason": "88bab838b95f368fecbeb76449554f4cac0ec77f218f99d738cdd98779b013a4",
+    "github_closed_at": "88bab838b95f368fecbeb76449554f4cac0ec77f218f99d738cdd98779b013a4",
+    "github_created_at": "ab081e50950a7804436e695a9a64b9f786998af152388b85f225140e763958f5",
+    "github_link_only": "3831fc77fb37ccfa0a0d24bbd86dbb30f6e64d0bd6f8561b18f76fd9bd014ac7",
+    "github_number": "2464efd3e3380407fa21b6c4b2f14505904f68bc40a27fa1793a83631c6c0b17",
+    "github_release": "88bab838b95f368fecbeb76449554f4cac0ec77f218f99d738cdd98779b013a4",
+    "github_state": "3531f08a1fa12535183237f847f3deb74e405498b051db208345e4787ba0f7f7",
+    "github_state_reason": "936313fd1d20c9d2ab2c0d706b8d4a586781d60c78cda0de861ca37b06a9ad3e",
+    "github_updated_at": "ab081e50950a7804436e695a9a64b9f786998af152388b85f225140e763958f5",
+    "github_url": "b75ee23a5560d336a10a45cde634f9b9b0ae77d768db2923bc3cac0d8acdccbd",
+    "title": "c9daafa840c0b415b8ba85eb80cf83e8c8dec98fc20c4faf465c2423e2b2d414",
+    "body": "70dd8ff1bfeb746c873eb4c98dca377fb44bd7dd5d0b78acdf6ff8884389846f",
+    "tags": "58b8101f6c8f7b0b8fe52dbac9f02db45d34a695dc884588dd9f2c900199a6f4"
+  },
+  "decisions": [],
+  "operation": {
+    "kind": "merge",
+    "original_head": "b9e741f1b42f2bf0fcc6526a15c63a0b91011fc7",
+    "original_blob": "9305b7aceb9174994780b88583bcb7d1e590c456"
+  },
+  "state": "reconciled",
+  "created_at": "2026-11-09T15:14:59.439Z",
+  "value_availability": "hash_only",
+  "value_policy": "bounded_non_sensitive_scalars_v1",
+  "reconciled_at": "2026-11-09T15:18:55.598Z"
+}

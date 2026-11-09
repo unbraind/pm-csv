@@ -1,12 +1,11 @@
 import { explicitDocumentMutation, mutationMessageBase } from "./mutation-intent.ts";
 import {
-  acquireLock, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
-  readLocatedItem, resolveItemTypeRegistry, verifyHistoryEntries,
+  acquireLockLease, appendHistoryEntry, createHistoryEntry, getHistoryPath, nowIso, parseItemDocument, splitFrontMatter, writeFileAtomic, locateItem, mutateItem, readHistoryEntries,
+  readLocatedItem, collectRegisteredItemFieldNames, resolveItemTypeRegistry, verifyHistoryEntries, getActiveExtensionRegistrations,
 } from "@unbrained/pm-cli/sdk";
 import type { ItemDocument, WorkspaceTransactionStepInspection, WorkspaceTransactionJsonValue } from "@unbrained/pm-cli/sdk";
 import { decode, encode } from "@toon-format/toon";
 import { createHash } from "node:crypto";
-import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
 import { readPinnedSettings as readSettings } from "./settings-snapshot.ts";
 
 /** Version of CSV prior-document compensation; also bound into every step id. */
@@ -15,10 +14,10 @@ export const UPDATE_COMPENSATION_VERSION = 2;
 /** Read authoritative item state, including absent fields and every collection. */
 export async function readUpdateSnapshot(pmRoot: string, id: string) {
   const settings = await readSettings(pmRoot);
-  const registry = resolveItemTypeRegistry(settings);
+  const registry = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
   const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, registry.type_to_folder);
   if (!located) throw new Error(`Atomic update item ${id} is missing; reconcile before retrying.`);
-  return { ...(await readLocatedItem(located, { schema: settings.schema })), located };
+  return { ...(await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) })), located };
 }
 
 /** Read canonical field values without discarding the stored snapshot API. */
@@ -63,21 +62,19 @@ export async function captureUpdateCompensation(
   pmRoot: string, id: string, marker: string, author: string,
 ): Promise<WorkspaceTransactionJsonValue> {
   const settings = await readSettings(pmRoot);
-  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
-  const startedAt = performance.now();
+  const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
   try {
     const { document, raw, located } = await readUpdateSnapshot(pmRoot, id);
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
     if (!verifyHistoryEntries(history, document).ok) {
       throw new Error(`Atomic update item ${id} has unverified history; reconcile before retrying.`);
     }
-    assertEditLease(performance.now() - startedAt, settings.locks.ttl_seconds);
-    return {
+    return await lease.fence(async () => ({
       version: UPDATE_COMPENSATION_VERSION, id, marker,
       prior: JSON.stringify(document), raw, format: located.item_format, historyLength: history.length, historyHash: journalHash(history),
-    };
+    }));
   } finally {
-    await release();
+    await lease.release();
   }
 }
 
@@ -101,9 +98,9 @@ function parsePriorDocument(raw: string, id: string): ItemDocument {
 
 /**
  * Restore the captured document through an append-only SDK mutation. History
- * verification and writer detection occur inside the item lock. Callback and
- * representation deadlines refuse exhausted leases; atomic persistence fencing
- * still belongs to the host SDK. Refuse any intervening
+ * verification and writer detection occur inside the item lock. Native mutations
+ * fence persistence; one SDK lease fence covers representation and its receipt.
+ * Refuse any intervening
  * history outside this batch, including edits to unrelated fields. A durable
  * compensation message makes a crash after restoration safe to replay.
  */
@@ -129,7 +126,9 @@ export async function compensateUpdate(
   await mutateItem({
     pmRoot, settings, id, op: "restore", author, message: restoreMessage,
     skipNoop: true,
-    mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
+    typeToFolder: resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder,
+    extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()),
+    mutate: explicitDocumentMutation(async document => {
       const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
       if (!verifyHistoryEntries(history, document).ok
           || journalHash(history.slice(0, historyLength)) !== historyHash
@@ -152,33 +151,33 @@ export async function compensateUpdate(
       document.metadata = structuredClone(prior.metadata);
       document.body = prior.body;
       return { changedFields };
-    })),
+    }),
   });
   if (completed) return;
   await onPhase("canonical_restored");
   // The SDK canonicalizes empty metadata to absent values. Preserve the raw
   // prior representation in a second, guarded, resumable phase. It has exactly
   // the same canonical hash as the SDK restore, so the derived index is valid.
-  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
-  const representationStartedAt = performance.now();
+  const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms);
   try {
     const current = await readUpdateSnapshot(pmRoot, id);
     const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
     const contents = priorRepresentation(data.raw, data.format as "toon" | "json_markdown", current.document.metadata.updated_at);
-    const represented = parseItemDocument(contents, { format: "toon", schema: settings.schema });
+    const represented = parseItemDocument(contents, { format: "toon", schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) });
     if (mutationMessageBase(history.at(-1)?.message) !== restoreMessage || !verifyHistoryEntries(history, current.document).ok
         || !verifyHistoryEntries(history, represented).ok) {
       throw new Error(`Atomic update item ${id} changed during representation restoration; refusing compensation.`);
     }
-    assertEditLease(performance.now() - representationStartedAt, settings.locks.ttl_seconds);
-    await writeFileAtomic(current.located.itemPath, contents);
-    await onPhase("representation_written");
-    await appendHistoryEntry(getHistoryPath(pmRoot, id), createHistoryEntry({
-      nowIso: nowIso(), author, op: "restore", before: current.document, after: represented, message: compensationMessage,
-    }));
-    await onPhase("compensation_recorded");
+    await lease.fence(async () => {
+      await writeFileAtomic(current.located.itemPath, contents);
+      await onPhase("representation_written");
+      await appendHistoryEntry(getHistoryPath(pmRoot, id), createHistoryEntry({
+        nowIso: nowIso(), author, op: "restore", before: current.document, after: represented, message: compensationMessage,
+      }));
+      await onPhase("compensation_recorded");
+    });
   } finally {
-    await release();
+    await lease.release();
   }
 }
 

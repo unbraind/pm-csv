@@ -543,16 +543,14 @@ editable fields, read-only status, bounded refusals, concurrency and recovery
 boundaries. This edit-session protocol reuses the existing SDK coordinator and
 CSV compensation; legacy keyed import remains a separate command.
 
-Apply and compensation callbacks refuse with `csv_lease_expired` when their
-monotonic elapsed time reaches the effective item TTL minus a safety margin
-(ten percent, capped at one second). Re-run apply; another writer may have
-changed the item. Checkout and compensation snapshot reads use the same budget.
-The real SDK/CLI takeover regressions now pass in the release suite.
-
-This callback deadline is a mitigation. The host must still atomically fence
-persistence after callback return; arbitrary delays there can exhaust the
-remaining lease. That root fix belongs upstream in
-[pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549).
+Native item mutations use the SDK's persistence fence, which refuses a lost lock
+generation with `lock_lost` or a changed document with `stale_revision`. Checkout
+and compensation snapshots verify their SDK lease before returning. Raw
+representation restoration and its append-only completion receipt share one
+`acquireLockLease().fence()` boundary. The supported host floor is 2026.11.5;
+[pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549) is fixed in the
+SDK. Separate-process takeover and post-callback delay regressions cover these
+boundaries; elapsed-time safety margins are no longer used.
 
 ## Without git
 

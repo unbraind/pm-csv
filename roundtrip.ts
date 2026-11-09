@@ -1,8 +1,9 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { assertCanonicalMutationIds, explicitDocumentMutation } from "./mutation-intent.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import {
-  acquireLock, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
+  PmCliError, getActiveExtensionRegistrations, collectRegisteredItemFieldNames, resolveItemTypeRegistry, acquireLockLease, canonicalDocument, commitWorkspaceTransaction, getHistoryPath, mutateItem,
   readHistoryEntries, verifyHistoryEntries, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
 import type { CommitWorkspaceTransactionOptions, ItemDocument, WorkspaceTransactionStep, PmSettings } from "@unbrained/pm-cli/sdk";
@@ -10,7 +11,6 @@ import { captureSettings, inSettingsTransaction, readPinnedSettings as readSetti
 import type { SettingsSnapshot } from "./settings-snapshot.ts";
 import { EditRefusal } from "./edit-refusal.ts";
 import type { EditConflict } from "./edit-refusal.ts";
-import { assertEditLease, guardEditMutation } from "./lease-guard.ts";
 export { EditRefusal } from "./edit-refusal.ts";
 export type { EditConflict, EditRefusalCode } from "./edit-refusal.ts";
 import { captureUpdateCompensation, compensateUpdate, inspectUpdate, readUpdateDocument } from "./atomic-update.ts";
@@ -57,20 +57,19 @@ function cells(document: ItemDocument): Record<EditField, string> {
 /** Read an item and its verified history while holding its native SDK lock. */
 async function snapshot(pmRoot: string, id: string): Promise<EditSessionRow> {
   const settings = await readSettings(pmRoot);
-  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
-  const startedAt = performance.now();
+  const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
   let row: EditSessionRow;
   try {
     const document = await readUpdateDocument(pmRoot, id);
     row = await documentRow(pmRoot, id, document);
-    assertEditLease(performance.now() - startedAt, settings.locks.ttl_seconds);
+    await lease.fence(async () => {});
   } catch (error) {
-    if (error instanceof EditRefusal) throw error;
+    if (error instanceof EditRefusal || (error instanceof PmCliError && error.code === "lock_lost")) throw error;
     const refusal = new EditRefusal("csv_session_invalid", "Verify that every exported item still exists and is readable; export a fresh session after resolving missing items.", [{ id, fields: ["item"] }]);
     refusal.cause = error;
     throw refusal;
   } finally {
-    await release();
+    await lease.release();
   }
   return row;
 }
@@ -127,7 +126,7 @@ async function exportEditSessionInternal(pmRoot: string, ids: readonly string[])
 export async function exportEditSession(pmRoot: string, ids: readonly string[]): Promise<{ session: EditSession; table: string[][] }> {
   pmRoot = resolve(pmRoot);
   const captured = [...ids];
-  return withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => exportEditSessionInternal(pmRoot, captured)));
 }
 
 /** Validate an untrusted sidecar structurally as well as by its content digest. */
@@ -199,12 +198,14 @@ function conflicts(plan: EditPlan, current: EditSessionRow): EditField[] {
   return plan.fields.filter(field => current.values[field] !== plan.base.values[field] && current.values[field] !== plan.desired[field]);
 }
 
-/** Check and apply a field patch under the host item lease; write-time fencing remains a host prerequisite. */
+/** Check and apply a field patch under the host item lease; the SDK fences persistence. */
 async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author: string): Promise<boolean> {
   const settings = await readSettings(pmRoot);
   const result = await withSettingsFence(pmRoot, () => mutateItem({ pmRoot, settings, id: plan.base.id, op: "update", author,
     message: `${marker}:apply`, skipNoop: true,
-    mutate: explicitDocumentMutation(guardEditMutation(settings.locks.ttl_seconds, async document => {
+    typeToFolder: resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder,
+    extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()),
+    mutate: explicitDocumentMutation(async document => {
       const current = await documentRow(pmRoot, plan.base.id, document);
       const divergent = conflicts(plan, current);
       if (divergent.length) throw new EditRefusal("csv_edit_conflict", "Re-export and reconcile the edited fields; no conflicting value was overwritten.", [{ id: plan.base.id, fields: divergent }]);
@@ -220,7 +221,7 @@ async function applyPlan(pmRoot: string, plan: EditPlan, marker: string, author:
         changedFields.push(field);
       }
       return { changedFields };
-    })),
+    }),
   }));
   return result.changedFields.length > 0;
 }
@@ -326,7 +327,7 @@ export async function applyEditSession(
     throw new EditRefusal("csv_edit_invalid", "Provide a table of CSV string cells, including the checkout header.");
   }
   const session = parseEditSession(input), captured = table.map(row => [...row]), configuration = { ...options };
-  return withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration));
+  return withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => applyEditSessionInternal(pmRoot, session, captured, configuration)));
 }
 
 /** Preserve the edit API refusal taxonomy for changing schema/settings. */

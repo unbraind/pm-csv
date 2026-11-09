@@ -1,17 +1,17 @@
+import { withWorkspaceExtensions } from "./extension-scope.ts";
 import { basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import * as nativeSdk from "@unbrained/pm-cli/sdk";
 import { readFileSync, writeFileSync, statSync } from "node:fs";
 import {
-  acquireLock, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
-  PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry,
+  acquireLockLease, create, commitWorkspaceTransaction, generateItemId, getHistoryPath, locateItem, normalizeItemId,
+  PmCliError, readHistoryEntries, readLocatedItem, resolveItemTypeRegistry, getActiveExtensionRegistrations, collectRegisteredItemFieldNames,
   resolveRuntimeStatusRegistry, verifyHistoryEntries,
   appendHistoryEntry, createHistoryEntry, emptyImportedDocument, removeFileIfExists, nowIso,
-  PmClient, runWithActiveExtensions, runActiveOnWriteHooks, runWorkspaceTransactionGc,
+  PmClient, runActiveOnWriteHooks, runWorkspaceTransactionGc,
 } from "@unbrained/pm-cli/sdk";
-import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings } from "@unbrained/pm-cli/sdk";
+import type { CommitWorkspaceTransactionOptions, WorkspaceTransactionStep, ItemDocument, PmSettings, LockLease } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
-import { assertEditLease } from "./lease-guard.ts";
 import { assertCanonicalMutationIds, buildMutationIntent, mutationMessageBase, matchesMutationScope } from "./mutation-intent.ts";
 import { readTable } from "./table-schema.ts";
 import { captureSettings, inSettingsTransaction, pinCreateDefaults, readPinnedSettings as readSettings, rethrowSettingsChange, settingsChangedIn, settingsDigest, useSettings, verifySettings, withSettings, withSettingsFence } from "./settings-snapshot.ts";
@@ -151,7 +151,7 @@ export async function mutateJoinIndex(mutation: JoinIndexMutation, run: () => Pr
     finally {
       if (capabilities.refreshItemMetadataDerivedIndex) {
         const located = await locateItem(mutation.pmRoot, mutation.id, mutation.idPrefix, mutation.preferredFormat, mutation.typeToFolder);
-        const document = located ? (await readLocatedItem(located, { schema: mutation.schema })).document : null;
+        const document = located ? (await readLocatedItem(located, { schema: mutation.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) })).document : null;
         await capabilities.refreshItemMetadataDerivedIndex({ ...mutation, document });
       }
     }
@@ -225,7 +225,7 @@ interface Row {
 /** Compile and validate all tables before generating a plan or invoking mutation primitives. */
 async function compile(settings: PmSettings, input: JoinInput): Promise<{ rows: Row[]; issues: JoinIssue[]; order: number[] }> {
   const statuses = resolveRuntimeStatusRegistry(settings.schema);
-  const types = new Map(Object.entries(resolveItemTypeRegistry(settings).type_to_folder));
+  const types = new Map(Object.entries(resolveItemTypeRegistry(settings, getActiveExtensionRegistrations()).type_to_folder));
   const issues: JoinIssue[] = [], rows: Row[] = [];
   const tables = input.tables.map(t => ({ ...t, data: readTable(t.csv, ",").table, keys: new Map<string, number[]>() }));
   for (const t of tables) {
@@ -311,7 +311,7 @@ type JoinState = "pending" | "applied" | "foreign" | "compensated" | "rollback_p
 
 /** Revalidate exact ownership, complete history and scope while the caller owns the item lease. */
 async function inspectLocked(pmRoot: string, id: string, marker: string, row: Row, ids: string[], settings: PmSettings): Promise<JoinState> {
-  const types = resolveItemTypeRegistry(settings);
+  const types = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
   const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
   const history = await readHistoryEntries(getHistoryPath(pmRoot, id), id);
   if (!located && history.length === 0) return "pending";
@@ -326,7 +326,7 @@ async function inspectLocked(pmRoot: string, id: string, marker: string, row: Ro
     if (deleted) return "compensated";
     return changed();
   }
-  const { document } = await readLocatedItem(located, { schema: settings.schema });
+  const { document } = await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) });
   if (!verifyHistoryEntries(deleted ? history.slice(0, -1) : history, document).ok) changed();
   const parent = row.edges.find(edge => edge.kind === "parent");
   if (!matchesMutationScope(document, { ...row.options, parent: parent ? ids[parent.target] : undefined }, settings,
@@ -337,13 +337,39 @@ async function inspectLocked(pmRoot: string, id: string, marker: string, row: Ro
 /** Inspect current SDK state under its item lease, never a frozen journal receipt. */
 async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids: string[]): Promise<JoinState> {
   const settings = await readSettings(pmRoot);
-  const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
-  const started = performance.now();
+  const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, "pm-csv", false, false, settings.locks.wait_ms);
   try {
     const result = await inspectLocked(pmRoot, id, marker, row, ids, settings);
-    assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
+    await lease.fence(async () => {});
     return result;
-  } finally { await release(); }
+  } finally { await lease.release(); }
+}
+
+/** Hold each dependency's native generation through validation and child persistence. */
+async function withJoinDependencies<T>(pmRoot: string, plan: JoinPlan, row: Row, rows: Row[], settings: PmSettings, author: string, run: () => Promise<T>): Promise<T> {
+  const dependencies = [...new Set(row.edges.map(edge => edge.target))].sort((a, b) => plan.ids[a].localeCompare(plan.ids[b]));
+  const leases: LockLease[] = [];
+  try {
+    for (const i of dependencies) leases.push(await acquireLockLease(pmRoot, plan.ids[i], settings.locks.ttl_seconds, author, false, false, settings.locks.wait_ms));
+    /** Fence the complete group before reading any decision data or creating a child. */
+    const fenced = async (index: number): Promise<T> => {
+      if (index < leases.length) return leases[index].fence(() => fenced(index + 1));
+      for (const i of dependencies) if (await inspectLocked(pmRoot, plan.ids[i], `csv-join:${plan.digest}:${i}`, rows[i], plan.ids, settings) !== "applied") {
+        throw new JoinRefusal("csv_join_target_changed", "A dependency changed before child creation. Reconcile current targets and preview a fresh plan.");
+      }
+      return run();
+    };
+    return await fenced(0);
+  } finally { await releaseJoinDependencies(leases); }
+}
+
+/** Attempt every acquired lease in reverse order before reporting the first release failure. */
+async function releaseJoinDependencies(leases: LockLease[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const lease of leases.reverse()) {
+    try { await lease.release(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw failures[0];
 }
 
 /**
@@ -354,41 +380,38 @@ async function inspect(pmRoot: string, id: string, marker: string, row: Row, ids
  */
 async function compensateCreate(pmRoot: string, plan: JoinPlan, i: number, row: Row, options: JoinApplyOptions): Promise<"foreign" | void> {
   const id = plan.ids[i], marker = `csv-join:${plan.digest}:${i}`;
-  return runWithActiveExtensions({ path: pmRoot }, async () => {
+  return withWorkspaceExtensions(pmRoot, async () => {
     const prior = await inspect(pmRoot, id, marker, row, plan.ids);
     if (prior === "foreign") return "foreign";
     if (prior === "pending" || prior === "compensated") return;
     if (prior === "applied") await withSettingsFence(pmRoot, () => PmClient.forActiveExtensionHost({ pmRoot, author: options.author }).delete(id, { dryRun: true, force: true }));
     await options.onBoundary?.("compensation_validated", id);
     return withSettingsFence(pmRoot, async () => {
-    const settings = await readSettings(pmRoot);
-    const release = await acquireLock(pmRoot, id, settings.locks.ttl_seconds, options.author, false, false, settings.locks.wait_ms);
-    const started = performance.now();
-    try {
-      await options.onBoundary?.("compensation_locked", id);
-      await verifySettings(pmRoot);
-      const current = await inspectLocked(pmRoot, id, marker, row, plan.ids, settings);
-      if (current === "foreign") return "foreign";
-      if (current === "pending" || current === "compensated") return;
-      await options.onBoundary?.("compensation_checked", id);
-      const types = resolveItemTypeRegistry(settings);
-      const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
-      if (!located) throw new JoinRefusal("csv_join_target_changed", "Reconcile a missing compensation target before retrying.");
-      const { document } = await readLocatedItem(located, { schema: settings.schema });
-      const empty = emptyImportedDocument(), historyPath = getHistoryPath(pmRoot, id);
-      await mutateJoinIndex({ id, idPrefix: settings.id_prefix, pmRoot, preferredFormat: settings.item_format, typeToFolder: types.type_to_folder,
-        schema: settings.schema, itemPath: located.itemPath, document: null }, async () => {
-        assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
-        if (current === "applied") await appendHistoryEntry(historyPath, createHistoryEntry({ nowIso: nowIso(), author: options.author,
-          op: "delete", before: document, after: empty, message: `${marker}:compensate` }));
-        await options.onBoundary?.("compensation_recorded", id);
-        assertEditLease(performance.now() - started, settings.locks.ttl_seconds);
-        await removeFileIfExists(located.itemPath);
-        await options.onBoundary?.("compensation_removed", id);
-      });
-      for (const [path, op] of [[located.itemPath, "delete"], [historyPath, "delete:history"]]) await runActiveOnWriteHooks({ path, scope: "project", op,
-        item_id: id, item_type: document.metadata.type, before: document, after: empty, changed_fields: ["deleted"] });
-    } finally { await release(); }
+      const settings = await readSettings(pmRoot);
+      const lease = await acquireLockLease(pmRoot, id, settings.locks.ttl_seconds, options.author, false, false, settings.locks.wait_ms);
+      try {
+        await options.onBoundary?.("compensation_locked", id);
+        await verifySettings(pmRoot);
+        const current = await inspectLocked(pmRoot, id, marker, row, plan.ids, settings);
+        if (current === "foreign") return "foreign";
+        if (current === "pending" || current === "compensated") return;
+        await options.onBoundary?.("compensation_checked", id);
+        const types = resolveItemTypeRegistry(settings, getActiveExtensionRegistrations());
+        const located = await locateItem(pmRoot, id, settings.id_prefix, settings.item_format, types.type_to_folder);
+        if (!located) throw new JoinRefusal("csv_join_target_changed", "Reconcile a missing compensation target before retrying.");
+        const { document } = await readLocatedItem(located, { schema: settings.schema, extensionFieldNames: collectRegisteredItemFieldNames(getActiveExtensionRegistrations()) });
+        const empty = emptyImportedDocument(), historyPath = getHistoryPath(pmRoot, id);
+        await lease.fence(() => mutateJoinIndex({ id, idPrefix: settings.id_prefix, pmRoot, preferredFormat: settings.item_format, typeToFolder: types.type_to_folder,
+          schema: settings.schema, itemPath: located.itemPath, document: null }, async () => {
+          if (current === "applied") await appendHistoryEntry(historyPath, createHistoryEntry({ nowIso: nowIso(), author: options.author,
+            op: "delete", before: document, after: empty, message: `${marker}:compensate` }));
+          await options.onBoundary?.("compensation_recorded", id);
+          await removeFileIfExists(located.itemPath);
+          await options.onBoundary?.("compensation_removed", id);
+        }));
+        for (const [path, op] of [[located.itemPath, "delete"], [historyPath, "delete:history"]]) await runActiveOnWriteHooks({ path, scope: "project", op,
+          item_id: id, item_type: document.metadata.type, before: document, after: empty, changed_fields: ["deleted"] });
+      } finally { await lease.release(); }
     });
   });
 }
@@ -457,10 +480,11 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
       const parent = row.edges.find(e => e.kind === "parent");
       await options.onBoundary?.("before_create", plan.ids[i]);
       try {
-        await withSettingsFence(pmRoot, () => create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
-          ...(parent ? { parent: plan.ids[parent.target] } : {}),
-          dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
-        }), { pmRoot }));
+        await withJoinDependencies(pmRoot, plan, row, rows, settings, options.author, () =>
+          withSettingsFence(pmRoot, () => create(buildMutationIntent({ ...row.options, id: plan.ids[i], author: options.author, message: marker(i),
+            ...(parent ? { parent: plan.ids[parent.target] } : {}),
+            dep: row.edges.filter(e => e.kind === "blocked_by").map(e => `kind=blocked_by,id=${plan.ids[e.target]}`),
+          }), { pmRoot })));
         applied++;
       } catch (error) {
         if (settingsChangedIn(error)) throw error;
@@ -491,6 +515,9 @@ async function applyJoinsInternal(pmRoot: string, plan: JoinPlan, options: JoinA
         if (journal?.status === "compensating" && ["compensated", "prepared"].includes(context.transition)) {
           throw new JoinRefusal("csv_join_reconcile", "Pending compensation was recovered under the original journal. Preview fresh identities; this retry does not restart forward work.");
         }
+        if (context.transition === "committing") for (const i of order) if (await state(i) === "pending") {
+          throw new JoinRefusal("csv_join_target_changed", "A reviewed target is missing before commit. Reconcile the retained transaction before retrying.");
+        }
         if (!compensating && context.transition !== "committed") await withSettingsFence(pmRoot, async () => {});
       } });
     }
@@ -511,7 +538,7 @@ export async function previewJoins(pmRoot: string, value: unknown): Promise<{ re
   pmRoot = resolve(pmRoot);
   try {
     const input = boundary(value, false) as JoinInput;
-    return await withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input));
+    return await withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => previewJoinsInternal(pmRoot, input)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the selected sources and initialized tracker, then preview again."); }
 }
@@ -521,7 +548,7 @@ export async function applyJoins(pmRoot: string, value: unknown, options: JoinAp
   pmRoot = resolve(pmRoot);
   try {
     const plan = boundary(value, true) as JoinPlan, captured = { ...options };
-    return await withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured));
+    return await withWorkspaceExtensions(pmRoot, () => withSettings(pmRoot, settingsChanged, () => applyJoinsInternal(pmRoot, plan, captured)));
   }
   catch (error) { throw joinRefusal(error, "csv_join_invalid", "Check the reviewed plan and current SDK state before retrying."); }
 }

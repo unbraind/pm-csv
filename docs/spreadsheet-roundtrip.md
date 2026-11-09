@@ -79,27 +79,21 @@ Preflight validates the complete table and all selected items before starting a
 transaction. A malformed, changed or conflicting digest causes zero item/history
 writes and creates no transaction journal. A successful dry run is a preview,
 not a reservation: a native writer can change state immediately afterward.
-The patch rechecks each item while holding the SDK item lock. Every native
-mutation callback used by apply and compensation records a monotonic start time
-and the effective `locks.ttl_seconds`. Before returning (including no-op returns),
-it refuses with typed `csv_lease_expired` when elapsed time reaches the TTL minus
-ten percent, capped at a one-second safety margin. Checkout, prior-document
-capture and representation restoration also check this budget before returning
-or writing. The remedy is: re-run apply; another writer may have changed the item.
+The patch rechecks each item while holding the SDK item lease. Native
+`mutateItem` fences persistence after callbacks and host hooks, refusing
+`lock_lost` on takeover or `stale_revision` on changed bytes. Read snapshots
+verify their lease generation before returning. Elapsed TTL alone does not
+prove takeover: a slow owner may complete while its generation is still held.
 
-Run `node --test test/repros/sdk-lease-overrun.ts` for two passing real-SDK
-regressions. A disposable non-git tracker uses a real one-second lease; a newer
-native SDK writer or separate CLI writer takes over while the first callback is
-suspended. The package guard refuses the stale callback and preserves the newer
-value. These cases also run in the normal release suite through
-`test/lease-guard.test.ts`, alongside actual apply and compensation wiring cases.
-
-The deadline is a package mitigation, not atomic persistence fencing. The SDK
-reads before entering the callback and persists after its return; arbitrary host
-delays in those windows can exhaust the lease despite the margin. A callback
-check cannot atomically close that later write window. The root fix belongs
-upstream in [pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549),
-verified by the owner on SDK 2026.10.22; the package dependency pin is unchanged.
+Run `node --test --test-concurrency=2 test/lease-guard.test.ts` for real non-git
+tracker regressions, including SDK and CLI writers in separate OS processes,
+delay after callback return, and takeover attempts between raw representation
+restoration and completion history. Both representation writes share a public
+SDK lease fence. Prior-state/history-prefix checks and resumable compensation
+remain CSV domain rules. SDK 2026.11.5 is the declared and tested floor;
+[pm-cli issue 1549](https://github.com/unbraind/pm-cli/issues/1549) is closed.
+Extension-provided lock overrides retain responsibility for their own fencing,
+as specified by the SDK `LockLease` contract.
 
 Ordinary failures trigger the existing SDK transaction coordinator and CSV
 full-document compensation; compensation checks for intervening writers before
@@ -120,12 +114,19 @@ Successful command results are compact TOON by default or JSON with `--json`:
 Counts are per row. `changed` is the preflight plan and `applied` counts actual
 mutations in this attempt; convergence after preflight can reduce `applied`.
 `concurrent` includes unedited and convergent concurrent
-changes. An applied batch also returns its transaction ID. Refusals have stable
+changes. An applied batch also returns its transaction ID. CSV refusals have stable
 codes (`csv_session_invalid`, `csv_edit_invalid`, `csv_edit_conflict`,
-`csv_edit_apply_failed`, `csv_lease_expired`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
-`conflicts` and `conflictCount`. Transaction refusals retain nested conflict keys
-and expose the original error as `cause`, including lease expiration, interruption
-and compensation failures. Checkout/apply IO and snapshot read refusals also retain their causes.
+`csv_edit_apply_failed`) and remedies. SDK `EditRefusal` exposes `code`, `remedy`,
+`conflicts` and `conflictCount`.
+
+Snapshot lease loss can escape as a top-level native `PmCliError` with
+`code: "lock_lost"` during export or apply preflight. Inside an apply transaction,
+native `lock_lost` or `stale_revision` errors can instead be nested under the
+outer `csv_edit_apply_failed` refusal. Callers must inspect `cause` and any
+`AggregateError.errors` recursively as well as the top-level `error.code`;
+checking only the outer code misses these native outcomes. Transaction refusals
+retain nested conflict keys and causes for interruption and compensation
+failures. Checkout/apply IO and snapshot read refusals retain their causes too.
 Diagnostics show at most twenty item/field keys,
 with the total count, and never include cell values. Command error messages carry
 the same code, remedy and bounded conflicts; the host controls error rendering.
@@ -159,3 +160,8 @@ with `pm init`, including with no `git` executable on PATH. This protocol neithe
 invokes Git nor needs branches. It uses the SDK's existing tracker storage,
 ownership checks, item locks, immutable history and transaction journal. Tests
 use real non-git trackers; hosted backend acceptance is separate evidence.
+
+Direct `exportEditSession` and `applyEditSession` calls activate the selected
+workspace's installed extensions. Snapshot reads and native mutations receive
+its complete type/folder and field registries, preserving opaque fields under
+strict unknown-field policy. The editable spreadsheet columns remain unchanged.

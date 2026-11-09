@@ -85,3 +85,8 @@ and explicit IDs own tracker behavior. Keep the output directory private. The
 CLI reserves a new directory before mutation, refuses existing directories, and
 never overwrites artifacts. If final writes fail, retain partial files and rerun
 unchanged input into a fresh directory; stable keys recover committed rows.
+
+Direct `importLineage` calls keep the selected workspace's extensions active
+through creation, native reads and receipt construction. Replay resolves item
+folders through the same SDK type registry. Installed opaque fields remain
+native item data; only explicitly selected lineage columns enter the manifest.

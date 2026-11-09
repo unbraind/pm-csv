@@ -197,3 +197,19 @@ SDK explicit-unset audit suffixes do not turn an own write into a foreign one.
 Single-target updates use the same verified retry checkpoints. Dry-run refuses
 a pending compensation journal instead of reporting restored rows as unchanged.
 The existing first-row-wins rule for duplicate *new* keys is unchanged.
+
+Admission activates the explicitly selected workspace through
+`runWithActiveExtensions`. Type aliases and folders come from
+`resolveItemTypeRegistry(settings, getActiveExtensionRegistrations())`;
+authoritative item/revision and compensation reads use
+`collectRegisteredItemFieldNames` alongside the native schema. Direct SDK calls
+and host-injected command calls use the same path. Installed schema fields are
+preserved during built-in CSV updates, including strict unknown-field policy;
+this does not expand the CSV column vocabulary. Unregistered types still refuse
+before any row is applied.
+
+Atomic imports lend target-check callbacks from one SDK extension activation to
+all planning, inspection and write boundaries. Target checks reread native state
+and history every time, without reloading extensions for every row. Standalone
+revision and sequence APIs still activate their explicitly selected workspace.
+This also covers direct atomic imports without the admission option.
