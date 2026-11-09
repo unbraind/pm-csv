@@ -67,6 +67,7 @@ for (const format of ["toon", "json_markdown"] as const) for (const injected of 
       assert.match(revision, /^[a-f0-9]{64}$/);
       writeFileSync(f.file, "title,type,key\nChanged,FixtureBridge,existing\n");
       assert.equal((await admitCSV(f.root, f.file)).admitted, true);
+      writeFileSync(f.activations, "");
       if (injected) {
         const sdk = createExtensionCommandSdk(f.root, new PmClient({ pmRoot: f.root }), "csv-test");
         const result = await harness.runCommand({ command: "csv import", args: [f.file], pmRoot: f.root,
@@ -78,6 +79,7 @@ for (const format of ["toon", "json_markdown"] as const) for (const injected of 
           commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) });
         assert.equal(result.updated, 1);
       }
+      assert.equal(readFileSync(f.activations, "utf8"), "activate\n", "SDK and command admission reuse the outer activation for both native formats");
       const historyAfterApply = await readHistoryEntries(getHistoryPath(f.root, f.id), f.id);
       assert.equal((await importCSV(f.root, f.file, { delimiter: ",", fieldMap: {}, dryRun: false, atomic: true, admission: {}, keyField: "key",
         commitTransaction: options => commitWorkspaceTransaction({ ...options, pmRoot: f.root }) })).updated, 0);
@@ -303,4 +305,33 @@ test("nested explicit workspaces restore their own activation without borrowing 
     assert.equal(readFileSync(a.activations, "utf8"), "activate\n");
     assert.equal(readFileSync(b.activations, "utf8"), "activate\n");
   } finally { rmSync(a.root, { recursive: true, force: true }); rmSync(b.root, { recursive: true, force: true }); }
+});
+
+test("generated nested admission, revision, spreadsheet and join previews reuse their workspace activation", async () => {
+  const f = await fixture("toon", "FixtureBridge");
+  try {
+    writeFileSync(f.file, "title,type\nPreview,FixtureBridge\n");
+    const operations = [
+      () => admitCSV(f.root, f.file),
+      () => admissionTargetRevision(f.root, f.id),
+      () => exportEditSession(f.root, [f.id]),
+      () => previewJoins(f.root, joinInput(true)),
+    ];
+    writeFileSync(f.activations, "");
+    for (const operation of operations) await operation();
+    assert.equal(readFileSync(f.activations, "utf8"), "activate\n".repeat(operations.length));
+    writeFileSync(f.activations, "");
+    let seed = 231;
+    await withWorkspaceExtensions(f.root, async () => {
+      for (let trial = 0; trial < 24; trial++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const operation = operations[seed % operations.length];
+        await withWorkspaceExtensions(join(f.root, "."), async () => {
+          await operation();
+          await withAdmissionTargetChecks(f.root, checks => checks.revision(f.id));
+        });
+      }
+    });
+    assert.equal(readFileSync(f.activations, "utf8"), "activate\n");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
 });

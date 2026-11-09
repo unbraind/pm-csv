@@ -12,6 +12,72 @@ import { applyJoins, previewJoins } from "../join-plans.ts";
 import type { JoinInput } from "../join-plans.ts";
 import { registerLeaseObserver } from "./support/lease-observer.ts";
 
+test("dependency cleanup attempts every native lease for every subset of release failures", async () => {
+  for (let mask = 0; mask < 8; mask++) {
+    const { root } = await fixture("parent");
+    const input: JoinInput = { version: 1, tables: [{ name: "rows", key: "key", fields: { title: "title" },
+      csv: "key,title,parent,blocker,other\na,First,,,\nb,Second,,,\nc,Third,,,\nd,Child,a,b,c\n",
+      references: [{ column: "parent", table: "rows", kind: "parent" },
+        { column: "blocker", table: "rows", kind: "blocked_by" }, { column: "other", table: "rows", kind: "blocked_by" }] }] };
+    const preview = await previewJoins(root, input); assert.ok(preview.plan);
+    const plan = preview.plan, expected = plan.ids.slice(0, 3).sort().reverse(), released: string[] = [];
+    let creating = false, cleaning = false;
+    const stop = registerLeaseObserver(root, api => {
+      api.hooks.beforeMutation(context => {
+        if (context.operation === "create" && context.after?.metadata.id === plan.ids[3]) {
+          creating = true;
+          throw new Error("Refuse child persistence");
+        }
+      });
+      const acquiring = new Set<string>();
+      api.registerService("lock_acquire", async context => {
+        const payload = context.payload as { id?: string; owner?: string; ttl_seconds: number };
+        if (!cleaning || (payload.id && acquiring.has(payload.id)) || payload.owner !== "csv-test" || !payload.id || !expected.includes(payload.id)) return { handled: false };
+        // A real provider delegates acquisition to the native store, then reports a release failure.
+        acquiring.add(payload.id);
+        let lease: Awaited<ReturnType<typeof acquireLockLease>>;
+        try { lease = await acquireLockLease(root, payload.id, payload.ttl_seconds, payload.owner); }
+        finally { acquiring.delete(payload.id); }
+        const id = payload.id, index = expected.indexOf(id);
+        return { handled: true, result: async () => {
+          released.push(id);
+          await lease.release();
+          if (mask & (1 << index)) throw new Error(`Release failure ${index}`);
+        } };
+      });
+    });
+    const installed = join(root, "extensions/lease-observer"); mkdirSync(installed, { recursive: true });
+    writeFileSync(join(installed, "manifest.json"), JSON.stringify({ name: "lease-observer", version: "1.0.0", entry: "./index.ts", capabilities: ["hooks", "services"] }));
+    const module = pathToFileURL(join(process.cwd(), "test/support/lease-observer.ts")).href;
+    writeFileSync(join(installed, "index.ts"), `import { activateLeaseObserver } from ${JSON.stringify(module)};
+      export default { activate(api: Parameters<typeof activateLeaseObserver>[1]) { activateLeaseObserver(${JSON.stringify(root)}, api); } };`);
+    try {
+      await assert.rejects(applyJoins(root, plan, { author: "csv-test", onBoundary(phase, id) {
+        if (phase === "before_create" && id === plan.ids[3]) cleaning = true;
+      }, onTransition(event) {
+        if (event.transition === "compensating") cleaning = false;
+      } }), error => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /csv_join_/);
+        if (mask) {
+          const first = expected.findIndex((_, index) => Boolean(mask & (1 << index)));
+          assert.ok(error.cause instanceof Error);
+          assert.match(error.cause.message, new RegExp(`Release failure ${first}`));
+        }
+        return true;
+      });
+      assert.equal(creating, true);
+      assert.deepEqual(released, expected, `failure subset ${mask} must release every dependency in reverse acquisition order`);
+      for (const id of expected) {
+        const probe = await acquireLockLease(root, id, 60, "probe-test", false, false, 0, { maxWaitMs: 0 });
+        await probe.release();
+      }
+      assert.equal(await locateItem(root, plan.ids[3]), null);
+      assert.notEqual(journalStatus(root), "committed");
+    } finally { stop(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
 /** Build a two-row reviewed plan in a real tracker with no git repository. */
 async function fixture(kind: "parent" | "blocked_by", ttl?: number) {
   const root = mkdtempSync(join(tmpdir(), "csv-join-review-"));

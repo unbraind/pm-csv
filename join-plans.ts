@@ -360,7 +360,16 @@ async function withJoinDependencies<T>(pmRoot: string, plan: JoinPlan, row: Row,
       return run();
     };
     return await fenced(0);
-  } finally { for (const lease of leases.reverse()) await lease.release(); }
+  } finally { await releaseJoinDependencies(leases); }
+}
+
+/** Attempt every acquired lease in reverse order before reporting the first release failure. */
+async function releaseJoinDependencies(leases: LockLease[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const lease of leases.reverse()) {
+    try { await lease.release(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw failures[0];
 }
 
 /**

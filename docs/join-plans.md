@@ -72,7 +72,9 @@ are one-based logical CSV records and columns, with the header as record 1;
 embedded newlines do not add logical records.
 
 Dependency item leases remain fenced from the final dependency revision check
-through native child creation. A dependency edited before those leases are held
+through native child creation. Cleanup attempts every acquired dependency lease
+in reverse acquisition order, then reports the first release failure if any.
+A dependency edited before those leases are held
 refuses the child write; a competing native writer cannot enter during creation.
 The coordinator checks every target again at its `committing` transition, so a
 precommit conflict runs reverse compensation instead of committing a journal
