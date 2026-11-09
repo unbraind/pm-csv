@@ -6,6 +6,10 @@
 
 - Disambiguate duplicate GitHub \#197 import ownership without losing either PM record ([pm-csv-v5fb](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-v5fb.toon))
 
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-208](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-208.toon))
+
 ## 2026.10.30 - 2026-10-30
 
 ### Added
@@ -23,6 +27,10 @@
 
 - Use the pm SDK for runtime CSV export fields ([pm-csv-sdk-adoption-1025](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-sdk-adoption-1025.toon))
 
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-204](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-204.toon))
+
 ## 2026.10.26 - 2026-10-26
 
 ### Other
@@ -31,6 +39,7 @@
 
 ### Closed
 
+- Closed: Point the npm homepage at the package's website and link the author ([pm-csv-github-2b408bfa2d7f-197](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-197.toon))
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-195](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-195.toon))
 
 ## 2026.10.25 - 2026-10-25
