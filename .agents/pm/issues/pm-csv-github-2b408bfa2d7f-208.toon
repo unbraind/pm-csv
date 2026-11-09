@@ -1,0 +1,25 @@
+id: pm-csv-github-2b408bfa2d7f-208
+title: Daily Release workflow is failing
+description: "GH issue #208: https://github.com/unbraind/pm-csv/issues/208 · author @github-actions[bot] · state reason completed · created 2026-10-27T10:29:02Z · updated 2026-11-02T09:26:35Z"
+type: Issue
+status: closed
+priority: 2
+tags[3]: "gh:unbraind/pm-csv#208","github_author:github-actions[bot]",release-failure
+created_at: "2026-10-27T10:29:02Z"
+updated_at: "2026-11-09T10:27:44.744Z"
+closed_at: "2026-11-02T09:26:35Z"
+completed_at: "2026-11-02T09:26:35Z"
+author: pm-github
+release: v2026.11.04
+close_reason: "Closed on GitHub as completed on 2026-11-02T09:26:35Z"
+github_close_reason: "Closed on GitHub as completed on 2026-11-02T09:26:35Z"
+github_closed_at: "2026-11-02T09:26:35Z"
+github_created_at: "2026-10-27T10:29:02Z"
+github_link_only: false
+github_number: 208
+github_release: v2026.11.04
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-11-02T09:26:35Z"
+github_url: "https://github.com/unbraind/pm-csv/issues/208"
+body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-csv/actions/runs/40478603904\n- Commit: 7adee35b2408c850e6921ee9272e2231fc03822b\n- Date (UTC): 2026-10-27T10:29:00Z\n\n\n---\n\n### GitHub comments (8)\n\n> **@coderabbitai[bot]** (2026-10-27T10:29:32Z)\n>\n> <!-- coderabbit-ai-generated:v1 -->\n> \n> <!-- This is an auto-generated issue plan by CodeRabbit -->\n> \n> <details>\n> <summary>⚠️ Possible Duplicate Issue(s)</summary>\n> <dl>\n> <dd>\n> \n> - https://github.com/unbraind/pm-csv/issues/173\n> </dd>\n> </dl>\n> </details>\n> \n> ---\n> <details>\n> <summary>📝 Issue Planner</summary>\n> <dl>\n> <dd>\n> \n> <sub>Check the box below or use the `@coderabbitai plan` command to generate an implementation plan and prompts that you can use with your favorite coding assistant.</sub>\n> \n> - [ ] <!-- {\"checkboxId\":\"8d4f2b9c-3e1a-4f7c-a9b2-d5e8f1c4a7b9\"} --> Create Plan\n> </dd>\n> </dl>\n> </details>\n> \n> \n> ---\n> <details>\n> <summary> 🧪 Issue enrichment is currently in open beta.</summary>\n> <dl>\n> <dd>\n> \n> \n> You can configure auto-planning by selecting labels in the issue_enrichment configuration.\n> \n> To disable automatic issue enrichment, add the following to your `.coderabbit.yaml`:\n> ```yaml\n> issue_enrichment:\n>   auto_enrich:\n>     enabled: false\n> ```\n> </dd>\n> </dl>\n> </details>\n> \n> 💬 Have feedback or questions? Drop into our [discord](https://discord.gg/coderabbit)!\n\n> **@github-actions[bot]** (2026-10-28T10:58:20Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/40667315400\n> - Commit: a5ae949c0911a083cdb77e43a3385fc63bff6a87\n> - Date (UTC): 2026-10-28T10:58:18Z\n> \n\n> **@github-actions[bot]** (2026-10-29T13:19:54Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/40855428254\n> - Commit: 1c13ab7d154a12d81f7ad4c5d870635a41f56d23\n> - Date (UTC): 2026-10-29T13:19:52Z\n> \n\n> **@github-actions[bot]** (2026-10-30T12:34:20Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/41039083962\n> - Commit: f6737f719f526a2a6d0223a2f24870c182a46487\n> - Date (UTC): 2026-10-30T12:34:17Z\n> \n\n> **@github-actions[bot]** (2026-10-30T16:07:24Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/41039083962\n> - Commit: f6737f719f526a2a6d0223a2f24870c182a46487\n> - Date (UTC): 2026-10-30T16:07:22Z\n> \n\n> **@github-actions[bot]** (2026-10-31T11:55:30Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/41190117945\n> - Commit: 6f82160954cc090fdb61689a69459d83e608fb01\n> - Date (UTC): 2026-10-31T11:55:28Z\n> \n\n> **@github-actions[bot]** (2026-11-01T12:24:27Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-csv/actions/runs/41298331516\n> - Commit: 893651df2075bdb04e32f48d7a011bab10b4c8b3\n> - Date (UTC): 2026-11-01T12:24:26Z\n> \n\n> **@unbraind** (2026-11-02T09:26:34Z)\n>\n> Closing: the latest scheduled Daily Release succeeded. Evidence: Latest scheduled Daily Release succeeded: run 41307158989 (2026-11-01T12:34Z), v2026.11.01 published via PR #221 Its release notes repeat the previous release's section; that defect is tracked separately in pm-changelog#311. (Found in the 2026-11-02 triage of issues the blind issue watch missed.)"
