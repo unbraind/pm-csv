@@ -98,6 +98,13 @@
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-173](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-173.toon))
 - Closed: Harden the release merge wait against mergeStateStatus deadlock ([pm-csv-7izf](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-7izf.toon))
 
+## 2026.10.22 - 2026-10-22
+
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#170](https://github.com/unbraind/pm-csv/pull/170))
+- Bump eslint ([#171](https://github.com/unbraind/pm-csv/pull/171))
+
 ## 2026.10.12 - 2026-10-12
 
 ### Added
