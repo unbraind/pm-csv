@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
+
 ## 2026.11.4 - 2026-11-04
 
 ### Fixed
