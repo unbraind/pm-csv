@@ -207,8 +207,8 @@
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
 - The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-csv-ab5t](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ab5t.toon))
+- A failed provenance publish silently falls back to an unattested one ([pm-csv-nb1m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-nb1m.toon))
 
 ### Closed
 
@@ -239,8 +239,8 @@
 
 ### Closed
 
-- Closed: Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 - Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-csv-om24](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-om24.toon))
+- Closed: Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 
 ## 2026.8.16 - 2026-08-16
 
@@ -428,8 +428,8 @@
 
 ### Added
 
-- Deepen SDK surface: relational columns, validate, encoding, excel, csv_source schema field ([pm-csv-aoox](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-aoox.toon))
 - New command: pm csv validate <file\> ([pm-csv-rq5q](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-rq5q.toon))
+- Deepen SDK surface: relational columns, validate, encoding, excel, csv_source schema field ([pm-csv-aoox](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-aoox.toon))
 
 ### Fixed
 
