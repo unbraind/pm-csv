@@ -72,7 +72,7 @@
     "@unbrained/pm-cli": "2026.11.8",
     "eslint": "10.14.0",
     "jiti": "2.7.0",
-    "jscpd": "5.4.2",
+    "jscpd": "5.4.3",
     "pm-changelog": "2026.11.7",
     "pm-ops": "2026.11.6",
     "typescript": "7.0.2",
