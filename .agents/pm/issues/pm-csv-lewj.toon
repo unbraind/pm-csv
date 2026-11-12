@@ -6,10 +6,11 @@ status: closed
 priority: 2
 tags[2]: "gh:unbraind/pm-csv#214","github_author:unbraind"
 created_at: "2026-10-29T07:10:50Z"
-updated_at: "2026-11-10T09:59:52.974Z"
+updated_at: "2026-11-12T10:07:53.770Z"
 closed_at: "2026-11-09T19:25:07Z"
 completed_at: "2026-11-09T19:25:07Z"
 author: pi-glm
+release: v2026.11.11
 comments[6]{created_at,author,text}:
   "2026-11-09T15:16:35.016Z",codex-agent,"Carried forward branch evidence from 2026-11-06T12:10:38.120Z (codex-sol): Reusing this issue owner for gh:unbraind/pm-csv#214 in the G2 adoption PR, linked to pm-csv-sdk-write-fence and companion pm-cli-website-sumw. Activate the explicit target workspace and use its public active type/field registrations in admission, revision reads and compensation; cover real installed schema extensions and cross-workspace isolation."
   "2026-11-09T15:16:36.012Z",codex-agent,"Carried forward branch evidence from 2026-11-06T12:33:57.172Z (codex-sol): Validation: six real installed-extension tests pass, covering TOON and JSON Markdown source documents, strict unknown-field policy, direct and host-injected admission, cross-workspace isolation, separate-CLI revision conflicts and interrupted representation replay with opaque string/object fields. Disposable admission registry-only revert fails all five admission/isolation tests; omitting registered fields only from representation parsing fails the recovery test. Restored implementation passes 6/6. Existing resource-bound, late-invalid-row, source/settings and revision scenarios remain covered."
@@ -36,7 +37,7 @@ github_closed_at: "2026-11-09T19:25:07Z"
 github_created_at: "2026-10-29T07:10:50Z"
 github_link_only: false
 github_number: 214
-github_release: ""
+github_release: v2026.11.11
 github_state: closed
 github_state_reason: completed
 github_updated_at: "2026-11-09T19:25:07Z"
