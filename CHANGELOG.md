@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.11.13 - 2026-11-13
+
+### Dependencies
+
+- Bump @unbrained/pm-cli ([#247](https://github.com/unbraind/pm-csv/pull/247))
+- Bump jscpd ([#244](https://github.com/unbraind/pm-csv/pull/244))
+- Bump @unbrained/pm-cli ([#243](https://github.com/unbraind/pm-csv/pull/243))
+
 ## 2026.11.11 - 2026-11-11
 
 ### Fixed
