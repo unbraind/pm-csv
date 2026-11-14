@@ -2,11 +2,13 @@ id: pm-csv-sdk-write-fence
 title: Adopt native SDK persistence fencing for CSV edits and compensation
 description: "Audit G2 adoption, companion pm-cli-website-sumw. Upstream #1549 is closed and its SDK lease/persistence APIs are available. Remove callback deadline workarounds, use native mutateItem fencing and acquireLockLease().fence() for snapshots, settings and raw representation/history boundaries. Preserve CSV history-prefix conflict detection, original representation recovery and resumable compensation. Supported and tested SDK floor: 2026.11.5."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags[1]: "gh:unbraind/pm-cli#1549"
 created_at: "2026-10-22T13:46:22.966Z"
-updated_at: "2026-11-09T15:30:47.040Z"
+updated_at: "2026-11-14T08:46:11.137Z"
+closed_at: "2026-11-14T08:46:11.036Z"
+completed_at: "2026-11-14T08:46:11.036Z"
 author: codex-agent
 expected_result: "The host atomically refuses stale item persistence when lease ownership or document revision changed, preserving the newer value and allowing safe transaction reconciliation."
 actual_result: "The supported SDK floor is 2026.11.5. Native mutateItem fences callback and host-hook persistence; explicit LockLease.fence protects snapshots, settings and representation plus append-only completion history. The package deadline helper is removed. Separate-process expiry/takeover tests preserve newer bytes and history; exact-function reverts expose the old deadline refusals and unfenced representation window. Upstream #1549 is fixed; no unavailable fence is claimed."
@@ -67,4 +69,5 @@ docs[3]{path,scope}:
   docs/atomic-compensation.md,project
   docs/join-plans.md,project
   docs/spreadsheet-roundtrip.md,project
+close_reason: "https://github.com/unbraind/pm-csv/pull/231 merged 2026-11-09T19:25:05Z; merge SHA 01bdd55998bbd8e3167e9035c3c467238395e5f9; PR head 349dbbd050ba8e13dc80531357187a22bf25269f. Delivered: Native SDK lease fencing, snapshots/settings/history compensation and extension-aware admission; existing roundtrip recovery and conflict detection retained. Green at that head: test (22), codeql, test (26), CodeQL, CodeRabbit, DeepScan, Greptile Review, Hound, semgrep-cloud-platform/scan. Other check outcomes: enable-auto-merge: SKIPPED; cubic · AI code reviewer: NEUTRAL; Sourcery review: SKIPPED (not counted as green)."
 body: ""

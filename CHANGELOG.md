@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
+
 ## 2026.11.13 - 2026-11-13
 
 ### Dependencies
