@@ -16,7 +16,7 @@ permissions:
   actions: write
 jobs:
   gated-closeout:
-    uses: unbraind/pm-github/.github/workflows/pm-github-closeout.yml@eb89c6a19ecf6301cd074f3dfb36c7da36135f90 # pm-github 2026.11.04
+    uses: unbraind/pm-github/.github/workflows/pm-github-closeout.yml@cf2111d75cd0b390ca437dbec51063a2aa691d45 # pm-github 2026.11.11
     with:
       pm-github-version: "2026.10.16"
       npm-project-dir: "." # Use tools/oracle or another contained npm project when needed.
