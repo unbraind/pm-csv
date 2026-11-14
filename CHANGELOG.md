@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Close delivered pm items and reserve in progress for active work (2026-10-24) ([pm-csv-6cjh](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-6cjh.toon))
+
 ## 2026.11.13 - 2026-11-13
 
 ### Dependencies
@@ -13,6 +19,7 @@
 ### Fixed
 
 - Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
+- Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
 
 ## 2026.11.4 - 2026-11-04
 
