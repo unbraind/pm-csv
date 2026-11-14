@@ -6,7 +6,7 @@ status: closed
 priority: 2
 tags[2]: maintenance,tracker-hygiene
 created_at: "2026-10-24T21:39:48.480Z"
-updated_at: "2026-11-14T08:50:20.093Z"
+updated_at: "2026-11-14T09:59:25.405Z"
 closed_at: "2026-11-14T08:50:19.828Z"
 completed_at: "2026-11-14T08:50:19.828Z"
 author: codex-agent
@@ -14,12 +14,14 @@ estimated_minutes: 60
 acceptance_criteria: "Every original in-progress and open item is inspected; delivery closures name the implementing merged PR, date and merge SHA and match the recorded acceptance; inactive work is open with claims released; original history records remain append-only; tracker health, changelog and PR CI outcomes are recorded."
 risk: low
 confidence: high
-comments[5]{created_at,author,text}:
+comments[7]{created_at,author,text}:
   "2026-10-24T21:39:49.313Z",codex-agent,"Oriented context, searched existing hygiene work, and read the complete tracker. Checking every original in-progress and open item against PR title/body/commits, delivery links and acceptance. The owner authorizes evidence-backed closure in this sweep. Ambiguous claims remain open; no PR merge or history rewrite."
   "2026-10-24T21:45:35.391Z",codex-agent,"Reviewed 7 original active items. 2 verified deliveries closed and 0 inactive items returned to open. Every other original open item remains open because complete delivery or explicit supersession was not established. No cancellation by inference, software change, threshold reduction, or history rewrite. Per-item evidence is recorded in closure reasons and the PR table. Tracker, changelog and CI verification follow."
   "2026-10-24T21:46:29.643Z",codex-agent,"Local tracker verification passed: repository changelog generation and consistency check, pinned strict health with required merge drivers under isolated Git identity, changed-item history verification, independent original-history prefix checks and linked git diff --check. All original inactive work and this audit have released claims; no in-progress item remains. No production function changed, so source-function revert proof is inapplicable; per-item merged ancestry and lifecycle/history checks are the evidence. The PR will carry the full before/after/evidence table. Complete npm/Bun release checks and native platform checks run in PR CI; their final outcome is reported separately, without treating queued or skipped checks as approval."
   "2026-11-14T08:46:08.413Z",codex-sweep-1114,"2026-11-14 sweep: inspected context, searched prior hygiene work, and read the complete tracker. Verify each in-progress item against acceptance, merged delivery, exact PR-head checks and linked issue state. Close complete delivery, reopen idle or partial work, preserve other live claims and all prior history."
   "2026-11-14T08:47:59.442Z",codex-sweep-1114,"Sweep decisions: 1 delivered items closed, 0 idle or partial items reopened, 0 canceled, 0 left alone. Evidence and remaining work are recorded per item. Linked git diff --check passed. Final tracker and changelog validation follows; release gates and hosted CI are separate evidence."
+  "2026-11-14T09:58:28.070Z",codex-sweep-1114,"Release-attribution correction continuation: use each delivered item's evidenced PR merge timestamp for completed_at and its first containing release tag for release. Preserve genuinely unreleased items without a release value, all statuses and existing claims. Sweep chore completion/release and reopened work are excluded. Regenerate and verify changelog placement, append-only history and health after the last write."
+  "2026-11-14T09:59:25.398Z",codex-sweep-1114,"Release metadata corrected for 1 delivered items: 1 attributed to first containing tags and 0 left genuinely unreleased. Linked diff check passed. Independent timestamp/tag/changelog-placement validation and regenerated changelog checks follow this final tracker write. No review thread replies, resolutions or reactions."
 files[2]:
   - path: .agents/pm
     scope: project
