@@ -2,11 +2,13 @@ id: pm-csv-6cjh
 title: Close delivered pm items and reserve in progress for active work (2026-10-24)
 description: "Review every in-progress and open record against merged delivery and current PR evidence. Preserve uncertain work as open, release stale claims, and submit the tracker changes for review."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[2]: maintenance,tracker-hygiene
 created_at: "2026-10-24T21:39:48.480Z"
-updated_at: "2026-11-14T08:48:00.851Z"
+updated_at: "2026-11-14T08:50:20.093Z"
+closed_at: "2026-11-14T08:50:19.828Z"
+completed_at: "2026-11-14T08:50:19.828Z"
 author: codex-agent
 estimated_minutes: 60
 acceptance_criteria: "Every original in-progress and open item is inspected; delivery closures name the implementing merged PR, date and merge SHA and match the recorded acceptance; inactive work is open with claims released; original history records remain append-only; tracker health, changelog and PR CI outcomes are recorded."
@@ -29,4 +31,5 @@ tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   git -c core.quotePath=true diff --check,project,codex-sweep-1114,"2026-11-14T08:47:55.400Z",local_mutation,chore/in-progress-sweep-2026-11-14
 docs[1]{path,scope,note}:
   CHANGELOG.md,project,Regenerated package release notes
+close_reason: "2026-11-14 tracker sweep delivered by https://github.com/unbraind/pm-csv/pull/251. Original in-progress items were audited against merged PRs, acceptance and linked issues; delivered work closed and idle work reopened with remaining work recorded. Live claims and append-only history preserved. Local changelog check, tracker health and history-prefix checks passed before this closure; regenerated final checks follow. The sweep PR is open for review; its CI is reported separately and no merge is claimed."
 body: ""
