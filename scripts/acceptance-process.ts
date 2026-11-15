@@ -168,7 +168,11 @@ export function runCommand(command: string, args: string[], options: CommandOpti
     function capture(chunk: Buffer, target: Buffer[]): void {
       bytes += chunk.length;
       if (bytes > 64 * 1024 * 1024) {
-        killTree(); finish(new Error(`${command} exceeded the 64 MiB acceptance output budget`));
+        // Same as hardExpire(): a cleanup failure (e.g. taskkill refused) must reject runCommand, not escape
+        // this data listener as an uncaught exception that skips the caller's finally cleanup.
+        try { killTree(); }
+        catch (error) { finish(error as Error); return; }
+        finish(new Error(`${command} exceeded the 64 MiB acceptance output budget`));
       } else target.push(chunk);
     }
     child.stdout.on("data", (chunk: Buffer) => capture(chunk, stdout));
