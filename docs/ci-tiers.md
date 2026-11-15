@@ -5,8 +5,8 @@ runners. Only PRs and manual dispatch start this tier. Superseded PR runs cancel
 Docs/tracker-only PRs keep both checks green by running their applicable gates.
 There is no standalone markdown linter in this package. The cheap path runs
 the existing packaging/documentation, shipped-changelog and identity suites.
-The executable `.agents/pm/verify-release-yaml.mjs` selects the code path even
-though it lives under the tracker root. CodeQL runs once in
+Executable `.mjs`, `.cjs`, `.js` and `.ts` files anywhere under `.agents/pm/`
+select the code path and remain included in CodeQL. CodeQL runs once in
 its own workflow; its table row describes triggers, not an extra matrix job.
 
 | Check | Code PR Node 22 | Code PR Node 26 | Docs/tracker-only PR (both) | Deep Node 22 + 26 |
@@ -100,8 +100,8 @@ suite without a second skip control.
 6. Copy the PR workflow's concurrency, hosted routing, Node 22/26 required job
    names, full checkout and NUL-safe base...head change detection with rename folding
    disabled (source-to-docs moves must retain the source deletion) as fixed
-   template. Audit tracker roots for executable code (the pilot exempts its release verifier
-   from the cheap allowlist). Adapt the embedded docs/identity test commands,
+   template. Keep the generic `.mjs|.cjs|.js|.ts` tracker-code exception before
+   the cheap allowlist; Bash `*` also matches nested tracker directories. Adapt the embedded docs/identity test commands,
    Node floor, release gate
    and Bun smoke to the package. Inspect packed acceptance before omitting an
    extra bunx smoke. Even the engines-floor tests may require Bun setup when
@@ -112,9 +112,12 @@ suite without a second skip control.
    gates and document any larger package-specific bound (this pilot needs 240).
    Pick a per-repository off-peak cron minute distinct from its
    release and CodeQL schedules. Never add a PR trigger or required deep check.
-8. Copy CodeQL tracker/docs/lockfile path exclusions on push and PR, retain its
-   weekly schedule and pinned actions, and use PR cancellation. Adapt lockfile
-   names if the sibling has additional lockfiles.
+8. Copy CodeQL's ordered `paths` on push and PR: include `**`, exclude tracker
+   data/docs/lockfiles, then re-include `.agents/pm/**/*.mjs`, `**/*.cjs`,
+   `**/*.js` and `**/*.ts` under that tracker root. Later patterns override
+   earlier exclusions. Keep workflow `permissions: {}`, explicit job permissions,
+   the weekly scan, pinned actions and PR cancellation. Adapt lockfile names
+   if the sibling has additional lockfiles.
 9. Run typecheck, lint, touched tests, quick/full coverage, changelog check and
    the quick release gate. Run actionlint if installed, otherwise parse YAML and
    record that narrower validation. Link and execute tests through pm as well.
