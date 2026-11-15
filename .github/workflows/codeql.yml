@@ -3,8 +3,18 @@ name: CodeQL
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.agents/pm/**'
+      - '**/*.md'
+      - 'docs/**'
+      - 'package-lock.json'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '.agents/pm/**'
+      - '**/*.md'
+      - 'docs/**'
+      - 'package-lock.json'
   schedule:
     # Weekly CodeQL scan, minute/hour staggered across the pm fleet so the
     # repos do not all fire against the API at the same time.

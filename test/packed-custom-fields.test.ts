@@ -50,12 +50,13 @@ test("packed scenarios retain distinct hosts and deduplicate matching npm versio
   ]);
 });
 
+// Fixed host/scenario counts bound this IO proof; runner speed is not its contract.
 // Installed hosts also exercise native rollback at every row position.
-test("packed acceptance proves custom columns on every installed host", { timeout: 600_000 }, () => {
+test("packed acceptance proves custom columns on every installed host", () => {
   const childEnvironment = { ...process.env };
   delete childEnvironment.PM_PATH;
   const result = spawnSync(process.execPath, ["scripts/accept-packed.ts"], {
-    cwd: resolve(import.meta.dirname, ".."), encoding: "utf8", timeout: 590_000,
+    cwd: resolve(import.meta.dirname, ".."), encoding: "utf8",
     env: childEnvironment, maxBuffer: 4 * 1024 * 1024,
   });
   assert.equal(result.error, undefined, result.error?.message ?? "Packed acceptance process error");

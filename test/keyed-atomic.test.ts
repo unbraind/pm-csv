@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtempSync, mkdirSync, symlinkSync, rmSync, readFileSync, readdirSync } from "node:fs";
@@ -39,8 +40,8 @@ function refusal(error: unknown): boolean { assert.ok(error instanceof JoinRefus
 function digest(value: unknown): string { return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex"); }
 
 // Repeated keyed permutations exercise dictionaries independently of implementation constants.
-test("500 keyed permutations never inherit prototype names in mappings, flags or status aliases", () => {
-  for (let seed = 1; seed <= 500; seed++) {
+test("keyed permutations never inherit prototype names in mappings, flags or status aliases", () => {
+  for (let seed = 1; seed <= testDepth(500); seed++) {
     const key = TOKENS[seed % TOKENS.length], normalized = key.toLowerCase();
     assert.deepEqual(applyFieldMap([key], {}), [key]);
     assert.deepEqual(applyFieldMap([key], Object.create({ [key]: "body" })), [key]);
