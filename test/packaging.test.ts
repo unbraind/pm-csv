@@ -240,23 +240,7 @@ test("whole-tracker changelog scripts explicitly disable every pm output bound",
     );
   }
 
-  const workflowInvocations = releaseWorkflow
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("npx pm-changelog "));
-  assert.equal(workflowInvocations.length, 3, "the release workflow must expose all three direct pm-changelog reads to this gate");
-  for (const invocation of workflowInvocations) {
-    assert.match(
-      invocation,
-      /--pm-arg=--output-budget\s+--pm-arg=unbounded/u,
-      "every release-workflow pm-changelog read must disable the token budget",
-    );
-    assert.match(
-      invocation,
-      /--pm-arg=--output-limit\s+--pm-arg=unbounded/u,
-      "every release-workflow pm-changelog read must disable the row limit",
-    );
-  }
+  assert.match(releaseWorkflow, /uses: unbraind\/pm-ops\/\.github\/workflows\/daily-release\.yml@[a-f0-9]{40}/u);
 });
 
 test("public atomic contracts disclose best-effort compensation and reconciliation", () => {

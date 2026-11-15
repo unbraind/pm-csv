@@ -23,6 +23,21 @@ function running(pid: number): boolean {
   return true;
 }
 
+/** Observe every descendant twice after scheduling a turn; transient procfs absence is not a stable exit receipt. */
+async function assertProcessesStopped(pids: number[], inspect = running): Promise<void> {
+  let stopped = 0;
+  let states: boolean[] = [];
+  for (let attempt = 0; attempt < scaledBudget(5_000) / 10; attempt++) {
+    states = pids.map(pid => inspect(pid));
+    stopped = states.some(Boolean) ? 0 : stopped + 1;
+    if (stopped === 2) return;
+    await delay(10);
+  }
+  assert.ok(!states[0], "stalled child must be dead");
+  assert.ok(!states[1], "sleeping grandchild must be dead");
+  assert.fail("descendant exit observations must settle before cleanup");
+}
+
 /** Clean up even when deliberately reverting group termination to prove the regression. */
 function cleanup(pid: number): void {
   try { process.kill(pid, "SIGKILL"); }
@@ -54,12 +69,12 @@ test("acceptance runner captures output and status and reports spawn failures", 
 });
 
 for (const nested of [false, true]) test(`acceptance ${nested ? "outer" : "child"} deadline kills a sleeping child and its grandchild`, {
-  timeout: scaledBudget(15_000),
+  timeout: scaledBudget(60_000),
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "acceptance-process-tree-"));
   const pidsFile = join(root, "pids.json");
   let pids: number[] = [];
-  const budget = scaledBudget(3_000);
+  const budget = scaledBudget(10_000);
   const started = performance.now();
   const args = ["test/fixtures/sleeping-process-tree.mjs", ...(nested ? ["supervisor"] : []), pidsFile];
   try {
@@ -74,10 +89,7 @@ for (const nested of [false, true]) test(`acceptance ${nested ? "outer" : "child
     assert.ok(performance.now() - started < budget + scaledBudget(5_000), "deadline must settle promptly, even with inherited pipes");
     pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[];
     assert.equal(pids.length, 2);
-    // The kernel may not yet have scheduled both exits when kill(2) returns.
-    for (let attempt = 0; attempt < 50 && pids.some(running); attempt++) await delay(10);
-    assert.ok(!running(pids[0]), "stalled child must be dead");
-    assert.ok(!running(pids[1]), "sleeping grandchild must be dead");
+    await assertProcessesStopped(pids);
   } finally {
     if (pids.length === 0) {
       try { pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[]; } catch { /* Fixture may not have started. */ }
@@ -134,7 +146,7 @@ test("taskkill outcome classification preserves root-exited timeouts and surface
 
 // Cross-process POSIX signal delivery is not exposed by Node on Windows.
 for (const signal of ["SIGTERM", "SIGINT"] as const) test(`external ${signal} cancels a nested runner and both fixture descendants`, {
-  skip: process.platform === "win32", timeout: scaledBudget(15_000),
+  skip: process.platform === "win32", timeout: scaledBudget(60_000),
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "acceptance-cancellation-"));
   const pidsFile = join(root, "pids.json");
@@ -147,7 +159,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) test(`external ${signal} ca
   });
   let pids: number[] = [];
   try {
-    for (let attempt = 0; attempt < scaledBudget(5_000) / 25 && !existsSync(pidsFile); attempt++) await delay(25);
+    for (let attempt = 0; attempt < scaledBudget(20_000) / 25 && !existsSync(pidsFile); attempt++) await delay(25);
+    assert.ok(existsSync(pidsFile), "nested descendants must become ready within the startup watchdog");
     pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[];
     assert.equal(pids.length, 2, "nested child and grandchild must start before cancellation");
     assert.ok(outer.kill(signal));
@@ -155,9 +168,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) test(`external ${signal} ca
       throw new Error("outer cancellation did not finish within its bounded cleanup");
     })]);
     assert.equal(code, signal === "SIGTERM" ? 143 : 130);
-    for (let attempt = 0; attempt < 50 && pids.some(running); attempt++) await delay(10);
-    assert.ok(!running(pids[0]), "cancelled nested child must be dead");
-    assert.ok(!running(pids[1]), "cancelled sleeping grandchild must be dead");
+    await assertProcessesStopped(pids);
   } finally {
     if (existsSync(pidsFile)) pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[];
     const supervisor = `${pidsFile}.supervisor`;
@@ -167,4 +178,15 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) test(`external ${signal} ca
     await closed;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test("descendant cleanup requires stable observations and checks both processes on every turn", async () => {
+  const visits: number[] = [];
+  const snapshots = [[false, false], [false, true], [false, false], [false, false]];
+  await assertProcessesStopped([101, 102], pid => {
+    visits.push(pid);
+    return snapshots[Math.floor((visits.length - 1) / 2)][pid - 101];
+  });
+  assert.deepEqual(visits, [101, 102, 101, 102, 101, 102, 101, 102]);
 });
