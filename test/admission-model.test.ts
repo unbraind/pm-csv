@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtempSync, rmSync, cpSync, writeFileSync } from "node:fs";
@@ -66,7 +67,7 @@ async function roundTrip(base: string, root: string, oracle: string, csv: string
   } finally { rmSync(target, { recursive: true, force: true }); rmSync(reference, { recursive: true, force: true }); }
 }
 
-test("500 seeded admission/import/export sequences compare SDK state to a native reference, including old inputs and ambient focus", { timeout: 900000 }, async t => {
+test("seeded admission/import/export sequences compare SDK state to a native reference, including old inputs and ambient focus", async t => {
   const base = mkdtempSync(join(tmpdir(), "csv-admission-model-")), template = join(base, "template");
   const initialized = spawnSync(process.execPath, [join(process.cwd(), "node_modules/@unbrained/pm-cli/dist/cli.js"), "init", "--defaults", "--path", template],
     { encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(base) } });
@@ -74,7 +75,7 @@ test("500 seeded admission/import/export sequences compare SDK state to a native
   const pool: { root: string; oracle: string; id: string; file: string; row: string[]; stale: boolean; ambient: string[] }[] = [];
   let operations = 0, exports = 0, roundTrips = 0;
   try {
-    for (let seed = 1; seed <= 500; seed++) {
+    for (let seed = 1; seed <= testDepth(500); seed++) {
       const rng = random(seed), slot = (seed - 1) % 4;
       let model = pool[slot];
       if (!model) {
@@ -149,7 +150,7 @@ test("500 seeded admission/import/export sequences compare SDK state to a native
       }
       if (seed % 100 === 0) t.diagnostic(`sequences=${seed}; operations=${operations}`);
     }
-    assert.equal(operations, 2000);
-    assert.ok(roundTrips >= 20); t.diagnostic(`exports=${exports}; full SDK-reference round trips=${roundTrips}`);
+    assert.equal(operations, testDepth(500) * 4);
+    assert.ok(roundTrips >= Math.ceil(20 * testDepth(500) / 500)); t.diagnostic(`exports=${exports}; full SDK-reference round trips=${roundTrips}`);
   } finally { rmSync(base, { recursive: true, force: true }); }
 });

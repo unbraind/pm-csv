@@ -33,3 +33,16 @@ The released shared stamper recognizes `defineExtension` descriptors, while this
 `node --test test/release-runtime-version.test.ts test/release-workflow.test.ts` proves an isolated `2099.1.2-3` build has matching package, manifest and built default-export versions. Removing only the caller preparation input makes the scratch-build test fail on the stale runtime assertion; the input is restored after the proof. The latest npm tarball inspected in this audit was `2026.11.13` and its runtime and manifest matched that version.
 
 The fleet-wide audit and exact registry receipts are in pm-graph’s `docs/release-runtime-stamping-audit.md`; the other affected callers are pm-context, pm-csv and pm-graph.
+
+
+## CI follow-up: descendant cleanup
+
+The release caller branch includes the current main CI harness. Process-tree
+regressions allow ten seconds for deadline fixtures and twenty seconds for the
+nested cancellation fixture to start on a contended host. Cleanup requires two
+consecutive stopped observations of both descendants, with a five-second scaled
+watchdog; one transient procfs observation cannot prematurely finish the check.
+The nested fixture lifetime scales with its parent harness deadline. The group
+termination contract, real descendant assertions and production budgets remain
+unchanged. A deterministic transient-observation regression fails when the
+second observation requirement is removed.
