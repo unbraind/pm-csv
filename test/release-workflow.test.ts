@@ -57,6 +57,7 @@ test('generation, checking and notes explicitly allow empty release sections bef
 
 test('package-owned approval and preparation inputs are preserved', () => {
   assert.deepEqual(caller.jobs.release.with, {
+  "prepare-script": "release:prepare",
   "reconcile-only": "${{ (github.event_name == 'schedule' && github.event.schedule == '41 * * * *') || inputs.retire-unpublished == true }}",
   "retire-unpublished": "${{ github.event_name == 'workflow_dispatch' && inputs.retire-unpublished == true }}",
   "release-enabled": "${{ github.ref == 'refs/heads/main' }}",

@@ -25,3 +25,11 @@ shared release implementation. Obsolete copied-workflow verifiers, planners and
 mutation helpers are retired where present; active package hooks remain tested.
 Coverage thresholds are unchanged. Package-specific restored tests and exact gate
 receipts are recorded in the rollout tracker item.
+
+## Runtime-version preparation
+
+The released shared stamper recognizes `defineExtension` descriptors, while this package exports a plain object. `prepare-script: release:prepare` now invokes `scripts/prepare-release-version.ts` after package/manifest stamping and before the shared build. It validates metadata parity and exactly one package-owned target before writing.
+
+`node --test test/release-runtime-version.test.ts test/release-workflow.test.ts` proves an isolated `2099.1.2-3` build has matching package, manifest and built default-export versions. Removing only the caller preparation input makes the scratch-build test fail on the stale runtime assertion; the input is restored after the proof. The latest npm tarball inspected in this audit was `2026.11.13` and its runtime and manifest matched that version.
+
+The fleet-wide audit and exact registry receipts are in pm-graph’s `docs/release-runtime-stamping-audit.md`; the other affected callers are pm-context, pm-csv and pm-graph.

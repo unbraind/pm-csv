@@ -28,3 +28,4 @@ jobs:
         inputs.retire-unpublished == true }}
       release-enabled: ${{ github.ref == 'refs/heads/main' }}
       alert-script: release:alert
+      prepare-script: release:prepare
