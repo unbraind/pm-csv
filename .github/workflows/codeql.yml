@@ -31,6 +31,8 @@ jobs:
       actions: read
       contents: read
     runs-on: ubuntu-latest
+    # Bounded like the CI jobs: a stuck analysis must not hold one of the account's 20 hosted slots for 6 h.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
