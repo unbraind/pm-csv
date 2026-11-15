@@ -31,6 +31,8 @@ jobs:
         node-version: [22, 26]
     env:
       PM_TEST_DEPTH: full
+      # Acceptance watchdogs allow slower local installs without becoming unbounded.
+      PM_TEST_TIME_SCALE: 3
     steps:
       - name: Checkout
         uses: actions/checkout@v7

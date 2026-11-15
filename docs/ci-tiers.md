@@ -59,9 +59,18 @@ because column ownership exceeded its fixed 2,400,000 ms test timeout. Individua
 job logs confirmed this as the only failing test; `gh --log-failed` returned no
 content. Seeded corpus tests now terminate by seed and transition counts, with
 the workflow guarding total job time. Those tests do not prove a latency SLA.
-The packed acceptance wrapper also drops its fixed ten-minute harness deadlines;
-its host/scenario and receipt counts bound the work. No product time contract
-needed scaling, so no `PM_TEST_TIME_SCALE` was added.
+Packed acceptance keeps its scenario/receipt counts and adds watchdogs for stalled
+external operations: five minutes per command and thirty minutes for the entire
+test invocation, both multiplied by `PM_TEST_TIME_SCALE` (default `1`, deep `3`).
+These are operational safety budgets, not product latency claims. Invalid or
+nonpositive factors fail rather than silently disabling timers. The async runner
+keeps the event loop available to enforce deadlines. On Linux/macOS, every command
+owns a process group and expiry sends group `SIGKILL`; Windows uses `taskkill /T /F`.
+The outer acceptance watchdog first gives its supervisor one second to forward
+termination to the active detached command, then hard-kills its own group. Timeout
+errors name the command, elapsed milliseconds and budget. A Node test timeout has
+a further ten seconds of cleanup headroom. Tiny child/grandchild fixtures prove
+both direct and nested termination without invoking package managers.
 
 `accept:packed` already installs the tarball using Bun project and global
 installs and the bunx ephemeral host CLI, then exercises CSV operations. It also
@@ -91,8 +100,11 @@ suite without a second skip control.
    seed expressions and batch sizes identical. Update expected counts and
    diagnostics. Support a partial final batch and retain all assertions. Default
    depth must be full. Remove machine-speed deadlines from finite corpora; use
-   operation budgets. Scale only real product time contracts with a documented
-   env factor when necessary.
+   operation budgets. Keep scaled watchdogs around external commands and the
+   overall packed invocation so a stalled install cannot hang local tests. Copy
+   the tested process-group runner and `PM_TEST_TIME_SCALE` contract (default `1`,
+   deep `3`), calibrating per-command/total budgets for the sibling's scenarios.
+   Distinguish these safety bounds from actual product latency assertions.
 5. Run quick coverage at the original thresholds. Turn late-seed-only branches
    into small explicit deterministic regression cases; never weaken thresholds
    or add exclusions. Run full coverage separately on the same host and record
@@ -107,7 +119,7 @@ suite without a second skip control.
    extra bunx smoke. Even the engines-floor tests may require Bun setup when
    the suite runs packed acceptance internally.
 7. Copy the deep workflow triggers, controller-owned runner expression,
-   per-ref cancellation, explicit full depth, and npm/Bun
+   per-ref cancellation, explicit full depth and watchdog scale `3`, and npm/Bun
    matrix gates. Start with the 120-minute timeout baseline; measure both full
    gates and document any larger package-specific bound (this pilot needs 240).
    Pick a per-repository off-peak cron minute distinct from its

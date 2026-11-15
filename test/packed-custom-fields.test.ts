@@ -1,6 +1,6 @@
 import "./support/isolated-environment.ts";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { runCommand, scaledBudget, ACCEPTANCE_TOTAL_BUDGET_MS, ACCEPTANCE_CLEANUP_GRACE_MS } from "../scripts/acceptance-process.ts";
 import { readFileSync } from "node:fs";
 import { packedScenarios } from "../scripts/packed-scenarios.ts";
 import { resolve } from "node:path";
@@ -50,16 +50,18 @@ test("packed scenarios retain distinct hosts and deduplicate matching npm versio
   ]);
 });
 
-// Fixed host/scenario counts bound this IO proof; runner speed is not its contract.
+// Finite scenarios keep their assertions; scaled watchdogs also stop stalled installs.
 // Installed hosts also exercise native rollback at every row position.
-test("packed acceptance proves custom columns on every installed host", () => {
+test("packed acceptance proves custom columns on every installed host", {
+  timeout: scaledBudget(ACCEPTANCE_TOTAL_BUDGET_MS) + ACCEPTANCE_CLEANUP_GRACE_MS + 10_000,
+}, async () => {
   const childEnvironment = { ...process.env };
   delete childEnvironment.PM_PATH;
-  const result = spawnSync(process.execPath, ["scripts/accept-packed.ts"], {
-    cwd: resolve(import.meta.dirname, ".."), encoding: "utf8",
-    env: childEnvironment, maxBuffer: 4 * 1024 * 1024,
+  const result = await runCommand(process.execPath, ["scripts/accept-packed.ts"], {
+    cwd: resolve(import.meta.dirname, ".."), env: childEnvironment,
+    timeoutMs: scaledBudget(ACCEPTANCE_TOTAL_BUDGET_MS),
+    terminationGraceMs: ACCEPTANCE_CLEANUP_GRACE_MS,
   });
-  assert.equal(result.error, undefined, result.error?.message ?? "Packed acceptance process error");
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const output = JSON.parse(result.stdout) as { ok: boolean; receipts: Array<Record<string, unknown>> };
   assert.equal(output.ok, true);
