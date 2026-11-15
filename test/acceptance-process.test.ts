@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import {
-  runCommand, scaledBudget, ACCEPTANCE_CHILD_BUDGET_MS, ACCEPTANCE_TOTAL_BUDGET_MS, ACCEPTANCE_CLEANUP_GRACE_MS,
+  runCommand, selectCommand, taskkillError, scaledBudget, ACCEPTANCE_CHILD_BUDGET_MS, ACCEPTANCE_TOTAL_BUDGET_MS, ACCEPTANCE_CLEANUP_GRACE_MS,
 } from "../scripts/acceptance-process.ts";
 
 const cwd = resolve(import.meta.dirname, "..");
@@ -83,6 +83,88 @@ for (const nested of [false, true]) test(`acceptance ${nested ? "outer" : "child
       try { pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[]; } catch { /* Fixture may not have started. */ }
     }
     for (const pid of pids) cleanup(pid);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows npm command selection prefers JavaScript entries and preserves direct Linux spawning", () => {
+  const execPath = "C:\\Program Files\\nodejs\\node.exe";
+  const npmEntry = "C:\\sandbox\\npm\\bin\\npm-cli.js";
+  const npxEntry = "C:\\sandbox\\npm\\bin\\npx-cli.js";
+  const bundled = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
+  const bundledNpx = bundled.replace("npm-cli.js", "npx-cli.js");
+  const entries = new Set([npmEntry, npxEntry, bundled, bundledNpx]);
+  const host = { platform: "win32" as const, execPath, npmExecPath: npmEntry, exists: (path: string) => entries.has(path) };
+  const args = ["install", "--ignore-scripts", "package@1.0.0"];
+  assert.deepEqual(selectCommand("npm.cmd", args, host), { command: execPath, args: [npmEntry, ...args], shell: false });
+  assert.deepEqual(selectCommand("npx.cmd", args, host), { command: execPath, args: [npxEntry, ...args], shell: false });
+  for (const npmExecPath of [undefined, "missing.js", "C:\\tools\\bun.exe"]) {
+    assert.deepEqual(selectCommand("npm.cmd", args, { ...host, npmExecPath }), { command: execPath, args: [bundled, ...args], shell: false });
+    assert.deepEqual(selectCommand("npx.cmd", args, { ...host, npmExecPath }), { command: execPath, args: [bundledNpx, ...args], shell: false });
+  }
+  assert.deepEqual(selectCommand("npm", args, { ...host, platform: "linux" }), { command: "npm", args, shell: false });
+  assert.deepEqual(selectCommand("npm.cmd", args, { ...host, platform: "linux" }), { command: "npm.cmd", args, shell: false });
+  assert.deepEqual(selectCommand("bun.exe", args, host), { command: "bun.exe", args, shell: false });
+});
+
+test("Windows npm shell fallback quotes fixed arguments and refuses shell expansion", () => {
+  const host = { platform: "win32" as const, execPath: "C:\\node\\node.exe", exists: () => false };
+  assert.deepEqual(selectCommand("npm.cmd", ["pack", "--pack-destination", "C:\\fixture space"], host), {
+    command: '"npm.cmd"', args: ['"pack"', '"--pack-destination"', '"C:\\fixture space"'], shell: true,
+  });
+  for (const unsafe of ['x"y', "%TEMP%", "!value!", "x&echo", "x|echo", "x>file", "x<file", "x^y", "x\nexit"]) {
+    assert.throws(() => selectCommand("npm.cmd", [unsafe], host), /Unsafe Windows npm shell fallback/);
+  }
+});
+
+test("taskkill outcome classification preserves root-exited timeouts and surfaces cleanup failures", () => {
+  assert.equal(taskkillError({ status: 0, stderr: "" }), undefined);
+  const spawnError = new Error("could not start taskkill");
+  assert.equal(taskkillError({ error: spawnError, status: null, stderr: null }), spawnError);
+  assert.equal(taskkillError({ status: 128, stderr: 'ERROR: The process "123" not found.' }), undefined);
+  assert.equal(taskkillError({ status: 128, stderr: 'ERROR: No running instance of the task.' }), undefined);
+  for (const status of [1, 5, 128, null]) {
+    const error = taskkillError({ status, stderr: "ERROR: Access is denied." });
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.includes(`status ${String(status)}`));
+    assert.match(error.message, /Access is denied/);
+  }
+  assert.match(taskkillError({ status: 1, stderr: "process not found" })?.message ?? "", /status 1/);
+});
+
+// Cross-process POSIX signal delivery is not exposed by Node on Windows.
+for (const signal of ["SIGTERM", "SIGINT"] as const) test(`external ${signal} cancels a nested runner and both fixture descendants`, {
+  skip: process.platform === "win32", timeout: scaledBudget(15_000),
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "acceptance-cancellation-"));
+  const pidsFile = join(root, "pids.json");
+  const outer = spawn(process.execPath, ["test/fixtures/sleeping-process-tree.mjs", "outer", pidsFile], {
+    cwd, detached: true, stdio: "ignore",
+  });
+  const closed = new Promise<number | null>((resolve, reject) => {
+    outer.once("error", reject);
+    outer.once("close", code => resolve(code));
+  });
+  let pids: number[] = [];
+  try {
+    for (let attempt = 0; attempt < scaledBudget(5_000) / 25 && !existsSync(pidsFile); attempt++) await delay(25);
+    pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[];
+    assert.equal(pids.length, 2, "nested child and grandchild must start before cancellation");
+    assert.ok(outer.kill(signal));
+    const code = await Promise.race([closed, delay(scaledBudget(10_000), undefined, { ref: false }).then(() => {
+      throw new Error("outer cancellation did not finish within its bounded cleanup");
+    })]);
+    assert.equal(code, signal === "SIGTERM" ? 143 : 130);
+    for (let attempt = 0; attempt < 50 && pids.some(running); attempt++) await delay(10);
+    assert.ok(!running(pids[0]), "cancelled nested child must be dead");
+    assert.ok(!running(pids[1]), "cancelled sleeping grandchild must be dead");
+  } finally {
+    if (existsSync(pidsFile)) pids = JSON.parse(readFileSync(pidsFile, "utf8")) as number[];
+    const supervisor = `${pidsFile}.supervisor`;
+    if (existsSync(supervisor)) pids.push(Number(readFileSync(supervisor, "utf8")));
+    if (outer.pid !== undefined) pids.push(outer.pid);
+    for (const pid of pids) cleanup(pid);
+    await closed;
     rmSync(root, { recursive: true, force: true });
   }
 });
