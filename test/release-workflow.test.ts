@@ -1,6 +1,6 @@
 /** Contracts owned by callers while the released workflow owns release execution. */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { isScalar, parseDocument } from 'yaml';
@@ -62,4 +62,11 @@ test('package-owned approval and preparation inputs are preserved', () => {
   "release-enabled": "${{ github.ref == 'refs/heads/main' }}",
   "alert-script": "release:alert"
 });
+});
+
+test('thin caller has no obsolete local release implementation artefacts', () => {
+  assert.equal(existsSync(".agents/pm/verify-release-yaml.mjs"), false, "Retired release-copy artefact: .agents/pm/verify-release-yaml.mjs");
+  assert.equal(caller.jobs.release.with['alert-script'], 'release:alert');
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+  assert.equal(manifest.scripts['release:alert'], 'bash scripts/alert-on-release-failure.sh');
 });

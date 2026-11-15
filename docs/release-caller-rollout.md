@@ -19,3 +19,9 @@ Only the orchestrator merges, dispatches and verifies publication.
 The caller contracts replace assertions about removed private release implementation.
 Implementation behavior belongs to the pinned pm-ops release harness. Package-owned
 approval, script and permission contracts remain checked locally.
+
+Round 2 preserves package changelog and publication checks independently of the
+shared release implementation. Obsolete copied-workflow verifiers, planners and
+mutation helpers are retired where present; active package hooks remain tested.
+Coverage thresholds are unchanged. Package-specific restored tests and exact gate
+receipts are recorded in the rollout tracker item.
