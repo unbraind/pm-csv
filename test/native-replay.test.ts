@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -99,34 +100,34 @@ test("unchanged atomic CSV with every importable field and accepted native forms
   } finally { process.env.PATH = oldPath; rmSync(f.base, { recursive: true, force: true }); }
 });
 
-test("500 seeded accepted-value sequences replay joins and lineage without SDK state changes", { timeout: 600000 }, async () => {
+test("seeded accepted-value sequences replay joins and lineage without SDK state changes", async () => {
   // Bound each native corpus so graph/index work does not grow quadratically.
   // Each seed still imports and replays both APIs, including immutable history.
-  for (let batch = 0; batch < 20; batch++) {
+  for (let batch = 0; batch * 25 < testDepth(500); batch++) {
     const f = fixture();
     try {
       const variants = ["none", "null", " NONE ", "\tNuLl\t", "Café 😀", " MiXeD ", "e\u0301", ""];
       const table = [["key", "title", "body", "type", "status", "priority", "tags", "assignee", "sprint", "release", "estimatedMinutes", "acceptanceCriteria"]];
-      for (let seed = batch * 25 + 1; seed <= (batch + 1) * 25; seed++) {
+      for (let seed = batch * 25 + 1; seed <= Math.min((batch + 1) * 25, testDepth(500)); seed++) {
         const rng = random(seed), pick = () => variants[Math.floor(rng() * variants.length)];
         table.push([`k${seed}`, `Seed ${seed} café`, `\n\nBody ${seed}\r\n😀  \n`, "Task", "open", String(seed % 5), " A,a,α ", pick(), pick(), pick(), String(seed % 100), `One ${seed};Two 😀`]);
       }
       const fields = Object.fromEntries(table[0].slice(1).map(field => [field, field]));
       const preview = await previewJoins(f.root, { version: 1, tables: [{ name: "tasks", key: "key", csv: serializeCSV(table, ","), fields, references: [] }] });
-      assert.ok(preview.plan); assert.equal((await applyJoins(f.root, preview.plan, { author: "replay-test" })).applied, 25);
+      assert.ok(preview.plan); assert.equal((await applyJoins(f.root, preview.plan, { author: "replay-test" })).applied, table.length - 1);
       const before = await evidence(f.root, preview.plan.ids);
-      assert.equal((await applyJoins(f.root, preview.plan, { author: "replay-test" })).unchanged, 25);
+      assert.equal((await applyJoins(f.root, preview.plan, { author: "replay-test" })).unchanged, table.length - 1);
       assert.deepEqual(await evidence(f.root, preview.plan.ids), before);
       // Lineage has its own stable keys and hashes, and exposes nine native fields.
       const columns = ["title", "body", "type", "status", "priority", "tags", "assignee", "sprint", "release"] as const;
       const lineage = [[...columns], ...table.slice(1).map(row => columns.map(field => row[table[0].indexOf(field)]))];
-      const imported = await importLineage(f.root, lineage, { columns }); assert.equal(imported.receipt.imported, 25);
+      const imported = await importLineage(f.root, lineage, { columns }); assert.equal(imported.receipt.imported, table.length - 1);
       const ids = imported.manifest.rows.map(row => row.item!); const saved = await evidence(f.root, ids);
-      assert.equal((await importLineage(f.root, lineage, { columns })).receipt.replayed, 25);
+      assert.equal((await importLineage(f.root, lineage, { columns })).receipt.replayed, table.length - 1);
       assert.deepEqual(await evidence(f.root, ids), saved);
     } finally { rmSync(f.base, { recursive: true, force: true }); }
   }
-  console.log("native accepted-value seeds=1..500; join sequences=500; lineage sequences=500; unchanged SDK reads=1000");
+  console.log(`native accepted-value seeds=1..${testDepth(500)}; unchanged SDK reads=${testDepth(500) * 2}`);
 });
 
 test("edit-session replay canonicalizes every stored field with the SDK, including leading blank body lines and literal sentinels", async () => {
