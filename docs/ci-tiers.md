@@ -35,6 +35,18 @@ the same ref and the pilot job timeout is 240 minutes. This is a measured except
 host, so two full gates need over 161 minutes before packing or other checks. Release remains at 03:23 UTC;
 weekly CodeQL remains at 03:17 UTC on Monday, including lockfile-only changes.
 
+`runs-on` is resolved when a job is queued, so switching `PM_LOCAL_DEEP` to `off`
+affects only runs queued afterwards. Deep runs already waiting for a `pm-local`
+runner would otherwise stay queued until GitHub fails them after 24 hours. The
+fleet's local-runner controller recovers them in the same fallback step: it
+cancels every queued `CI Deep` run of the repository, then dispatches one
+`ci-deep.yml` run on `main`, which resolves to `ubuntu-latest`. One run on the
+newest main covers the cancelled ones, because each deep run tests a whole
+commit and the concurrency group already keeps only the latest. When a local
+host answers again, the controller sets `PM_LOCAL_DEEP=on`, and later runs
+queue locally. No operator step is needed. To recover by hand, cancel the queued
+run and run `gh workflow run ci-deep.yml --ref main` while the variable is `off`.
+
 `PM_TEST_DEPTH=quick` selects the first 50 of each existing 500-case deterministic
 sequence. `full`, an unset variable, and any unrecognized value keep full depth.
 The helper uses one tenth (rounded up), with a floor of 25 capped by the original
