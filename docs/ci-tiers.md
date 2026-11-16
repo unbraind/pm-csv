@@ -5,11 +5,12 @@ runners. Only PRs and manual dispatch start this tier. Superseded PR runs cancel
 Docs/tracker-only PRs keep both checks green by running their applicable gates.
 There is no standalone markdown linter in this package. The cheap path runs
 the existing packaging/documentation, shipped-changelog and identity suites.
-Executable `.mjs`, `.cjs`, `.js` and `.ts` files anywhere under `.agents/pm/`
-select the code path and remain included in CodeQL. CodeQL runs once in
+Executable JavaScript, TypeScript and shell files under `.agents/pm/` and
+`docs/`, plus all tracker extensions, select code CI. Executable tracker files
+and all tracker extensions remain included in CodeQL. CodeQL runs once in
 its own workflow; its table row describes triggers, not an extra matrix job.
 
-| Check | Code PR Node 22 | Code PR Node 26 | Docs/tracker-only PR (both) | Deep Node 22 + 26 |
+| Check | Code PR Node 22 | Code PR Node 26 | Docs/tracker-only PR (both) | Deep Node 22/26 × npm/Bun |
 | --- | --- | --- | --- | --- |
 | npm ci / prepare merge drivers | yes | yes | yes | yes |
 | Strict tracker health / merge drivers | — | yes | yes | yes |
@@ -26,14 +27,17 @@ its own workflow; its table row describes triggers, not an extra matrix job.
 | CodeQL | matching paths, separate workflow | matching paths, separate workflow | path-filtered | separate weekly scan |
 
 Deep runs on main pushes, daily at 02:47 UTC, and manual dispatch. It never
-blocks PRs. Its checks are named `deep (22)` and `deep (26)` so manual branch
-runs cannot match the required PR check names. Local jobs queue even when local slots are busy; the fleet controller
+blocks PRs. Its checks are named `deep (22, npm)`, `deep (22, bun)`,
+`deep (26, npm)` and `deep (26, bun)` so manual branch runs cannot match the required PR check names. Local jobs queue even when local slots are busy; the fleet controller
 sets `PM_LOCAL_DEEP=off` only after no local host has been reachable for ten
-minutes. The fallback is GitHub-hosted. Deep concurrency cancels older runs of
-the same ref and the pilot job timeout is 240 minutes. This is a measured exception to the
-120-minute fleet baseline: full coverage alone took 80m 40.58s on the shared
-host, so two full gates need over 161 minutes before packing or other checks. Release remains at 03:23 UTC;
-weekly CodeQL remains at 03:17 UTC on Monday, including lockfile-only changes.
+minutes. The fallback is GitHub-hosted. Deep concurrency preserves an active run and
+keeps one pending run per ref. Each matrix job executes one complete gate with
+a 120-minute timeout. Historical full coverage measured 80m 40.58s on the shared
+host; splitting npm and Bun removes the former two-gate 240-minute exception.
+Local runners retain their persistent npm cache and preinstalled Bun; only hosted
+runners restore the GitHub npm cache and run setup-bun. Every job logs Bun's version.
+Release remains at 03:23 UTC; weekly CodeQL remains at 03:17 UTC on Monday,
+including lockfile-only changes in that scheduled scan.
 
 `runs-on` is resolved when a job is queued, so switching `PM_LOCAL_DEEP` to `off`
 affects only runs queued afterwards. Deep runs already waiting for a `pm-local`
@@ -112,21 +116,21 @@ suite without a second skip control.
 6. Copy the PR workflow's concurrency, hosted routing, Node 22/26 required job
    names, full checkout and NUL-safe base...head change detection with rename folding
    disabled (source-to-docs moves must retain the source deletion) as fixed
-   template. Keep the generic `.mjs|.cjs|.js|.ts` tracker-code exception before
+   template. Keep the generic executable tracker/docs and tracker-extension exceptions before
    the cheap allowlist; Bash `*` also matches nested tracker directories. Adapt the embedded docs/identity test commands,
    Node floor, release gate
    and Bun smoke to the package. Inspect packed acceptance before omitting an
    extra bunx smoke. Even the engines-floor tests may require Bun setup when
    the suite runs packed acceptance internally.
 7. Copy the deep workflow triggers, controller-owned runner expression,
-   per-ref cancellation, explicit full depth and watchdog scale `3`, and npm/Bun
-   matrix gates. Start with the 120-minute timeout baseline; measure both full
-   gates and document any larger package-specific bound (this pilot needs 240).
+   non-cancelling per-ref concurrency, explicit full depth and watchdog scale `3`,
+   and a Node × package-manager matrix with one complete gate per job. Use the
+   120-minute timeout for each gate.
    Pick a per-repository off-peak cron minute distinct from its
    release and CodeQL schedules. Never add a PR trigger or required deep check.
 8. Copy CodeQL's ordered `paths` on push and PR: include `**`, exclude tracker
-   data/docs/lockfiles, then re-include `.agents/pm/**/*.mjs`, `**/*.cjs`,
-   `**/*.js` and `**/*.ts` under that tracker root. Later patterns override
+   data/docs/lockfiles, then re-include every executable tracker suffix
+   (`mjs,cjs,js,jsx,ts,tsx,mts,cts,sh`) and `.agents/pm/extensions/**`. Later patterns override
    earlier exclusions. Keep workflow `permissions: {}`, explicit job permissions,
    the weekly scan, pinned actions and PR cancellation. Adapt lockfile names
    if the sibling has additional lockfiles.
@@ -155,3 +159,24 @@ For queue-inclusive measurements, read the jobs rather than only step durations:
 gh api repos/OWNER/REPO/actions/runs/RUN_ID/jobs --paginate \
   --jq '.jobs[] | {name, created_at, started_at, completed_at}'
 ```
+
+## Final-template follow-up (2026-11-16)
+
+Latest successful PR CI: [run 43757855030](https://github.com/unbraind/pm-csv/actions/runs/43757855030).
+These are historical workflow job measurements, not a controlled benchmark of this change.
+
+| Job | Execution (started → completed) | Wall time (created → completed) |
+| --- | --- | --- |
+| test (22) | 6m06s | 6m08s |
+| test (26) | 9m35s | 9m37s |
+
+Every measured job executed within the 15-minute quick-tier target. Queueing
+explains any larger wall time. No test-depth adjustment or sharding is included.
+CodeQL is optional: ordered paths exclude tracker data, Markdown, docs and
+lockfiles, then restore all executable tracker suffixes (`mjs,cjs,js,jsx,ts,tsx,mts,cts,sh`)
+and `.agents/pm/extensions/**`. Required CI still runs on every PR.
+
+The workflow contracts strictly parse all three tier YAML files, exercise each PR
+classifier against data and executable paths, and verify one full gate per matrix
+job, self-hosted setup, the runner expression and non-cancelling deep concurrency.
+Full-depth execution remains post-merge deep-CI evidence.
