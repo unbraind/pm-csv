@@ -6,13 +6,14 @@ status: in_progress
 priority: 2
 tags[1]: "gh:unbraind/pm-csv#259"
 created_at: "2026-11-16T12:11:18.315Z"
-updated_at: "2026-11-16T12:59:04.364Z"
+updated_at: "2026-11-16T13:28:18.959Z"
 author: codex-sol
-comments[4]{created_at,author,text}:
+comments[5]{created_at,author,text}:
   "2026-11-16T12:11:30.491Z",codex-sol,"Merged current main and retained both bounded-dispatch caller pins. No failed checks at the inspected PR head. Thread PRRT_kwDOSYpI8s63oa6P is a valid conditional upstream behavior concern: GITHUB_TOKEN merges do not trigger push workflows. The pinned sync implementation checks branch freshness before arming auto-merge (lines 770-785). Read-only repository APIs show allow_auto_merge=true, classic required checks strict=false, and no applicable branch rules. Thus the strict-check guard currently leaves auto-merge unarmed. Refuse adding nonexistent App credentials or changing secrets/settings (outside this task); no independent caller auto-merge input exists, and empty ci-workflows would disable the requested CI dispatch. Preserve this operational caveat; no thread reply or resolution."
   "2026-11-16T12:23:01.361Z",codex-sol,"Read-only GraphQL confirms requiresStatusChecks=true and requiresStrictStatusChecks=false, matching REST; branch rules API returns an empty list. Both pinned callee guard functions check this before gh pr merge --auto. Exact caller-contract test and typecheck pass, tracker validation passes. The repository defines no npm lint script. Quick npm suite remains running; no CI completion or auto-merge execution claimed."
   "2026-11-16T12:30:18.331Z",codex-sol,"Prepared verification commit b1fbb53 covers the exact caller contract and review refusal evidence. Thread PRRT_kwDOSYpI8s63oa6P remains untouched remotely; the current strict-check guard prevents auto-merge arming, while future branch-protection changes could expose the documented token behavior. Typecheck, caller contract, tracker validation and changelog:check pass. Quick npm tests remain running."
   "2026-11-16T12:58:56.323Z",codex-sol,"Caller pins and review disposition are committed in b1fbb53. Exact caller regression, typecheck, changelog:check and tracker validation pass; no lint script exists. Full quick npm suite remains active at receipt preparation with no failure reported so far; absence of a failure is not a passing terminal result. The conditional token auto-merge risk remains documented, with live strict-check guard currently refusing automatic landing. Release the pin claim for orchestrator review."
+  "2026-11-16T13:28:18.958Z",codex-sol,"Terminal PM_TEST_DEPTH=quick npm test exits 1 after 4367564 ms: 486 tests, 485 pass, 0 fail, 1 cancelled, 0 skipped/todo. Only test/repeated-targets.test.ts:45 is cancelled (180008 ms), with test timed out after 180000ms; this is an unchanged hardcoded harness deadline. Follow-up pm-csv-repeated-targets-timeout owns investigation. Exact caller regression, typecheck, changelog:check and tracker validation pass; no lint script exists. Full quick success is not claimed, and review-thread current guarded-landing evidence remains unchanged."
 files[3]{path,scope}:
   .github/workflows/pm-github-closeout.yml,project
   .github/workflows/pm-github-sync.yml,project
