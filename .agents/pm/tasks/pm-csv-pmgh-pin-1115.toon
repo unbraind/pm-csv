@@ -1,0 +1,22 @@
+id: pm-csv-pmgh-pin-1115
+title: Verify the pm-github 2026.11.15 caller pins and review concerns
+description: ""
+type: Task
+status: in_progress
+priority: 2
+tags[1]: "gh:unbraind/pm-csv#259"
+created_at: "2026-11-16T12:11:18.315Z"
+updated_at: "2026-11-16T12:23:01.361Z"
+assignee: codex-sol
+claim_principal: codex-sol
+author: codex-sol
+comments[2]{created_at,author,text}:
+  "2026-11-16T12:11:30.491Z",codex-sol,"Merged current main and retained both bounded-dispatch caller pins. No failed checks at the inspected PR head. Thread PRRT_kwDOSYpI8s63oa6P is a valid conditional upstream behavior concern: GITHUB_TOKEN merges do not trigger push workflows. The pinned sync implementation checks branch freshness before arming auto-merge (lines 770-785). Read-only repository APIs show allow_auto_merge=true, classic required checks strict=false, and no applicable branch rules. Thus the strict-check guard currently leaves auto-merge unarmed. Refuse adding nonexistent App credentials or changing secrets/settings (outside this task); no independent caller auto-merge input exists, and empty ci-workflows would disable the requested CI dispatch. Preserve this operational caveat; no thread reply or resolution."
+  "2026-11-16T12:23:01.361Z",codex-sol,"Read-only GraphQL confirms requiresStatusChecks=true and requiresStrictStatusChecks=false, matching REST; branch rules API returns an empty list. Both pinned callee guard functions check this before gh pr merge --auto. Exact caller-contract test and typecheck pass, tracker validation passes. The repository defines no npm lint script. Quick npm suite remains running; no CI completion or auto-merge execution claimed."
+files[3]{path,scope}:
+  .github/workflows/pm-github-closeout.yml,project
+  .github/workflows/pm-github-sync.yml,project
+  test/pm-github-callers.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/pm-github-callers.test.ts,project,codex-sol,"2026-11-16T12:13:44.548Z",local_mutation,ci/pm-github-2026.11.15-bounded-ci-dispatch
+body: ""
