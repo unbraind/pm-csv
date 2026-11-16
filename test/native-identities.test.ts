@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -64,7 +65,7 @@ function invalid(error: unknown): boolean {
   return true;
 }
 
-test("500 native identity families reject normalized collisions and noncanonical artifact spellings", async () => {
+test("native identity families reject normalized collisions and noncanonical artifact spellings", async () => {
   const root = fixture();
   try {
     const plan = (await previewJoins(root, source())).plan!;
@@ -72,7 +73,7 @@ test("500 native identity families reject normalized collisions and noncanonical
     for (const ids of [new Array<string>(1), [undefined] as unknown as string[]]) {
       assert.throws(() => assertCanonicalMutationIds(ids, "review", () => new Error("Identity refusal")), /Identity refusal/);
     }
-    for (let seed = 1; seed <= 500; seed++) {
+    for (let seed = 1; seed <= testDepth(500); seed++) {
       const prefix = ["review", "review-", "pm-", "other"][seed % 4], bare = `key${seed}`;
       const canonical = normalizeItemId(bare, prefix), second = normalizeItemId(`second${seed}`, prefix);
       assert.doesNotThrow(() => assertCanonicalMutationIds([canonical, second], prefix, () => new Error("Identity refusal")));

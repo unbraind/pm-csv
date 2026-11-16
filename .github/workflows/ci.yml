@@ -1,17 +1,26 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Same PR grouping as the local-runner pilot (#254); manual runs stay independent.
+concurrency:
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
+    # Required checks stay on fast GitHub-hosted hardware.
     runs-on: ubuntu-latest
+    # Quick tier executes in about 6-7 min. A hung step must not hold a hosted slot for the default 6 h:
+    # on 2026-11-15 three fleet release-gate jobs hung for 90+ min until another session cancelled them.
+    timeout-minutes: 30
+    env:
+      PM_TEST_DEPTH: quick
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +34,32 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # Checkout must precede this first decision. NUL delimiters handle unusual
+      # filenames; compare the actual PR endpoints, not the synthetic merge commit.
+      # Disable rename folding so moving source into docs still counts its deletion.
+      - name: Detect code changes
+        id: changes
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            code=false
+            git diff --name-only --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-changed-paths"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                # Executable tracker files use the same code tier in every package.
+                .agents/pm/*.mjs|.agents/pm/*.cjs|.agents/pm/*.js|.agents/pm/*.ts) code=true ;;
+                .agents/pm/*|*.md|docs/*|CHANGELOG.md|LICENSE) ;;
+                *) code=true ;;
+              esac
+            done < "$RUNNER_TEMP/ci-changed-paths"
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -32,15 +67,18 @@ jobs:
           cache: npm
 
       - name: Setup Bun
+        if: steps.changes.outputs.code == 'true'
         uses: oven-sh/setup-bun@v2.2.0
 
       - name: Install dependencies
         run: npm ci
 
       - name: Verify release workflow contract
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         run: npm run verify:release-workflow
 
       - name: Verify tracked pm project health
+        if: steps.changes.outputs.code != 'true' || matrix.node-version == 26
         shell: bash
         run: |
           set -euo pipefail
@@ -58,11 +96,24 @@ jobs:
           # still exiting successfully.
           ./node_modules/.bin/pm health --strict-exit --require-merge-drivers
 
-      - name: Full npm release gate
+      # No standalone markdown linter exists. These small suites enforce the
+      # existing README/docs, shipped changelog and public commit contracts.
+      - name: Check documentation and tracker changes
+        if: steps.changes.outputs.code != 'true'
+        run: |
+          npm run changelog:check
+          node --test test/packaging.test.ts test/shipped-changelog.test.ts test/identity-audit.test.ts
+
+      - name: Engines floor tests
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 22
+        run: npm test
+
+      - name: Quick npm release gate
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         run: npm run release:check
 
-      - name: Full Bun release gate
-        run: bun run release:check
-
+      # accept:packed in the gate already exercises Bun project/global installs
+      # and bunx ephemeral CLI + tarball extension installs (with real CSV IO).
       - name: Verify Bun can install the package graph
+        if: steps.changes.outputs.code == 'true' && matrix.node-version == 26
         run: bun install --no-save

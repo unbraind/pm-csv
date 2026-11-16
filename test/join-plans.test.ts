@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, cpSync, mkdirSync, symlinkSync, truncateSync } from "node:fs";
@@ -307,14 +308,14 @@ async function nativeState(root: string, id: string): Promise<unknown> {
   return { body: doc.body, ...Object.fromEntries(fields.map(field => [field, doc.metadata[field]])), dependencies: doc.metadata.dependencies?.map(e => ({ id: e.id, kind: e.kind })) };
 }
 
-test("500 seeded model sequences compare SDK readback with native reference state across replay, variants and custom roles", { timeout: 900000 }, async t => {
+test("seeded model sequences compare SDK readback with native reference state across replay, variants and custom roles", async t => {
   const template = fixture();
   const base = mkdtempSync(join(tmpdir(), "csv-join-model-"));
   const pool: { root: string; oracle: string; source: JoinInput; plan: JoinPlan; edited: boolean; ambient: string[]; cwd: string[] }[] = [];
   let operations = 0;
   const originalCwd = process.cwd();
   try {
-    for (let seed = 1; seed <= 500; seed++) {
+    for (let seed = 1; seed <= testDepth(500); seed++) {
       const rng = random(seed), slot = (seed - 1) % 16;
       let model = pool[slot];
       if (!model) {
@@ -404,7 +405,7 @@ test("500 seeded model sequences compare SDK readback with native reference stat
       }
       if (seed % 100 === 0) t.diagnostic(`seeded join sequences=${seed}; operations=${operations}`);
     }
-    assert.equal(operations, 4000);
+    assert.equal(operations, testDepth(500) * 8);
   } finally { process.chdir(originalCwd); rmSync(template, { recursive: true, force: true }); rmSync(base, { recursive: true, force: true }); }
 });
 

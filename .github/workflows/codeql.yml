@@ -3,12 +3,37 @@ name: CodeQL
 on:
   push:
     branches: [main]
+    # Ordered filters: tracker data is cheap, executable tracker code still scans.
+    paths:
+      - '**'
+      - '!.agents/pm/**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!package-lock.json'
+      - '.agents/pm/**/*.mjs'
+      - '.agents/pm/**/*.cjs'
+      - '.agents/pm/**/*.js'
+      - '.agents/pm/**/*.ts'
   pull_request:
     branches: [main]
+    # Ordered filters: tracker data is cheap, executable tracker code still scans.
+    paths:
+      - '**'
+      - '!.agents/pm/**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!package-lock.json'
+      - '.agents/pm/**/*.mjs'
+      - '.agents/pm/**/*.cjs'
+      - '.agents/pm/**/*.js'
+      - '.agents/pm/**/*.ts'
   schedule:
     # Weekly CodeQL scan, minute/hour staggered across the pm fleet so the
     # repos do not all fire against the API at the same time.
     - cron: "17 3 * * 1"
+
+# Jobs opt into only the permissions they need.
+permissions: {}
 
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +46,8 @@ jobs:
       actions: read
       contents: read
     runs-on: ubuntu-latest
+    # Bounded like the CI jobs: a stuck analysis must not hold one of the account's 20 hosted slots for 6 h.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
