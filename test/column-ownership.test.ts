@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cpSync, mkdtempSync, mkdirSync, symlinkSync, rmSync, writeFileSync } from "node:fs";
@@ -98,20 +99,21 @@ test("review regression: title-only keyed updates preserve scope, links, custom 
   } finally { process.env.PATH = oldPath; rmSync(f.base, { recursive: true, force: true }); }
 });
 
-test("500 seeded column-ownership sequences obey silence, unchanged roundtrip, exact edits and old-input replay with SDK read-back", { timeout: 2400000 }, async t => {
+test("seeded column-ownership sequences obey silence, unchanged roundtrip, exact edits and old-input replay with SDK read-back", async t => {
   const f = fixture(), oldPath = process.env.PATH;
   let sequences = 0, transitions = 0;
   try {
     process.env.PATH = f.bin;
     const parents: string[] = [];
     for (let i = 0; i < 3; i++) parents.push((await create({ title: `Parent ${i}`, unset: ["parent"] }, { pmRoot: f.root })).item.id);
-    for (let batch = 0; batch < 25; batch++) {
+    // Bound work by cases and four transitions per case, not runner speed.
+    for (let batch = 0; batch * 20 < testDepth(500); batch++) {
       const key = ["title", "id", "external_key", "custom_code"][batch % 4];
       const subsetRandom = random(Math.imul(batch + 1, 2654435761));
       const selected = ["title", key, ...FIELDS.filter(field => field !== "title" && subsetRandom() < .6)];
       const headers = [...new Set([...selected, "custom_data"])];
       const rows: { id: string; values: Record<string, string>; original: Record<string, string> }[] = [];
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < Math.min(20, testDepth(500) - batch * 20); i++) {
         const seed = batch * 20 + i + 1, rng = random(seed * 2654435761);
         const title = `Seed ${seed}`, external = `external-${seed}`, custom = `code-${seed}`;
         const created = await create({ title, parent: parents[i % 3], status: "in_progress", priority: i % 5,
@@ -173,6 +175,6 @@ test("500 seeded column-ownership sequences obey silence, unchanged roundtrip, e
         assert.deepEqual(await state(f.root, row.id), await state(f.oracle, row.id), `older replay seed=${row.original.title}`); transitions++; }
       t.diagnostic(`column sequences=${sequences}; transitions=${transitions}; seeds=1..${sequences}`);
     }
-    assert.equal(sequences, 500); assert.equal(transitions, 2000);
+    assert.equal(sequences, testDepth(500)); assert.equal(transitions, testDepth(500) * 4);
   } finally { process.env.PATH = oldPath; rmSync(f.base, { recursive: true, force: true }); }
 });

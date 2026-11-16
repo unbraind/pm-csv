@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 2026.11.15 - 2026-11-15
 
-### Other
+### Dependencies
 
-- Close delivered pm items and reserve in progress for active work (2026-10-24) ([pm-csv-6cjh](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-6cjh.toon))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#256](https://github.com/unbraind/pm-csv/pull/256))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#255](https://github.com/unbraind/pm-csv/pull/255))
+- Bump the pm-toolchain group with 2 updates ([#250](https://github.com/unbraind/pm-csv/pull/250))
 
 ## 2026.11.13 - 2026-11-13
 
@@ -19,7 +21,6 @@
 ### Fixed
 
 - Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
-- Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
 
 ## 2026.11.4 - 2026-11-04
 
@@ -30,6 +31,14 @@
 ### Closed
 
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-208](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-208.toon))
+
+## 2026.11.1 - 2026-11-01
+
+No changes.
+
+## 2026.10.31 - 2026-10-31
+
+No changes.
 
 ## 2026.10.30 - 2026-10-30
 
@@ -120,6 +129,26 @@
 - Bump the pm-toolchain group across 1 directory with 3 updates ([#170](https://github.com/unbraind/pm-csv/pull/170))
 - Bump eslint ([#171](https://github.com/unbraind/pm-csv/pull/171))
 
+## 2026.10.18 - 2026-10-18
+
+No changes.
+
+## 2026.10.17 - 2026-10-17
+
+No changes.
+
+## 2026.10.16 - 2026-10-16
+
+No changes.
+
+## 2026.10.15 - 2026-10-15
+
+No changes.
+
+## 2026.10.14 - 2026-10-14
+
+No changes.
+
 ## 2026.10.12 - 2026-10-12
 
 ### Added
@@ -136,6 +165,10 @@
 
 - Auto-merge green Dependabot updates and group the pm toolchain into one daily PR ([pm-csv-dida](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-dida.toon))
 
+## 2026.10.4 - 2026-10-04
+
+No changes.
+
 ## 2026.9.26 - 2026-09-26
 
 ### Fixed
@@ -149,6 +182,10 @@
 ### Closed
 
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-134](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-134.toon))
+
+## 2026.9.23 - 2026-09-23
+
+No changes.
 
 ## 2026.9.18 - 2026-09-18
 
@@ -167,6 +204,10 @@
 ### Other
 
 - Certify pm CLI 2026.9.10 and pick up the canonical auditor fixes the lockfile was holding back ([pm-csv-86p1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-86p1.toon))
+
+## 2026.9.9 - 2026-09-09
+
+No changes.
 
 ## 2026.9.8 - 2026-09-08
 
@@ -308,6 +349,10 @@
 
 - Resolve pm-changelog to the release that derives release dates in UTC ([pm-csv-dzlr](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-dzlr.toon))
 
+## 2026.8.3 - 2026-08-03
+
+No changes.
+
 ## 2026.7.29 - 2026-07-29
 
 ### Added
@@ -365,6 +410,10 @@
 
 - Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-csv-9c2s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-9c2s.toon))
 
+## 2026.7.22 - 2026-07-22
+
+No changes.
+
 ## 2026.7.19-1 - 2026-07-19
 
 ### Added
@@ -385,6 +434,10 @@
 
 - Closed: Fix --no-header: host rejects bare --no- flag as negation of missing --header ([pm-csv-ik4l](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-ik4l.toon))
 
+## 2026.7.13 - 2026-07-13
+
+No changes.
+
 ## 2026.7.11 - 2026-07-11
 
 ### Added
@@ -394,6 +447,14 @@
 ### Other
 
 - Adopt current pm SDK and TypeScript 7 toolchain ([pm-csv-axm5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-axm5.toon))
+
+## 2026.7.10 - 2026-07-10
+
+No changes.
+
+## 2026.7.7 - 2026-07-07
+
+No changes.
 
 ## 2026.7.6 - 2026-07-06
 
@@ -405,6 +466,22 @@
 
 - Align Node engine with pm CLI runtime ([pm-csv-2thu](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-2thu.toon))
 - Regenerate CHANGELOG after pm close item ([pm-csv-137e](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-137e.toon))
+
+## 2026.6.14 - 2026-06-14
+
+No changes.
+
+## 2026.6.13 - 2026-06-13
+
+No changes.
+
+## 2026.6.10-1 - 2026-06-10
+
+No changes.
+
+## 2026.6.10 - 2026-06-09
+
+No changes.
 
 ## 2026.6.9 - 2026-06-09
 
@@ -432,6 +509,10 @@
 
 - Harden release readiness checks ([pm-csv-wn9s](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-wn9s.toon))
 - Align package dependencies to pm CLI/SDK 2026.6.6 ([pm-csv-eio7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-eio7.toon))
+
+## 2026.6.5 - 2026-06-05
+
+No changes.
 
 ## 2026.6.4 - 2026-06-04
 
@@ -477,6 +558,14 @@
 ### Fixed
 
 - Command handlers threw plain Error (no exitCode) → runtime double-invocation ([pm-csv-017m](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-017m.toon))
+
+## 2026.5.31 - 2026-05-31
+
+No changes.
+
+## 2026.5.30 - 2026-05-30
+
+No changes.
 
 ## 2026.5.29 - 2026-05-29
 

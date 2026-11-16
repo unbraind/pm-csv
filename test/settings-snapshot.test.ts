@@ -1,4 +1,5 @@
 import "./support/isolated-environment.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
@@ -122,7 +123,7 @@ test("snapshot scopes isolate trackers and concurrent operations; SDK settings w
       const value = (await get(native.item.id, {}, { pmRoot: root })).item.status;
       assert.ok(typeof value === "string"); oracles.set(JSON.stringify([type, status]), value);
     }
-    for (let seed = 1; seed <= 500; seed++) {
+    for (let seed = 1; seed <= testDepth(500); seed++) {
       const type = ["Work", "work", "WORK"][seed % 3];
       const explicit = seed % 2 ? {} : { status: "in_progress" };
       const pinned = pinCreateDefaults({ title: "Seed", type, ...explicit }, settings);

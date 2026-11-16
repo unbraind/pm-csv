@@ -1,6 +1,6 @@
 {
   "name": "pm-csv",
-  "version": "2026.11.13",
+  "version": "2026.11.15",
   "description": "CSV importer and exporter for pm-cli",
   "repository": {
     "type": "git",
@@ -27,24 +27,26 @@
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run duplicates",
-    "verify:release-workflow": "node .agents/pm/verify-release-yaml.mjs",
+    "verify:release-workflow": "node --test --test-concurrency=2 test/release-workflow.test.ts",
     "verify:release-publish-attestation": "node scripts/verify-release-publish-attestation.ts",
     "lint": "eslint --config scripts/eslint.config.ts --max-warnings=0 .",
     "duplicates": "jscpd --config .jscpd.json",
     "audit:prod": "node --input-type=module -e \"import { spawnSync } from 'node:child_process'; import { devNull } from 'node:os'; const env = { ...process.env, npm_config_userconfig: devNull, NPM_CONFIG_USERCONFIG: devNull }; for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_config_allow_scripts') delete env[key]; const win = process.platform === 'win32'; const r = spawnSync(win ? 'npm.cmd' : 'npm', ['audit', '--omit=dev', '--ignore-scripts'], { stdio: 'inherit', env, shell: win }); process.exit(r.status ?? 1);\"",
     "pack:dry-run": "npm pack --dry-run",
     "accept:packed": "node scripts/accept-packed.ts",
-    "changelog:full": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --date-from-version --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release",
-    "changelog:check": "npm run changelog:full -- --check",
+    "changelog:full": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --date-from-version --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release --include-empty",
+    "changelog:check": "npm run changelog:full -- --check --include-empty",
     "release:check": "npm run typecheck && npm run verify:release-workflow && npm run build && npm run lint && npm run duplicates && npm run docstring && npm run coverage && npm run audit:prod && npm run pack:dry-run && npm run accept:packed && npm run changelog:check && npm run verify:release-publish-attestation && npm run verify:release-changelog-date",
     "prepublishOnly": "npm run release:check",
-    "release:notes": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --stdout --since-previous-tag --until-release-tag --release-version-from-package --date-from-version --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release --pm-bin ./node_modules/.bin/pm --github-step-summary",
+    "release:notes": "pm-changelog --pm-root .agents/pm --pm-arg=--output-budget --pm-arg=unbounded --pm-arg=--output-limit --pm-arg=unbounded --stdout --since-previous-tag --until-release-tag --release-version-from-package --date-from-version --item-url-base https://github.com/unbraind/pm-csv/blob/main/.agents/pm --respect-item-release --pm-bin ./node_modules/.bin/pm --github-step-summary --include-empty",
     "prepare": "node scripts/prepare-merge-driver.ts",
     "merge:install": "pm merge install",
     "pm:validate": "pm validate --json",
     "coverage": "npm run build && npm run build:test && node scripts/coverage-gate.ts",
     "docstring": "node scripts/docstring-gate.ts",
-    "verify:release-changelog-date": "node scripts/verify-release-changelog-date.ts"
+    "verify:release-changelog-date": "node scripts/verify-release-changelog-date.ts",
+    "release:alert": "bash scripts/alert-on-release-failure.sh",
+    "release:prepare": "node scripts/prepare-release-version.ts"
   },
   "coverageGate": {
     "sources": [
@@ -74,7 +76,7 @@
     "jiti": "2.7.0",
     "jscpd": "5.4.3",
     "pm-changelog": "2026.11.10",
-    "pm-ops": "2026.11.6",
+    "pm-ops": "2026.11.14",
     "typescript": "7.0.2",
     "yaml": "2.9.1"
   },
