@@ -2,7 +2,9 @@
 
 ## 2026.11.16 - 2026-11-16
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates
 
 ## 2026.11.15 - 2026-11-15
 
