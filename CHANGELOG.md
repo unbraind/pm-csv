@@ -21,6 +21,7 @@
 ### Fixed
 
 - Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
+- Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
 
 ## 2026.11.4 - 2026-11-04
 
