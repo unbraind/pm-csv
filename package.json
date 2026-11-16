@@ -68,7 +68,7 @@
     "@unbrained/pm-cli": ">=2026.11.5"
   },
   "devDependencies": {
-    "@babel/eslint-parser": "8.0.7",
+    "@babel/eslint-parser": "8.1.2",
     "@babel/plugin-syntax-typescript": "8.0.3",
     "@types/node": "26.6.6",
     "@unbrained/pm-cli": "2026.11.13",
