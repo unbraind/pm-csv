@@ -14,21 +14,22 @@ permissions:
 
 concurrency:
   group: ci-deep-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # Distinct check names prevent a manual branch run from matching required PR checks.
 jobs:
   deep:
+    name: deep (${{ matrix.node-version }}, ${{ matrix.package-manager }})
     # Busy local slots must queue. Only the fleet controller disables this pool
     # after all local hosts have been unreachable for ten minutes.
     runs-on: ${{ vars.PM_LOCAL_DEEP != 'off' && fromJSON('["self-hosted","pm-local"]') || 'ubuntu-latest' }}
-    # Pilot exception: full coverage measured 80m 41s per gate on the shared host.
-    # Two gates exceed 160m before packing; retain headroom for slow local IO.
-    timeout-minutes: 240
+    # One full gate per job fits the fleet deep timeout.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         node-version: [22, 26]
+        package-manager: [npm, bun]
     env:
       PM_TEST_DEPTH: full
       # Acceptance watchdogs allow slower local installs without becoming unbounded.
@@ -44,10 +45,14 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Setup Bun
+        if: runner.environment == 'github-hosted'
         uses: oven-sh/setup-bun@v2.2.0
+
+      - name: Show Bun version
+        run: bun --version
 
       - name: Install dependencies
         run: npm ci
@@ -56,9 +61,11 @@ jobs:
         run: ./node_modules/.bin/pm health --strict-exit --require-merge-drivers
 
       - name: Full npm release gate
+        if: matrix.package-manager == 'npm'
         run: npm run release:check
 
       - name: Full Bun release gate
+        if: matrix.package-manager == 'bun'
         run: bun run release:check
 
       - name: Verify Bun can install the package graph

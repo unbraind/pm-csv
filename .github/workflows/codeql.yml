@@ -3,30 +3,52 @@ name: CodeQL
 on:
   push:
     branches: [main]
-    # Ordered filters: tracker data is cheap, executable tracker code still scans.
+    # Ordered filters preserve scans for executable tracker code and extensions.
     paths:
       - '**'
       - '!.agents/pm/**'
       - '!**/*.md'
       - '!docs/**'
       - '!package-lock.json'
+      - '!bun.lock'
+      - '!bun.lockb'
+      - '!pnpm-lock.yaml'
+      - '!yarn.lock'
+      - '!npm-shrinkwrap.json'
       - '.agents/pm/**/*.mjs'
       - '.agents/pm/**/*.cjs'
       - '.agents/pm/**/*.js'
+      - '.agents/pm/**/*.jsx'
       - '.agents/pm/**/*.ts'
+      - '.agents/pm/**/*.tsx'
+      - '.agents/pm/**/*.mts'
+      - '.agents/pm/**/*.cts'
+      - '.agents/pm/**/*.sh'
+      - '.agents/pm/extensions/**'
   pull_request:
     branches: [main]
-    # Ordered filters: tracker data is cheap, executable tracker code still scans.
+    # Ordered filters preserve scans for executable tracker code and extensions.
     paths:
       - '**'
       - '!.agents/pm/**'
       - '!**/*.md'
       - '!docs/**'
       - '!package-lock.json'
+      - '!bun.lock'
+      - '!bun.lockb'
+      - '!pnpm-lock.yaml'
+      - '!yarn.lock'
+      - '!npm-shrinkwrap.json'
       - '.agents/pm/**/*.mjs'
       - '.agents/pm/**/*.cjs'
       - '.agents/pm/**/*.js'
+      - '.agents/pm/**/*.jsx'
       - '.agents/pm/**/*.ts'
+      - '.agents/pm/**/*.tsx'
+      - '.agents/pm/**/*.mts'
+      - '.agents/pm/**/*.cts'
+      - '.agents/pm/**/*.sh'
+      - '.agents/pm/extensions/**'
   schedule:
     # Weekly CodeQL scan, minute/hour staggered across the pm fleet so the
     # repos do not all fire against the API at the same time.

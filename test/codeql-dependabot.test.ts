@@ -27,7 +27,10 @@ test("CodeQL re-includes executable tracker files after data exclusions", () => 
   const config = parse(workflow);
   const paths = [
     "**", "!.agents/pm/**", "!**/*.md", "!docs/**", "!package-lock.json",
-    ".agents/pm/**/*.mjs", ".agents/pm/**/*.cjs", ".agents/pm/**/*.js", ".agents/pm/**/*.ts",
+    "!bun.lock", "!bun.lockb", "!pnpm-lock.yaml", "!yarn.lock", "!npm-shrinkwrap.json",
+    ".agents/pm/**/*.mjs", ".agents/pm/**/*.cjs", ".agents/pm/**/*.js", ".agents/pm/**/*.jsx",
+    ".agents/pm/**/*.ts", ".agents/pm/**/*.tsx", ".agents/pm/**/*.mts", ".agents/pm/**/*.cts",
+    ".agents/pm/**/*.sh", ".agents/pm/extensions/**",
   ];
   for (const event of ["push", "pull_request"]) {
     assert.equal(config.on[event]["paths-ignore"], undefined);
