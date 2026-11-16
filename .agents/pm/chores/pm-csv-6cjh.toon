@@ -4,15 +4,15 @@ description: "Review every in-progress and open record against merged delivery a
 type: Chore
 status: open
 priority: 2
-tags[2]: maintenance,tracker-hygiene
+tags[3]: "gh:unbraind/pm-csv#251",maintenance,tracker-hygiene
 created_at: "2026-10-24T21:39:48.480Z"
-updated_at: "2026-11-16T13:41:51.520Z"
+updated_at: "2026-11-16T15:42:37.506Z"
 author: codex-agent
 estimated_minutes: 60
 acceptance_criteria: "Every original in-progress and open item is inspected; delivery closures name the implementing merged PR, date and merge SHA and match the recorded acceptance; inactive work is open with claims released; original history records remain append-only; tracker health, changelog and PR CI outcomes are recorded."
 risk: low
 confidence: high
-comments[8]{created_at,author,text}:
+comments[12]{created_at,author,text}:
   "2026-10-24T21:39:49.313Z",codex-agent,"Oriented context, searched existing hygiene work, and read the complete tracker. Checking every original in-progress and open item against PR title/body/commits, delivery links and acceptance. The owner authorizes evidence-backed closure in this sweep. Ambiguous claims remain open; no PR merge or history rewrite."
   "2026-10-24T21:45:35.391Z",codex-agent,"Reviewed 7 original active items. 2 verified deliveries closed and 0 inactive items returned to open. Every other original open item remains open because complete delivery or explicit supersession was not established. No cancellation by inference, software change, threshold reduction, or history rewrite. Per-item evidence is recorded in closure reasons and the PR table. Tracker, changelog and CI verification follow."
   "2026-10-24T21:46:29.643Z",codex-agent,"Local tracker verification passed: repository changelog generation and consistency check, pinned strict health with required merge drivers under isolated Git identity, changed-item history verification, independent original-history prefix checks and linked git diff --check. All original inactive work and this audit have released claims; no in-progress item remains. No production function changed, so source-function revert proof is inapplicable; per-item merged ancestry and lifecycle/history checks are the evidence. The PR will carry the full before/after/evidence table. Complete npm/Bun release checks and native platform checks run in PR CI; their final outcome is reported separately, without treating queued or skipped checks as approval."
@@ -21,15 +21,47 @@ comments[8]{created_at,author,text}:
   "2026-11-14T09:58:28.070Z",codex-sweep-1114,"Release-attribution correction continuation: use each delivered item's evidenced PR merge timestamp for completed_at and its first containing release tag for release. Preserve genuinely unreleased items without a release value, all statuses and existing claims. Sweep chore completion/release and reopened work are excluded. Regenerate and verify changelog placement, append-only history and health after the last write."
   "2026-11-14T09:59:25.398Z",codex-sweep-1114,"Release metadata corrected for 1 delivered items: 1 attributed to first containing tags and 0 left genuinely unreleased. Linked diff check passed. Independent timestamp/tag/changelog-placement validation and regenerated changelog checks follow this final tracker write. No review thread replies, resolutions or reactions."
   "2026-11-16T13:41:34.314Z",pi-glm,"Main synchronization: merged current main into the sweep branch, bringing the 2026.11.15 release notes and the quick-tier CI workflow. The CHANGELOG conflict was resolved by taking main's release notes and regenerating them from the tracker, so the delivered persistence-fencing item keeps its 2026.11.11 release placement; its merged-PR evidence still verifies at the same merge SHA. Tracker validation, strict health with merge drivers, changelog check and the quick packaging/shipped-changelog/identity-audit tests all pass after the merge. The sweep chore stays open to track this synchronization; closure is deferred to post-merge verification."
+  "2026-11-16T15:18:49.779Z",codex-sol,"Continuation inspected the existing branch, remote PR head, tracker context and current GitHub delivery evidence. Preserved landed commits and existing tracker items. The branch includes current main; changelog conflicts use main before generator regeneration. Delivered PR merge timestamps and first containing release tags are rechecked. Sweep closure remains reserved for orchestrator verification."
+  "2026-11-16T15:35:58.467Z",codex-sol,The tracker-only quick gate uses the repository documentation and public identity contracts. Full package npm test includes long native-state/model workloads; the initial two broader attempts were interrupted and are not passing evidence. Focused commands are linked and run to completion separately; no source coverage or full release-gate claim is made.
+  "2026-11-16T15:37:03.864Z",codex-sol,"Continuation verification: npm ci passed; focused documentation/tracker tests (PM_TEST_DEPTH=quick node --test --test-concurrency=2 test/packaging.test.ts test/shipped-changelog.test.ts test/identity-audit.test.ts) passed to completion. All retained delivery rows were checked against current GitHub merge state, completion timestamps and first containing tags. No active implementation PR delivers the remaining reopened roadmap work. Both source history streams are retained in timestamp order, including original records carried by audited reanchor evidence. Final released-state tracker validation, repository changelog generation/check and identity gates run before push."
+  "2026-11-16T15:42:37.506Z",codex-sol,The pinned project CLI health check sees an inherited global pm-github host-version mismatch. The compatible host pm health check passes; this environment distinction is not a hosted CI result. Clone-local merge drivers were reinstalled without changing source or workflows.
 files[2]:
   - path: .agents/pm
     scope: project
     note: Tracker lifecycle and append-only evidence
   - path: .agents/pm/issues/pm-csv-sdk-write-fence.toon
     scope: project
-tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  git diff --check,project,codex-agent,"2026-10-24T21:45:35.479Z",local_mutation,chore/pm-in-progress-sweep
-  git -c core.quotePath=true diff --check,project,codex-sweep-1114,"2026-11-14T08:47:55.400Z",local_mutation,chore/in-progress-sweep-2026-11-14
+tests[4]:
+  - command: git diff --check
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-24T21:45:35.479Z"
+      source_kind: local_mutation
+      source_ref: chore/pm-in-progress-sweep
+  - command: git -c core.quotePath=true diff --check
+    scope: project
+    provenance:
+      author: codex-sweep-1114
+      created_at: "2026-11-14T08:47:55.400Z"
+      source_kind: local_mutation
+      source_ref: chore/in-progress-sweep-2026-11-14
+  - command: PM_TEST_DEPTH=quick npm test
+    scope: project
+    timeout_seconds: 1200
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-16T15:22:54.825Z"
+      source_kind: local_mutation
+      source_ref: chore/in-progress-sweep-2026-11-14
+  - command: PM_TEST_DEPTH=quick node --test --test-concurrency=2 test/packaging.test.ts test/shipped-changelog.test.ts test/identity-audit.test.ts
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-sol
+      created_at: "2026-11-16T15:36:28.419Z"
+      source_kind: local_mutation
+      source_ref: chore/in-progress-sweep-2026-11-14
 docs[1]{path,scope,note}:
   CHANGELOG.md,project,Regenerated package release notes
 body: ""
