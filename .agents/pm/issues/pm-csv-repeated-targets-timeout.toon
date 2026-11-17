@@ -1,0 +1,13 @@
+id: pm-csv-repeated-targets-timeout
+title: Investigate repeated-target import model exceeding its fixed test deadline
+description: "Complete quick npm test on the caller-pin branch ran 486 tests: 485 passed and the unchanged repeated-target model was cancelled at 180008 ms by its hardcoded 180000 ms test deadline. No assertion failure or skipped test was reported. Investigate fixture cost and shared-load sensitivity while retaining admitted, atomic, streaming and ordinary import/reference-state assertions; do not treat a cancelled case as passing or weaken the existing oracle."
+type: Issue
+status: open
+priority: 2
+tags[3]: follow-up,performance,testing
+created_at: "2026-11-16T13:28:10.975Z"
+updated_at: "2026-11-16T13:28:15.175Z"
+author: codex-sol
+files[1]{path,scope}:
+  test/repeated-targets.test.ts,project
+body: ""

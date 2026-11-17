@@ -16,9 +16,8 @@ permissions:
   actions: write
 jobs:
   gated-closeout:
-    uses: unbraind/pm-github/.github/workflows/pm-github-closeout.yml@cf2111d75cd0b390ca437dbec51063a2aa691d45 # pm-github 2026.11.11
+    uses: unbraind/pm-github/.github/workflows/pm-github-closeout.yml@a3a2e7ccbee2bbd23933d10be578422b967a519c # pm-github 2026.11.15
     with:
-      pm-github-version: "2026.10.16"
       npm-project-dir: "." # Use tools/oracle or another contained npm project when needed.
       post-closeout-script: "changelog:full" # Missing script skips; "" disables it.
       ci-workflows: "ci.yml" # Whitespace-separated workflow filenames; "" disables dispatch.
