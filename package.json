@@ -1,6 +1,6 @@
 {
   "name": "pm-csv",
-  "version": "2026.11.15",
+  "version": "2026.11.16",
   "description": "CSV importer and exporter for pm-cli",
   "repository": {
     "type": "git",
@@ -71,11 +71,11 @@
     "@babel/eslint-parser": "8.0.7",
     "@babel/plugin-syntax-typescript": "8.0.3",
     "@types/node": "26.6.6",
-    "@unbrained/pm-cli": "2026.11.10",
+    "@unbrained/pm-cli": "2026.11.13",
     "eslint": "10.14.0",
     "jiti": "2.7.0",
     "jscpd": "5.4.3",
-    "pm-changelog": "2026.11.10",
+    "pm-changelog": "2026.11.13",
     "pm-ops": "2026.11.14",
     "typescript": "7.0.2",
     "yaml": "2.9.1"

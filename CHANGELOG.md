@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.11.16 - 2026-11-16
+
+### Other
+
+- Pilot Fleet CI v2 quick PR and exhaustive local tiers ([pm-csv-ci-v2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-ci-v2.toon))
+- Adopt the released reusable Daily Release caller ([pm-csv-release-caller-rollout](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-release-caller-rollout.toon))
+
 ## 2026.11.15 - 2026-11-15
 
 ### Dependencies
@@ -21,6 +28,7 @@
 ### Fixed
 
 - Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
+- Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
 
 ## 2026.11.4 - 2026-11-04
 
