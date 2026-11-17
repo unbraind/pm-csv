@@ -2,9 +2,10 @@
 
 ## 2026.11.16 - 2026-11-16
 
-### Dependencies
+### Other
 
-- Bump the pm-toolchain group with 2 updates
+- Pilot Fleet CI v2 quick PR and exhaustive local tiers ([pm-csv-ci-v2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-ci-v2.toon))
+- Adopt the released reusable Daily Release caller ([pm-csv-release-caller-rollout](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-release-caller-rollout.toon))
 
 ## 2026.11.15 - 2026-11-15
 
