@@ -3151,7 +3151,7 @@ async function prepareCsvExport(
 
 export default {
   name: "pm-csv",
-  version: "2026.11.16",
+  version: "2026.11.20",
 
   activate(api: ExtensionApi) {
     registerTableSchemaCommands(api);
