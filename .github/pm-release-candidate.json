@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "repository": "unbraind/pm-csv",
-  "baseSha": "adccfb810ebc9e37c25abacd2cd7be3139acb7ba",
-  "version": "2026.11.21",
-  "runId": 44898928788,
+  "baseSha": "969eb4f429938a6de75d51cf8d46ac462dc79af1",
+  "version": "2026.11.22",
+  "runId": 45018398743,
   "runAttempt": 1,
   "configDigest": "a28b9c9d47b72c560ccdc63147b4b8fbcc1462c22ce2a88bba34257e3d3aba02"
 }
