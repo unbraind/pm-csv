@@ -71,12 +71,13 @@ export function mutationScopeArguments(options: MutationOptions, mode: "create" 
 
 /**
  * Scope raw SDK patches/restores from the document read under the native item
- * lock. Explicit selected scalars go through the same builder; untouched native
+ * lock. The lock location (storage id) is passed through to the wrapped mutate
+ * callback unchanged. Explicit selected scalars go through the same builder; untouched native
  * link arrays remain the exact current/restore document, with no ambient lookup.
  */
 export function explicitDocumentMutation(mutate: Parameters<typeof mutateItem>[0]["mutate"]): Parameters<typeof mutateItem>[0]["mutate"] {
-  return async document => {
-    const result = await mutate(document);
+  return async (document, mutation) => {
+    const result = await mutate(document, mutation);
     const intent = buildMutationIntent(Object.fromEntries(SCALARS.map(([option, field]) => [option, document.metadata[field]])), "snapshot");
     for (const [option, field] of SCALARS) {
       if (intent[option] === undefined) delete document.metadata[field];
