@@ -89,7 +89,9 @@ test("builder declares absent scope, honors reviewed values, clears selected emp
     }
     // A stored snapshot is state, not command input: literal sentinels and empty representation survive the builder.
     await mutateItem({ pmRoot: root, settings: await readSettings(root), id: created.item.id, op: "update", author: "scope-test",
-      mutate: explicitDocumentMutation(document => { document.metadata.sprint = "none"; document.metadata.assignee = "";
+      mutate: explicitDocumentMutation((document, mutation) => {
+        assert.equal(mutation.storageId, created.item.id);
+        document.metadata.sprint = "none"; document.metadata.assignee = "";
         return { changedFields: ["sprint", "assignee"] }; }) });
     assert.equal((await readUpdateDocument(root, created.item.id)).metadata.sprint, "none");
   } finally { rmSync(root, { recursive: true, force: true }); }

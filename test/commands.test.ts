@@ -26,6 +26,14 @@ async function commandHarness() {
   });
 }
 
+/** Invoke the registered importer with a configuration payload, outside CLI flag parsing. */
+async function runConfiguredImporter(harness: Awaited<ReturnType<typeof commandHarness>>, pmRoot: string, options: Record<string, unknown>) {
+  const command = "csv-import import";
+  const registered = harness.activation.commands.handlers.find(handler => handler.command === command);
+  assert.ok(registered);
+  return registered.run({ command, args: [], options, pm_root: pmRoot, global: { json: true } });
+}
+
 test("CSV commands and configured importers reject partial create/update failures", async () => {
   const root = freshTracker();
   const harness = await commandHarness();
@@ -38,9 +46,9 @@ test("CSV commands and configured importers reject partial create/update failure
         const title = `Created ${stream} ${configured}`;
         writeFileSync(input, "title,priority,type\nExisting,99,Task\nExisting,2,Task\nInvalid,99,Task\n"
           + `${title},2,Task\nFiltered,2,Feature\n,2,Task\n`, "utf8");
-        const options = { file: input, key: "title", type: "Task", stream };
+        const options = { key: "title", type: "Task", stream };
         const run = configured
-          ? harness.runImporter({ importer: "csv-import", options, pmRoot: root })
+          ? runConfiguredImporter(harness, root, { file: input, ...options })
           : harness.runCommand({ command: "csv import", args: [input], options, pmRoot: root });
         await assert.rejects(run, (error: unknown) => {
           assert.ok(error instanceof CommandError);
@@ -303,9 +311,16 @@ test("registered importer and exporter execute through host-owned capability dis
     assert.equal(preview.handled, true);
     assert.equal((preview.result as Record<string, unknown>).wouldCreate, 1);
 
+    await assert.rejects(harness.runImporter({
+      importer: "csv-import",
+      options: { file: input },
+      pmRoot: root,
+    }), { code: "unknown_option", exitCode: 2 });
+
     const imported = await harness.runImporter({
       importer: "csv-import",
-      options: { file: input, autoMap: true },
+      args: [input],
+      options: { autoMap: true },
       pmRoot: root,
       global: { author: "harness:codex" },
     });
@@ -330,7 +345,7 @@ test("registered importer and exporter execute through host-owned capability dis
 
     await assert.rejects(harness.runImporter({
       importer: "csv-import",
-      options: { file: join(root, "missing.csv") },
+      args: [join(root, "missing.csv")],
       pmRoot: root,
     }), (error: unknown) => error instanceof CommandError && error.exitCode === 3);
   } finally {
