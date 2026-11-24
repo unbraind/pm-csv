@@ -21,6 +21,12 @@ No changes.
 - Pilot Fleet CI v2 quick PR and exhaustive local tiers ([pm-csv-ci-v2](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-ci-v2.toon))
 - Adopt the released reusable Daily Release caller ([pm-csv-release-caller-rollout](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-release-caller-rollout.toon))
 
+### Dependencies
+
+- Bump the dependencies group across 1 directory with 2 updates ([#270](https://github.com/unbraind/pm-csv/pull/270))
+- Bump @unbrained/pm-cli ([#271](https://github.com/unbraind/pm-csv/pull/271))
+- Bump the pm-toolchain group with 2 updates ([#265](https://github.com/unbraind/pm-csv/pull/265))
+
 ## 2026.11.15 - 2026-11-15
 
 ### Dependencies
@@ -44,6 +50,17 @@ No changes.
 - Admission omits installed extension type/field registries from validation and revision lookup ([pm-csv-lewj](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-lewj.toon))
 - Adopt native SDK persistence fencing for CSV edits and compensation ([pm-csv-sdk-write-fence](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-sdk-write-fence.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#240](https://github.com/unbraind/pm-csv/pull/240))
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#237](https://github.com/unbraind/pm-csv/pull/237))
+- Bump the codeql-action group across 1 directory with 2 updates ([#233](https://github.com/unbraind/pm-csv/pull/233))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#235](https://github.com/unbraind/pm-csv/pull/235))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#234](https://github.com/unbraind/pm-csv/pull/234))
+- Bump the pm-toolchain group with 2 updates ([#232](https://github.com/unbraind/pm-csv/pull/232))
+- Bump @unbrained/pm-cli ([#230](https://github.com/unbraind/pm-csv/pull/230))
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#229](https://github.com/unbraind/pm-csv/pull/229))
+
 ## 2026.11.4 - 2026-11-04
 
 ### Fixed
@@ -54,9 +71,17 @@ No changes.
 
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-208](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-208.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#215](https://github.com/unbraind/pm-csv/pull/215))
+- Bump the dependencies group with 2 updates ([#223](https://github.com/unbraind/pm-csv/pull/223))
+
 ## 2026.11.1 - 2026-11-01
 
-No changes.
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#219](https://github.com/unbraind/pm-csv/pull/219))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#220](https://github.com/unbraind/pm-csv/pull/220))
 
 ## 2026.10.31 - 2026-10-31
 
@@ -68,6 +93,10 @@ No changes.
 
 - Admit large CSV imports within declared memory and mutation budgets ([pm-csv-bounded-admission](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-bounded-admission.toon))
 - Resolve cross-table external references before CSV import ([pm-csv-join-plans](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/features/pm-csv-join-plans.toon))
+
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#212](https://github.com/unbraind/pm-csv/pull/212))
 
 ## 2026.10.28 - 2026-10-28
 
@@ -82,6 +111,11 @@ No changes.
 ### Closed
 
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-204](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-204.toon))
+
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#209](https://github.com/unbraind/pm-csv/pull/209))
+- Bump the pm-toolchain group with 3 updates ([#205](https://github.com/unbraind/pm-csv/pull/205))
 
 ## 2026.10.26 - 2026-10-26
 
@@ -104,6 +138,12 @@ No changes.
 
 - Reconcile stale in-progress tracker records (2026-10-23) ([pm-csv-reconcile-1023](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-reconcile-1023.toon))
 
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#190](https://github.com/unbraind/pm-csv/pull/190))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#191](https://github.com/unbraind/pm-csv/pull/191))
+- Bump the codeql-action group with 2 updates ([#189](https://github.com/unbraind/pm-csv/pull/189))
+
 ## 2026.10.24 - 2026-10-24
 
 ### Added
@@ -118,6 +158,11 @@ No changes.
 ### Other
 
 - Correct delivery evidence in tracker reconciliation PR 178 ([pm-csv-review-178](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-review-178.toon))
+
+### Dependencies
+
+- Bump jscpd ([#187](https://github.com/unbraind/pm-csv/pull/187))
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#177](https://github.com/unbraind/pm-csv/pull/177))
 
 ## 2026.10.23 - 2026-10-23
 
@@ -153,23 +198,34 @@ No changes.
 
 ## 2026.10.18 - 2026-10-18
 
-No changes.
+### Dependencies
+
+- Bump the codeql-action group with 2 updates ([#168](https://github.com/unbraind/pm-csv/pull/168))
 
 ## 2026.10.17 - 2026-10-17
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#166](https://github.com/unbraind/pm-csv/pull/166))
 
 ## 2026.10.16 - 2026-10-16
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#162](https://github.com/unbraind/pm-csv/pull/162))
 
 ## 2026.10.15 - 2026-10-15
 
-No changes.
+### Dependencies
+
+- Bump @unbrained/pm-cli ([#160](https://github.com/unbraind/pm-csv/pull/160))
 
 ## 2026.10.14 - 2026-10-14
 
-No changes.
+### Dependencies
+
+- Bump the dependencies group across 1 directory with 4 updates ([#157](https://github.com/unbraind/pm-csv/pull/157))
+- Bump @unbrained/pm-cli ([#156](https://github.com/unbraind/pm-csv/pull/156))
 
 ## 2026.10.12 - 2026-10-12
 
@@ -181,11 +237,19 @@ No changes.
 
 - Certify self-syncing toolchain upgrades and validated CSV closure ([pm-csv-hzn7](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-hzn7.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#152](https://github.com/unbraind/pm-csv/pull/152))
+
 ## 2026.10.5 - 2026-10-05
 
 ### Other
 
 - Auto-merge green Dependabot updates and group the pm toolchain into one daily PR ([pm-csv-dida](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-dida.toon))
+
+### Dependencies
+
+- Bump the codeql-action group across 1 directory with 2 updates ([#140](https://github.com/unbraind/pm-csv/pull/140))
 
 ## 2026.10.4 - 2026-10-04
 
@@ -207,7 +271,12 @@ No changes.
 
 ## 2026.9.23 - 2026-09-23
 
-No changes.
+### Dependencies
+
+- Bump jscpd from 5.2.0 to 5.3.0 ([#129](https://github.com/unbraind/pm-csv/pull/129))
+- Bump yaml from 2.9.0 to 2.9.1 ([#130](https://github.com/unbraind/pm-csv/pull/130))
+- Bump @babel/eslint-parser from 8.0.1 to 8.0.6 ([#131](https://github.com/unbraind/pm-csv/pull/131))
+- Bump @types/node from 26.5.1 to 26.6.1 ([#132](https://github.com/unbraind/pm-csv/pull/132))
 
 ## 2026.9.18 - 2026-09-18
 
@@ -220,6 +289,14 @@ No changes.
 ### Other
 
 - Certify pm CLI 2026.9.12 and the pm-ops 2026.9.11 auditor ([pm-csv-umrv](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-umrv.toon))
+
+### Dependencies
+
+- Bump jscpd from 5.1.1 to 5.2.0 ([#119](https://github.com/unbraind/pm-csv/pull/119))
+- Bump eslint from 10.9.1 to 10.10.0 ([#121](https://github.com/unbraind/pm-csv/pull/121))
+- Bump pm-changelog from 2026.9.6 to 2026.9.9 ([#120](https://github.com/unbraind/pm-csv/pull/120))
+- Bump @types/node from 26.4.1 to 26.5.1 ([#122](https://github.com/unbraind/pm-csv/pull/122))
+- Bump the codeql-action group with 2 updates ([#123](https://github.com/unbraind/pm-csv/pull/123))
 
 ## 2026.9.11 - 2026-09-11
 
@@ -241,6 +318,10 @@ No changes.
 
 - Harden the attestation consumer suite to match the rest of the converged fleet ([pm-csv-nm3w](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-nm3w.toon))
 
+### Dependencies
+
+- Bump @types/node from 26.4.0 to 26.4.1 ([#104](https://github.com/unbraind/pm-csv/pull/104))
+
 ## 2026.9.7 - 2026-09-07
 
 ### Fixed
@@ -256,6 +337,10 @@ No changes.
 ### Other
 
 - Pin pm-cli 2026.9.5, pm-changelog 2026.9.2, and pm-ops 2026.9.5 ([pm-csv-xq6d](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/chores/pm-csv-xq6d.toon))
+
+### Dependencies
+
+- Bump jscpd from 5.0.16 to 5.1.1 ([#106](https://github.com/unbraind/pm-csv/pull/106))
 
 ## 2026.9.4 - 2026-09-04
 
@@ -274,12 +359,23 @@ No changes.
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-86](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-86.toon))
 - Closed: Pin pm-changelog 2026.8.30 before the next release ([pm-csv-vc26](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-vc26.toon))
 
+### Dependencies
+
+- Bump @unbrained/pm-cli from 2026.8.26 to 2026.8.27 ([#98](https://github.com/unbraind/pm-csv/pull/98))
+
 ## 2026.8.31 - 2026-08-31
 
 ### Fixed
 
 - Keep CodeQL action updates synchronized in one pull request ([pm-csv-tbxy](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-tbxy.toon))
 - Rebase the changelog date verifier onto the current release workflow ([pm-csv-bnra](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-bnra.toon))
+
+### Dependencies
+
+- Bump @types/node from 26.3.0 to 26.4.0 ([#97](https://github.com/unbraind/pm-csv/pull/97))
+- Bump @unbrained/pm-cli from 2026.8.24 to 2026.8.26 ([#90](https://github.com/unbraind/pm-csv/pull/90))
+- Bump @types/node from 26.2.0 to 26.3.0 ([#91](https://github.com/unbraind/pm-csv/pull/91))
+- Bump eslint from 10.8.1 to 10.9.1 ([#92](https://github.com/unbraind/pm-csv/pull/92))
 
 ## 2026.8.29 - 2026-08-29
 
@@ -320,11 +416,21 @@ No changes.
 - Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-csv-om24](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-om24.toon))
 - Closed: Full git history retains personal identity and redacted host-path blobs ([pm-csv-uaq1](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-uaq1.toon))
 
+### Dependencies
+
+- Bump pm-ops from 2026.8.10 to 2026.8.17 ([#77](https://github.com/unbraind/pm-csv/pull/77))
+- Bump pm-changelog from 2026.8.12 to 2026.8.17 ([#76](https://github.com/unbraind/pm-csv/pull/76))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
 
 - A truncated list-all answer is consumed as if it were complete ([pm-csv-mua3](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-mua3.toon))
+
+### Dependencies
+
+- Bump pm-changelog from 2026.8.6 to 2026.8.12 ([#70](https://github.com/unbraind/pm-csv/pull/70))
+- Bump @types/node from 26.1.2 to 26.2.0 ([#69](https://github.com/unbraind/pm-csv/pull/69))
 
 ## 2026.8.10 - 2026-08-10
 
@@ -373,7 +479,10 @@ No changes.
 
 ## 2026.8.3 - 2026-08-03
 
-No changes.
+### Dependencies
+
+- Bump pm-changelog from 2026.7.25 to 2026.7.29 ([#54](https://github.com/unbraind/pm-csv/pull/54))
+- Bump @types/node from 26.1.1 to 26.1.2 ([#55](https://github.com/unbraind/pm-csv/pull/55))
 
 ## 2026.7.29 - 2026-07-29
 
@@ -411,6 +520,10 @@ No changes.
 
 - Closed: Documented install command fails: pm install github.com/unbraind/pm-csv cannot resolve an entry file ([pm-csv-agf5](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-agf5.toon))
 
+### Dependencies
+
+- Bump pm-changelog from 2026.7.24 to 2026.7.25 ([#44](https://github.com/unbraind/pm-csv/pull/44))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Other
@@ -446,6 +559,12 @@ No changes.
 
 - atomic import: per-row resume/compensation tag + in-batch dup-key guard + SDK resolve hardening (2026.7.19-1) ([pm-csv-j3pi](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/tasks/pm-csv-j3pi.toon))
 
+### Dependencies
+
+- Bump actions/setup-node from 6 to 7 ([#32](https://github.com/unbraind/pm-csv/pull/32))
+- Bump pm-changelog from 2026.7.11 to 2026.7.18 ([#33](https://github.com/unbraind/pm-csv/pull/33))
+- Bump @unbrained/pm-cli from 2026.7.11 to 2026.7.18 ([#34](https://github.com/unbraind/pm-csv/pull/34))
+
 ## 2026.7.19 - 2026-07-19
 
 ### Other
@@ -458,7 +577,10 @@ No changes.
 
 ## 2026.7.13 - 2026-07-13
 
-No changes.
+### Dependencies
+
+- Bump pm-changelog from 2026.7.10 to 2026.7.11 ([#31](https://github.com/unbraind/pm-csv/pull/31))
+- Bump @unbrained/pm-cli from 2026.7.10 to 2026.7.11 ([#30](https://github.com/unbraind/pm-csv/pull/30))
 
 ## 2026.7.11 - 2026-07-11
 

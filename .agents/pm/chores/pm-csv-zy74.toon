@@ -1,0 +1,25 @@
+id: pm-csv-zy74
+title: Keep published dependency updates in the generated changelog
+description: Pass the dependency updates flag through the package changelog entry points so regeneration preserves published dependency bullets.
+type: Chore
+status: in_progress
+priority: 2
+tags[2]: changelog,maintenance
+created_at: "2026-11-24T06:13:20.203Z"
+updated_at: "2026-11-24T06:26:13.700Z"
+author: codex-agent
+estimated_minutes: 30
+acceptance_criteria: Every changelog entry point uses dependency updates. Removing the flag from any entry point fails the regression.
+comments[2]{created_at,author,text}:
+  "2026-11-24T06:13:28.805Z",codex-agent,"Apply the dependency updates flag to all direct invocations and verify the release workflow scripts, full regeneration, and flag-only reverts."
+  "2026-11-24T06:26:11.152Z",codex-agent,"Full regeneration adds 59 dependency bullets versus main and retains all nine previously published bullets. Removing the option from either direct entry point separately fails the named regression assertion. Bypassing the flagged full script from changelog:check also fails. Typecheck, lint, build, and 71 focused tests including packed npm and Bun acceptance passed."
+files[2]{path,scope}:
+  package.json,project
+  test/release-workflow.test.ts,project
+tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/release-workflow.test.ts,project,codex-agent,"2026-11-24T06:13:39.336Z",local_mutation,fix/changelog-keep-dependency-updates
+  "npm run changelog:check",project,codex-agent,"2026-11-24T06:13:42.689Z",local_mutation,fix/changelog-keep-dependency-updates
+  "npm run release:notes",project,codex-agent,"2026-11-24T06:13:45.148Z",local_mutation,fix/changelog-keep-dependency-updates
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""
