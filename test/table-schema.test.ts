@@ -188,6 +188,11 @@ test("native schema commands: final quoted empty records refuse without tracker 
     process.env.GIT_CEILING_DIRECTORIES = dirname(root);
     const file = join(root, "eof.csv");
     const output = join(root, "eof.schema.json");
+    const describe = { command: "csv schema describe", pmRoot: root, args: [file] };
+    await assert.rejects(harness.runCommand({ ...describe, options: { schema: output } }), { code: "unknown_option" });
+    const commands = [describe, ...["preview", "import"].map(action => ({
+      command: `csv schema ${action}`, pmRoot: root, args: [file], options: { schema: output },
+    }))];
     for (const eol of ["\n", "\r\n"]) {
       const prefix = `title,priority${eol}Task,2${eol}`;
       const { schema } = await describeTable(root, prefix);
@@ -195,8 +200,8 @@ test("native schema commands: final quoted empty records refuse without tracker 
       for (const ending of ['""', `""${eol}`, eol]) {
         writeFileSync(file, prefix + ending);
         const before = snapshot(root);
-        for (const command of ["csv schema describe", "csv schema preview", "csv schema import"]) {
-          await assert.rejects(harness.runCommand({ command, pmRoot: root, args: [file], options: { schema: output } }), refusal("csv_table_invalid"));
+        for (const command of commands) {
+          await assert.rejects(harness.runCommand(command), refusal("csv_table_invalid"));
           assert.equal(snapshot(root), before);
         }
       }

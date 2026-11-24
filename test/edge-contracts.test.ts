@@ -371,13 +371,15 @@ test("command paths exercise rich create/update, headerless streaming, strict su
     const strict = await harness.runImporter({
       importer: "csv-import",
       pmRoot: root,
-      options: { file: warnings, strict: true },
+      args: [warnings],
+      options: { strict: true },
     });
     assert.equal(strict.handled, true);
     const filteredImporter = await harness.runImporter({
       importer: "csv-import",
       pmRoot: root,
-      options: { file: warnings, type: "Feature" },
+      args: [warnings],
+      options: { type: "Feature" },
     });
     assert.equal(filteredImporter.handled, true);
 
@@ -437,7 +439,8 @@ test("command paths exercise rich create/update, headerless streaming, strict su
     await assert.rejects(harness.runImporter({
       importer: "csv-import",
       pmRoot: root,
-      options: { file: warnings, stream: true, atomic: true },
+      args: [warnings],
+      options: { stream: true, atomic: true },
     }), /--atomic cannot be combined with --stream/u);
   } finally {
     await harness.deactivate();
