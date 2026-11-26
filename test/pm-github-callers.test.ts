@@ -35,7 +35,7 @@ test("pm-github callers share one compatible pinned release and Dependabot moves
     assert.ok(release, `the ${name} pin must carry its release comment on the same line`);
     assert.ok(atLeast(release.slice(1).map(part => Number(part ?? 0)), MINIMUM_RELEASE), `${name} must not pin a release older than ${MINIMUM_RELEASE.slice(0, 3).join(".")}`);
     assert.equal(job.with?.["pm-github-version"], undefined);
-    return `${revision} ${release[0]}`;
+    return `${revision} ${release.slice(1).join(".")}`;
   });
   assert.equal(new Set(pins).size, 1, "every pm-github caller must use one reviewed release");
   const updates = parse(readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8")).updates as { "package-ecosystem": string; groups?: Record<string, { patterns?: string[] }> }[];
