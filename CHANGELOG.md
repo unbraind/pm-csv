@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-226](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-226.toon))
+
+### Dependencies
+
+- Bump unbraind/pm-ops/.github/workflows/daily-release.yml
+
 ## 2026.11.24 - 2026-11-24
 
 No changes.
