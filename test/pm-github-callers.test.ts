@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
-import { parse } from "yaml";
+import { isScalar, parse, parseDocument } from "yaml";
 
 /** First pm-github release whose gated import works with the pm CLI this package installs. */
 const MINIMUM_RELEASE = [2026, 11, 25, 0];
@@ -26,15 +26,16 @@ test("pm-github callers share one compatible pinned release and Dependabot moves
   const names = ["sync", "closeout"].filter(name => existsSync(callerFile(name)));
   assert.ok(names.includes("sync"), "the gated sync caller must exist");
   const pins = names.map(name => {
-    const source = readFileSync(callerFile(name), "utf8");
-    const job = parse(source).jobs[`gated-${name}`];
-    const revision = new RegExp(`^unbraind/pm-github/\\.github/workflows/pm-github-${name}\\.yml@([0-9a-f]{40})$`).exec(job.uses)?.[1];
+    const document = parseDocument(readFileSync(callerFile(name), "utf8"));
+    // The pin and its comment are read from the gated job's own YAML node, so another job's line cannot stand in.
+    const pin = document.getIn(["jobs", `gated-${name}`, "uses"], true);
+    assert.ok(isScalar(pin) && typeof pin.value === "string", `gated-${name} must call the reusable workflow`);
+    const revision = new RegExp(`^unbraind/pm-github/\\.github/workflows/pm-github-${name}\\.yml@([0-9a-f]{40})$`).exec(pin.value)?.[1];
     assert.ok(revision, `${name} must pin a full commit`);
-    const line = source.split("\n").find(candidate => /^\s*uses:/.test(candidate) && candidate.includes(job.uses)) ?? "";
-    const release = /# pm-github (\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?\s*$/.exec(line);
-    assert.ok(release, `the ${name} pin must carry its release comment on the same line`);
+    const release = /^\s*pm-github (\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d+))?\s*$/.exec(pin.comment ?? "");
+    assert.ok(release, `the ${name} pin must carry its release comment`);
     assert.ok(atLeast(release.slice(1).map(part => Number(part ?? 0)), MINIMUM_RELEASE), `${name} must not pin a release older than ${MINIMUM_RELEASE.slice(0, 3).join(".")}`);
-    assert.equal(job.with?.["pm-github-version"], undefined);
+    assert.equal(document.getIn(["jobs", `gated-${name}`, "with", "pm-github-version"]), undefined);
     return `${revision} ${release.slice(1).join(".")}`;
   });
   assert.equal(new Set(pins).size, 1, "every pm-github caller must use one reviewed release");
