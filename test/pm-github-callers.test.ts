@@ -27,6 +27,7 @@ test("pm-github callers share one compatible pinned release and Dependabot moves
   assert.ok(names.includes("sync"), "the gated sync caller must exist");
   const pins = names.map(name => {
     const document = parseDocument(readFileSync(callerFile(name), "utf8"));
+    assert.deepEqual(document.errors, [], `${name} caller must be valid YAML`);
     // The pin and its comment are read from the gated job's own YAML node, so another job's line cannot stand in.
     const pin = document.getIn(["jobs", `gated-${name}`, "uses"], true);
     assert.ok(isScalar(pin) && typeof pin.value === "string", `gated-${name} must call the reusable workflow`);
