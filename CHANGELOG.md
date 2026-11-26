@@ -8,7 +8,7 @@
 
 ### Dependencies
 
-- Bump unbraind/pm-ops/.github/workflows/daily-release.yml
+- Bump unbraind/pm-ops/.github/workflows/daily-release.yml ([#287](https://github.com/unbraind/pm-csv/pull/287))
 
 ## 2026.11.24 - 2026-11-24
 
