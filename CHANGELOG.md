@@ -6,6 +6,10 @@
 
 - Closed: Daily Release workflow is failing ([pm-csv-github-2b408bfa2d7f-226](https://github.com/unbraind/pm-csv/blob/main/.agents/pm/issues/pm-csv-github-2b408bfa2d7f-226.toon))
 
+### Dependencies
+
+- Bump the codeql-action group with 2 updates
+
 ## 2026.11.24 - 2026-11-24
 
 No changes.
