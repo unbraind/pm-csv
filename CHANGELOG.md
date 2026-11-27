@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Dependencies
+
+- Bump @unbrained/pm-cli
+
 ## 2026.11.27 - 2026-11-27
 
 No changes.
